@@ -54,8 +54,8 @@ $match_modes = [ [ 0, $text{'index_equals'} ], [ 1, $text{'index_contains'} ],
 # Connect to the LDAP server and return a handle to the Net::LDAP object
 sub ldap_connect
 {
-if (!$ldap_client::config{'auth_ldap'} ||
-    !-r $ldap_client::config{'auth_ldap'}) {
+my $cfile = &ldap_client::get_ldap_config_file();
+if (!$cfile || !-r $cfile) {
 	# LDAP client config file not known .. force manual specification
 	foreach my $f ("ldap_host", "login") {
 		if (!$config{$f}) {
@@ -133,10 +133,27 @@ sub encrypt_password
 {
 local ($pass, $salt) = @_;
 &seed_random();
+if ($config{'md5'} == 5) {
+	# SHA encryption
+	local $qp = quotemeta($pass);
+	local $out = &backquote_command("$config{'slappasswd'} -h '{sha}' -s $qp 2>/dev/null");
+	if ($out && !$?) {
+		$out =~ s/\s+$//;
+		$out =~ s/^\{sha\}//i;
+		return $out;
+		}
+	# Fall back to built-in code
+	$out = &useradmin::encrypt_sha1($pass);
+	$out =~ s/^\{sha\}//i;
+	return $out;
+	}
 if ($config{'md5'} == 4) {
 	# LDAP SSHA encryption
 	local $qp = quotemeta($pass);
-	local $out = `$config{'slappasswd'} -h '{ssha}' -s $qp 2>/dev/null`;
+	local $out = &backquote_command("$config{'slappasswd'} -h '{ssha}' -s $qp 2>/dev/null");
+	if ($?) {
+		&error("$config{'slappasswd'} command failed to generate ssha password : $out");
+		}
 	$out =~ s/\s+$//;
 	$out =~ s/^\{ssha\}//i;
 	return $out;
@@ -144,7 +161,7 @@ if ($config{'md5'} == 4) {
 if ($config{'md5'} == 3) {
 	# LDAP MD5 encryption
 	local $qp = quotemeta($pass);
-	local $out = `$config{'slappasswd'} -h '{md5}' -s $qp 2>/dev/null`;
+	local $out = &backquote_command("$config{'slappasswd'} -h '{md5}' -s $qp 2>/dev/null");
 	$out =~ s/\s+$//;
 	$out =~ s/^\{md5\}//i;
 	return $out;
@@ -199,7 +216,7 @@ local $schema = $ldap->schema();
 if ($schema->objectclass("person") && $config{'person'}) {
 	push(@classes, "person");
 	}
-@classes = &unique(@classes);
+@classes = &uniquelc(@classes);
 @classes = grep { /\S/ } @classes;	# Remove empty
 local @attrs = &user_to_dn($_[0]);
 push(@attrs, &split_props($config{'props'}, $_[0]));
@@ -317,7 +334,7 @@ local $base = &get_group_base();
 $_[0]->{'dn'} = "cn=$_[0]->{'group'},$base";
 local @classes = ( "posixGroup" );
 push(@classes, split(/\s+/, $config{'gother_class'}));
-@classes = &unique(@classes);
+@classes = &uniquelc(@classes);
 local @attrs = &group_to_dn($_[0]);
 push(@attrs, @{$_[0]->{'ldap_attrs'}});
 push(@attrs, "objectClass" => \@classes);
@@ -400,7 +417,7 @@ if ($_[0]->get_value("uid")) {
 			'warn' => $_[0]->get_value("shadowWarning") || "",
 			'inactive' => $_[0]->get_value("shadowInactive") || "",
 		      );
-	$user{'pass'} =~ s/^(\!?){[a-z0-9]+}/$1/i;
+	$user{'pass'} =~ s/^(\!?)\{[a-z0-9]+\}/$1/i;
 	$user{'all_ldap_attrs'} = { map { lc($_), scalar($_[0]->get_value($_)) }
 					$_[0]->attributes() };
 	$user{'ldap_class'} = [ $_[0]->get_value('objectClass') ];
@@ -424,6 +441,8 @@ else {
 sub user_to_dn
 {
 local $pfx = $_[0]->{'pass'} =~ /^\{[a-z0-9]+\}/i ? undef :
+	     $_[0]->{'pass'} =~ /^\$1\$/ ? "{md5}" :
+	     $_[0]->{'pass'} =~ /^[a-zA-Z0-9\.\/]{13}$/ ? "{crypt}" :
 	     $config{'md5'} == 1 || $config{'md5'} == 3 ? "{md5}" :
 	     $config{'md5'} == 4 ? "{ssha}" : 
 	     $config{'md5'} == 0 ? "{crypt}" : "";
@@ -953,7 +972,11 @@ local $i = 0;
 local $f;
 foreach $f (@fields) {
 	$f->[0] =~ s/\+$//;
-	next if ($already{lc($f->[0])});	# Skip fields set by Webmin
+	if ($already{lc($f->[0])}) {
+		# Skip fields set by Webmin
+		$i++;
+		next;
+		}
 	if ($in{"field_$i"} eq "") {
 		push(@$rprops, $f->[0]);
 		}
@@ -1171,17 +1194,12 @@ return $rv->code ? $rv->error : undef;
 sub remove_accents
 {
 local ($string) = @_;
-$string =~ tr/ÀÁÂÃÄÅàáâãäå/a/;
-$string =~ tr/Çç/c/;
-$string =~ tr/ÈÉÊËèéêë/e/;
-$string =~ tr/ÌÍÎÏìíîï/i/;
-$string =~ tr/Ğ/d/;
-$string =~ tr/Ññ/n/;
-$string =~ tr/ÒÓÔÕÖØğòóôõöø/o/;
-$string =~ tr/ÙÚÛÜùúûü/u/;
-$string =~ tr/İıÿ/y/;
-$string =~ tr/ß/b/;
-$string =~ s/æÆ/ae/go;
+eval "use Text::Unidecode; use utf8;";
+if (!$@) {
+	utf8::decode($string);
+	$string = Text::Unidecode::unidecode($string);
+	}
+$string =~ s/[\177-\377]//g;	# Fallback - remove all non-ascii chars
 return $string;
 }
 

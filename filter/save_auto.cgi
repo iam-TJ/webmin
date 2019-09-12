@@ -2,9 +2,9 @@
 # Create, update or delete an autoreply filter
 
 require './filter-lib.pl';
-&foreign_require("mailbox", "mailbox-lib.pl");
 &ReadParse();
 &error_setup($text{'auto_err'});
+use Time::Local;
 
 # Find existing autoreply filter object
 &lock_file($procmail::procmailrc);
@@ -73,6 +73,31 @@ elsif ($in{'enabled'}) {
 		$in{'charset'} =~ /^[a-z0-9\.\-\_]+$/i ||
 			error($text{'save_echarset'});
 		$filter->{'reply'}->{'charset'} = $in{'charset'};
+		}
+
+	# Save subject
+	if ($in{'subject_def'}) {
+		delete($filter->{'reply'}->{'subject'});
+		}
+	else {
+		$filter->{'reply'}->{'subject'} = $in{'subject'};
+		}
+
+	# Save autoreply start and end
+	foreach $p ('start', 'end') {
+		local ($s, $m, $h) = $p eq 'start' ? (0, 0, 0) :
+					(59, 59, 23);
+		if (!$in{$p.'_def'}) {
+			eval {
+				$tm = timelocal($s, $m, $h, $in{'d'.$p},
+				    $in{'m'.$p}-1, $in{'y'.$p}-1900);
+				};
+			$tm || &error($text{'save_e'.$p});
+			$filter->{'reply'}->{'autoreply_'.$p} = $tm;
+			}
+		else {
+			delete($filter->{'reply'}->{'autoreply_'.$p});
+			}
 		}
 
 	if ($old) {

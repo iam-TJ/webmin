@@ -67,6 +67,7 @@ elsif ($in{'source'} == 3) {
 	$in{'cpan'} || &error($text{'download_emodname'});
 	$in{'cpan'} =~ s/^\s+//;
 	$in{'cpan'} =~ s/\s+$//;
+	$in{'cpan'} =~ s/\/+/::/g;
 	@cpan = split(/\s+|\0/, $in{'cpan'});
 
 	# First check if YUM or APT can install this module for us
@@ -74,23 +75,47 @@ elsif ($in{'source'} == 3) {
 		@yum = &list_packaged_modules();
 		foreach $c (@cpan) {
 			($yum) = grep { lc($_->{'mod'}) eq lc($c) } @yum;
-			push(@cpanyum, $yum) if ($yum);
+			if ($yum) {
+				# Module name is known
+				push(@cpanyum, $yum);
+				}
+			elsif ($software::config{'package_system'} eq "rpm") {
+				# Try to install from perl dependency
+				push(@cpanyum, { 'package' => "perl($c)" });
+				}
 			}
 		}
-	if (scalar(@cpan) == scalar(@cpanyum)) {
+	if (scalar(@cpan) == scalar(@cpanyum) &&
+	    defined(&software::update_system_install)) {
 		# Can install from YUM or APT .. do it!
 		$i = 0;
+		@fallback = ( );
 		foreach $yum (@cpanyum) {
 			print &text('download_yum', "<tt>$cpan[$i]</tt>",
 				    "<tt>$yum->{'package'}</tt>"),"<br>\n";
 			print "<ul>\n";
-			&software::update_system_install($yum->{'package'});
+			@got = &software::update_system_install(
+				$yum->{'package'});
 			print "</ul>\n";
+			if (!@got) {
+				# Failed, so fall back to direct install (but
+				# only if not installed yet)
+				eval "use $cpan[$i]";
+				if ($@) {
+					push(@fallback, $cpan[$i]);
+					}
+				}
 			$i++;
 			}
-		&ui_print_footer($in{'return'},
-			         $in{'returndesc'} || $text{'index_return'});
-		exit;
+		if (@fallback) {
+			print "<b>$text{'download_fallback'}</b><p>\n";
+			@cpan = @fallback;
+			}
+		else {
+			&ui_print_footer($in{'return'},
+				 $in{'returndesc'} || $text{'index_return'});
+			exit;
+			}
 		}
 
 	$progress_callback_url = $config{'packages'};

@@ -12,7 +12,7 @@ if (@jobs) {
 	print &ui_form_start("delete_jobs.cgi", "post");
 	@links = ( &select_all_link("d"),
 		   &select_invert_link("d"),
-		   "<a href='edit_job.cgi?new=1'>$text{'jobs_add'}</a>" );
+		   &ui_link("edit_job.cgi?new=1",$text{'jobs_add'}) );
 	print &ui_links_row(\@links);
 	@tds = ( "width=5", "width=30%", "width=10%", "width=20%", "width=20%",
 		 "width=20%" );
@@ -29,8 +29,7 @@ if (@jobs) {
 		$fileset = &find_value("FileSet", $f->{'members'});
 		$schedule = &find_value("Schedule", $f->{'members'});
 		print &ui_checked_columns_row([
-			"<a href='edit_job.cgi?name=".&urlize($name)."'>".
-			$name."</a>",
+			&ui_link("edit_job.cgi?name=".&urlize($name), $name),
 			$f->{'name'} eq 'Job' ? $text{'no'} : $text{'yes'},
 			$type || "<i>$text{'default'}</i>",
 			$client || "<i>$text{'default'}</i>",
@@ -44,7 +43,7 @@ if (@jobs) {
 	}
 else {
 	print "<b>$text{'jobs_none'}</b><p>\n";
-	print "<a href='edit_job.cgi?new=1'>$text{'jobs_add'}</a><br>\n";
+	print &ui_link("edit_job.cgi?new=1",$text{'jobs_add'}),"<br>\n";
 	}
 
 &ui_print_footer("", $text{'index_return'});

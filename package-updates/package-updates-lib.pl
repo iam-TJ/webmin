@@ -7,16 +7,29 @@ eval "use WebminCore;";
 &foreign_require("software", "software-lib.pl");
 &foreign_require("cron", "cron-lib.pl");
 &foreign_require("webmin", "webmin-lib.pl");
-use Data::Dumper;
 
-$available_cache_file = "$module_config_directory/available.cache";
-$current_cache_file = "$module_config_directory/current.cache";
-$updates_cache_file = "$module_config_directory/updates.cache";
+$available_cache_file = &cache_file_path("available.cache");
+$current_cache_file = &cache_file_path("current.cache");
+$updates_cache_file = &cache_file_path("updates.cache");
 $cron_cmd = "$module_config_directory/update.pl";
 
-$yum_cache_file = "$module_config_directory/yumcache";
-$apt_cache_file = "$module_config_directory/aptcache";
-$yum_changelog_cache_dir = "$module_config_directory/yumchangelog";
+$yum_cache_file = &cache_file_path("yumcache");
+$apt_cache_file = &cache_file_path("aptcache");
+$yum_changelog_cache_dir = &cache_file_path("yumchangelog");
+
+$update_progress_dir = "$module_var_directory/progress";
+
+# cache_file_path(name)
+# Returns a path in the /var directory unless the file already exists under
+# /etc/webmin
+sub cache_file_path
+{
+my ($name) = @_;
+if (-e "$module_config_directory/$name") {
+	return "$module_config_directory/$name";
+	}
+return "$module_var_directory/$name";
+}
 
 # get_software_packages()
 # Fills in software::packages with list of installed packages (if missing),
@@ -25,6 +38,9 @@ sub get_software_packages
 {
 if (!$get_software_packages_cache) {
         %software::packages = ( );
+	if (!defined(&software::list_packages)) {
+		return 0;
+		}
         $get_software_packages_cache = &software::list_packages();
         }
 return $get_software_packages_cache;
@@ -139,10 +155,13 @@ return 0;
 sub write_cache_file
 {
 my ($file, $arr) = @_;
-&open_tempfile(FILE, ">$file");
-&print_tempfile(FILE, Dumper($arr));
-&close_tempfile(FILE);
-$read_cache_file_cache{$file} = $arr;
+eval "use Data::Dumper";
+if (!$@) {
+	&open_tempfile(FILE, ">$file");
+	&print_tempfile(FILE, Dumper($arr));
+	&close_tempfile(FILE);
+	$read_cache_file_cache{$file} = $arr;
+	}
 }
 
 # read_cache_file(file)
@@ -173,7 +192,7 @@ if ($pkg1->{'system'} eq 'webmin' && $pkg2->{'system'} eq 'webmin') {
 my $ec = $pkg1->{'epoch'} <=> $pkg2->{'epoch'};
 if ($ec && ($pkg1->{'epoch'} eq '' || $pkg2->{'epoch'} eq '') &&
     $pkg1->{'system'} eq 'apt') {
-	# On some Debian systems, we don't have a my epoch
+	# On some Debian systems, we don't have any epoch
 	$ec = undef;
 	}
 return $ec ||
@@ -275,12 +294,13 @@ if (!scalar(@updates_available_cache)) {
 return @updates_available_cache;
 }
 
-# package_install(package-name, [system])
+# package_install(package-name, [system], [new-install])
 # Install some package, either from an update system or from Webmin. Returns
 # a list of updated package names.
 sub package_install
 {
-my ($name, $system) = @_;
+my ($name, $system, $install) = @_;
+$system ||= $software::update_system;
 my @rv;
 my $pkg;
 
@@ -296,6 +316,11 @@ if (!$pkg) {
 		      sort { &compare_versions($b, $a) }
 			   &list_available(0);
 	}
+if (!$pkg && $install) {
+	# Assume that it will exist
+	$pkg = { 'system' => $system || $software::update_system,
+		 'name' => $name };
+	}
 if (!$pkg) {
 	print &text('update_efindpkg', $name),"<p>\n";
 	return ( );
@@ -305,6 +330,18 @@ if (defined(&software::update_system_install)) {
 	&clean_environment();
 	if ($software::update_system eq $pkg->{'system'}) {
 		# Can use the default system
+		if ($name eq "apache2" &&
+		    $pkg->{'system'} eq 'apt') {
+			# If updating the apache2 package on an apt system
+			# and apache2-mpm-prefork is installed, also update it
+			# so that ubuntu doesn't pull in the apache2-mpm-worker
+			# instead, which breaks PHP :-(
+			local @pinfo = &software::package_info(
+					"apache2-mpm-prefork");
+			if (@pinfo) {
+				$name .= " apache2-mpm-prefork";
+				}
+			}
 		@rv = &software::update_system_install($name, undef, 1);
 		}
 	else {
@@ -327,12 +364,13 @@ unlink($current_cache_file);
 return @rv;
 }
 
-# package_install_multiple(&package-names, system)
+# package_install_multiple(&package-names, system, [new-install])
 # Install multiple packages, either from an update system or from Webmin.
 # Returns a list of updated package names.
 sub package_install_multiple
 {
-my ($names, $system) = @_;
+my ($names, $system, $install) = @_;
+$system ||= $software::update_system;
 my @rv;
 my $pkg;
 
@@ -442,6 +480,7 @@ else {
 			}
 		}
 	}
+@rv = &filter_duplicates(\@rv);
 return @rv;
 }
 
@@ -517,10 +556,19 @@ return 1;
 sub clear_repository_cache
 {
 if ($software::update_system eq "yum") {
-	&execute_command("yum clean all");
+	&execute_command("$software::yum_command clean all");
 	}
 elsif ($software::update_system eq "apt") {
 	&execute_command("apt-get update");
+	}
+elsif ($software::update_system eq "ports") {
+	&foreign_require("proc");
+	foreach my $cmd ("portsnap fetch",
+			 "portsnap update || portsnap extract") {
+		my ($fh, $pid) = &proc::pty_process_exec($cmd);
+		while(<$fh>) { }
+		close($fh);
+		}
 	}
 }
 
@@ -543,8 +591,8 @@ my ($pkg) = @_;
 if ($pkg->{'system'} eq 'yum') {
 	# See if yum supports changelog
 	if (!defined($supports_yum_changelog)) {
-		my $out = &backquote_command("yum -h 2>&1 </dev/null");
-		$supports_yum_changelog = $out =~ /changelog/ ? 1 : 0;
+		my $out = &backquote_command("$software::yum_command -h 2>&1 </dev/null");
+		$supports_yum_changelog = $out =~ /changelog|updateinfo/ ? 1 : 0;
 		}
 	return undef if (!$supports_yum_changelog);
 
@@ -552,25 +600,47 @@ if ($pkg->{'system'} eq 'yum') {
 	my $cfile = $yum_changelog_cache_dir."/".
 		       $pkg->{'name'}."-".$pkg->{'version'};
 	my $cl = &read_file_contents($cfile);
-	if (!$cl) {
-		# Run it for this package and version
+	if (!$cl && $software::yum_command =~ /yum/) {
+		# Run yum changelog for this package and version
 		my $started = 0;
-		&open_execute_command(YUMCL, "yum changelog all ".
-					     quotemeta($pkg->{'name'}), 1, 1);
-		while(<YUMCL>) {
+		&open_execute_command(YUMCL,
+			"$software::yum_command changelog all ".
+		        quotemeta($pkg->{'name'}), 1, 1);
+                while(<YUMCL>) {
+                        s/\r|\n//g;
+                        if (/^\Q$pkg->{'name'}-$pkg->{'version'}\E/) {
+                                $started = 1;
+                                }
+                        elsif (/^==========/ || /^changelog stats/) {
+                                $started = 0;
+                                }
+                        elsif ($started) {
+                                $cl .= $_."\n";
+                                }
+                        }
+                close(YUMCL);
+		}
+	elsif (!$cl && $software::yum_command =~ /dnf/) {
+		# Run dnf updateinfo for this package and version
+		&open_execute_command(DNFUI,
+			"$software::yum_command updateinfo info ".
+		        quotemeta($pkg->{'name'}), 1, 1);
+		while(<DNFUI>) {
 			s/\r|\n//g;
-			if (/^\Q$pkg->{'name'}-$pkg->{'version'}\E/) {
+			if (/^\s*Description\s*:\s*(.*)/) {
 				$started = 1;
+				$cl .= $1."\n";
 				}
-			elsif (/^==========/ || /^changelog stats/) {
+			elsif ($started && /^\s*:\s*(.*)/) {
+				$cl .= $1."\n";
+				}
+			else {
 				$started = 0;
 				}
-			elsif ($started) {
-				$cl .= $_."\n";
-				}
 			}
-		close(YUMCL);
-
+		close(DNFUI);
+		}
+	if ($cl) {
 		# Save the cache
 		if (!-d $yum_changelog_cache_dir) {
 			&make_dir($yum_changelog_cache_dir, 0700);
@@ -603,6 +673,94 @@ sub list_for_mode
 my ($mode, $nocache) = @_;
 return $mode eq 'updates' || $mode eq 'security' ?
 	&list_possible_updates($nocache) : &list_available($nocache);
+}
+
+# check_reboot_required(after-flag)
+# Returns 1 if the package system thinks a reboot is needed
+sub check_reboot_required
+{
+if ($gconfig{'os_type'} eq 'debian-linux') {
+        return -e "/var/run/reboot-required" ? 1 : 0;
+        }
+elsif ($gconfig{'os_type'} eq 'redhat-linux') {
+	my $needs_restarting = has_command("needs-restarting");
+	my $needs_restarting_correct = 0;
+	if ($needs_restarting) {
+		($needs_restarting_correct) = `needs-restarting -h` =~ /reboothint/;
+		}
+	if ($needs_restarting && $needs_restarting_correct) {
+		my $ex = &execute_command(
+			"needs-restarting -r", undef, undef, undef, 0, 1);
+		return $ex ? 1 : 0;
+		}
+	else {
+		my ($new_kernel_install_time, $last_reboot_time, $new_kernel, $cur_kernel);
+		
+		&execute_command('rpm -q kernel --qf "%{INSTALLTIME}\n"', undef, \$new_kernel_install_time);
+		$new_kernel_install_time =~ /(.*$)/;
+		$new_kernel_install_time = $1;
+
+		&execute_command("sed -n '/^btime /s///p' /proc/stat", undef, \$last_reboot_time);
+
+		&execute_command("rpm -q --last kernel", undef, \$new_kernel);
+		$new_kernel =~ /(kernel-\S+)/;
+		$new_kernel = $1;
+		$new_kernel =~ s/^\s+|\s+$//g;
+
+		&execute_command("uname -r", undef, \$cur_kernel);
+		$cur_kernel =~ /^(\S+)$/;
+		# make sure to prevent false positive alerts on custom kernels 
+		&execute_command("rpm -q kernel-$cur_kernel", undef, \$cur_kernel);
+		$cur_kernel =~ s/^\s+|\s+$//g;
+		$cur_kernel = undef if ($cur_kernel =~ /not installed/);
+
+		if ($new_kernel_install_time && $last_reboot_time && 
+			$new_kernel_install_time > $last_reboot_time &&
+			$cur_kernel && $new_kernel && $cur_kernel ne $new_kernel) {
+			return 1;
+			}
+		else {
+			return 0;
+			}
+		}
+	}
+return 0;
+}
+
+# start_update_progress(&packages)
+# Record that a bunch of package updates are in progress by this process
+sub start_update_progress
+{
+my ($pkgs) = @_;
+if (!-d $update_progress_dir) {
+	&make_dir($update_progress_dir, 0700);
+	}
+my $f = "$update_progress_dir/$$";
+&write_file($f, { 'pid' => $$,
+		  'pkgs' => join(' ', @$pkgs) });
+}
+
+# end_update_progress()
+# Clear update progress marker file
+sub end_update_progress
+{
+my $f = "$update_progress_dir/$$";
+&unlink_file($f);
+}
+
+# get_update_progress()
+# Returns a list of hash refs, one per update in progress
+sub get_update_progress
+{
+my @rv;
+foreach my $f (glob("$update_progress_dir/*")) {
+	my %u;
+	&read_file($f, \%u) || next;
+	$u{'pid'} || next;
+	kill(0, $u{'pid'}) || next;
+	push(@rv, \%u);
+	}
+return @rv;
 }
 
 1;

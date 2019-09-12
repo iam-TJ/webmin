@@ -40,9 +40,9 @@ print &ui_table_row(&hlink($text{'dump_dest'}, "dest"),
 	       &ui_textbox("file", $_[0]->{'file'}, 50).
 	       " ".&file_chooser_button("file")."<br>" ],
 	  [ 1, &text('dump_host',
-		     &ui_textbox("host", $_[0]->{'host'}, 15),
-		     &ui_textbox("huser", $_[0]->{'huser'}, 8),
-		     &ui_textbox("hfile", $_[0]->{'hfile'}, 20)) ] ]), 3);
+		     &ui_textbox("host", $_[0]->{'host'}, 20),
+		     &ui_textbox("huser", $_[0]->{'huser'}, 15),
+		     &ui_textbox("hfile", $_[0]->{'hfile'}, 40)) ] ]), 3);
 
 if ($_[0]->{'fs'} ne 'xfs') {
 	# Display remote target options
@@ -77,7 +77,8 @@ if ($_[0]->{'fs'} eq 'tar') {
 			    &ui_select("gzip", int($_[0]->{'gzip'}),
 				[ [ 0, $text{'no'} ],
 				  [ 1, $text{'dump_gzip1'} ],
-				  [ 2, $text{'dump_gzip2'} ] ]), 1, $tds);
+				  [ 2, $text{'dump_gzip2'} ],
+				  [ 3, $text{'dump_gzip3'} ] ]), 1, $tds);
 
 	print &ui_table_row(&hlink($text{'dump_multi'},"multi"),
 			    &ui_yesno_radio("multi", int($_[0]->{'multi'})),
@@ -347,6 +348,7 @@ local $tapecmd = $_[0]->{'multi'} && $_[0]->{'fs'} eq 'tar' ? $multi_cmd :
 		 $_[3] && !$config{'nonewtape'} ? $newtape_cmd : $notape_cmd;
 local @dirs = $_[0]->{'tabs'} ? split(/\t+/, $_[0]->{'dir'})
 			      : split(/\s+/, $_[0]->{'dir'});
+@dirs = map { &date_subs($_) } @dirs;
 if ($_[0]->{'fs'} eq 'tar') {
 	# tar format backup
 	$cmd = "tar ".($_[0]->{'update'} ? "-u" : "-c")." ".$flag;
@@ -354,6 +356,7 @@ if ($_[0]->{'fs'} eq 'tar') {
 	$cmd .= " -L $_[0]->{'blocks'}" if ($_[0]->{'blocks'});
 	$cmd .= " -z" if ($_[0]->{'gzip'} == 1);
 	$cmd .= " --bzip" if ($_[0]->{'gzip'} == 2);
+	$cmd .= " -J" if ($_[0]->{'gzip'} == 3);
 	$cmd .= " -M" if ($_[0]->{'multi'});
 	$cmd .= " -h" if ($_[0]->{'links'});
 	$cmd .= " --one-file-system" if ($_[0]->{'xdev'});
@@ -479,6 +482,7 @@ if ($_[0]->{'fs'} eq "tar") {
 	$vcmd = "tar -t -v";
 	$vcmd .= " -z" if ($_[0]->{'gzip'} == 1);
 	$vcmd .= " --bzip" if ($_[0]->{'gzip'} == 2);
+	$vcmd .= " -J" if ($_[0]->{'gzip'} == 3);
 	$vcmd .= " -M" if ($_[0]->{'multi'});
 	}
 elsif ($_[0]->{'fs'} eq "xfs") {
@@ -538,9 +542,9 @@ print &ui_table_row(&hlink($text{'restore_src'}, "rsrc"),
 	       &ui_textbox("file", $_[1]->{'file'}, 50).
 	       " ".&file_chooser_button("file")."<br>" ],
 	  [ 1, &text('dump_host',
-		     &ui_textbox("host", $_[1]->{'host'}, 15),
-		     &ui_textbox("huser", $_[1]->{'huser'}, 8),
-		     &ui_textbox("hfile", $_[1]->{'hfile'}, 20)) ] ]), 3, $tds);
+		     &ui_textbox("host", $_[1]->{'host'}, 20),
+		     &ui_textbox("huser", $_[1]->{'huser'}, 15),
+		     &ui_textbox("hfile", $_[1]->{'hfile'}, 40)) ] ]), 3, $tds);
 
 if ($_[0] eq 'tar') {
 	# tar restore options
@@ -572,7 +576,8 @@ if ($_[0] eq 'tar') {
 		      &ui_select("gzip", $_[1]->{'gzip'},
 				[ [ 0, $text{'no'} ],
 				  [ 1, $text{'dump_gzip1'} ],
-				  [ 2, $text{'dump_gzip2'} ] ]), 1, $tds);
+				  [ 2, $text{'dump_gzip2'} ],
+				  [ 3, $text{'dump_gzip3'} ] ]), 1, $tds);
 
 	print &ui_table_row(&hlink($text{'restore_keep'},"keep"),
 		      &ui_yesno_radio("keep", 0), 1, $tds);
@@ -580,6 +585,11 @@ if ($_[0] eq 'tar') {
 	# Multiple files
 	print &ui_table_row(&hlink($text{'restore_multi'},"rmulti"),
 		      &ui_yesno_radio("multi", 0), 1, $tds);
+
+	# rmt path option
+	print &ui_table_row(&hlink($text{'dump_rmt'},"rmt"),
+		&ui_opt_textbox("rmt", $_[0]->{'rmt'}, 30, $text{'default'}),
+		3, $tds);
 	}
 elsif ($_[0] eq 'xfs') {
 	# xfs restore options
@@ -681,6 +691,7 @@ if ($_[0] eq 'tar') {
 	$cmd .= " -p" if ($in{'perms'});
 	$cmd .= " -z" if ($in{'gzip'} == 1);
 	$cmd .= " --bzip" if ($in{'gzip'} == 2);
+	$cmd .= " -J" if ($in{'gzip'} == 3);
 	$cmd .= " -k" if ($in{'keep'});
 	if ($in{'multi'}) {
 		!-c $in{'file'} && !-b $in{'file'} ||
@@ -691,6 +702,10 @@ if ($_[0] eq 'tar') {
 	local $rsh = &rsh_command_parse("rsh_def", "rsh");
 	if ($rsh) {
 		$cmd .= " --rsh-command=".quotemeta($rsh);
+		}
+	if (!$in{'rmt_def'}) {
+		$in{'rmt'} =~ /^\S+$/ || &error($text{'dump_ermt'});
+		$cmd .= " --rmt-command=".quotemeta($in{'rmt'});
 		}
 	$cmd .= " $in{'extra'}" if ($in{'extra'});
 	if (!$in{'files_def'}) {

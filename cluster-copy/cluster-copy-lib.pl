@@ -115,6 +115,13 @@ foreach $s (@run) {
 		# Run the command in a subprocess
 		close($rh);
 
+		if (!$s->{'fast'}) {
+			print $wh &serialise_variable(
+				[ 0, "Fast RPC mode must be enabled ".
+				     "for copies to work" ]);
+			exit;
+			}
+
 		&remote_foreign_require($s->{'host'}, "webmin",
 					"webmin-lib.pl");
 		if ($inst_error_msg) {
@@ -205,6 +212,11 @@ foreach $s (@run) {
 			else {
 				push(@errs, [ $f, "Copy was incomplete" ]);
 				}
+
+			# Preserve file permissions
+			&remote_foreign_call($s->{'host'}, "webmin",
+				"set_ownership_permissions", $st[4], $st[5],
+				$st[2] & 0777, $dest);
 			}
 
 		# Run the post command on remote

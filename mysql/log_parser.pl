@@ -63,7 +63,8 @@ elsif ($type eq 'user' || $type eq 'perm' || $type eq 'host' ||
 	$p->{'db'} = $text{'log_any'}
 		if ($p->{'db'} eq '-' || $p->{'db'} eq '%');
 	$p->{'host'} = $text{'log_any'}
-		if ($p->{'host'} eq '-' || $p->{'host'} eq '%');
+		if ($p->{'host'} eq '-' || $p->{'host'} eq '%' ||
+		    $p->{'host'} eq '');
 	local $t = "log_${type}_${action}";
 	if ($long && $text{$t.'_l'}) { $t .= '_l'; }
 	return &text($t, "<tt>$p->{'user'}</tt>",
@@ -71,6 +72,7 @@ elsif ($type eq 'user' || $type eq 'perm' || $type eq 'host' ||
 		     "<tt>$p->{'table'}</tt>", "<tt>$p->{'field'}</tt>");
 	}
 elsif ($action eq 'backup') {
+	$object = "" if ($object eq "-");
 	return &text($object ? ($long ? 'log_backup_l' : 'log_backup')
 			     : ($long ? 'log_backup_all_l' : 'log_backup_all'),
 		     "<tt>$object</tt>",
@@ -89,6 +91,9 @@ elsif ($action eq 'set') {
 	}
 elsif ($action eq 'root') {
 	return $text{'log_root'};
+	}
+elsif ($action eq 'manual') {
+	return $text{'log_manual'};
 	}
 else {
 	return undef;

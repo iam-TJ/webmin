@@ -1,5 +1,10 @@
 
-do "acl-lib.pl";
+use strict;
+use warnings;
+if (!$main::done_foreign_require{"acl","acl-lib.pl"}) {
+	do "acl-lib.pl";
+	}
+our (%config, $config_directory);
 
 # useradmin_create_user(&details)
 # Create a new webmin user in the group
@@ -41,7 +46,8 @@ if ($u) {
 	&delete_user($u->{'name'});
 	&reload_miniserv();
 	}
-foreach $g (&list_groups()) {
+foreach my $g (&list_groups()) {
+	next if (!$g->{'members'});
 	my @mems = @{$g->{'members'}};
 	my $i = &indexof($_[0]->{'user'}, @mems);
 	if ($i >= 0) {
@@ -77,7 +83,7 @@ if ($u && $u->{'sync'}) {
 	}
 
 
-if ($_[0]->{'user'} ne $_[0]->{'olduser'}) {
+if ($_[0]->{'olduser'} && $_[0]->{'user'} ne $_[0]->{'olduser'}) {
 	# Check other users' acl module acls
 	foreach my $u (&list_users()) {
 		my %uaccess = &get_module_acl($u->{'name'});

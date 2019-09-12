@@ -5,7 +5,7 @@
 require './dhcpd-lib.pl';
 require './params-lib.pl';
 &ReadParse();
-&lock_file($config{'dhcpd_conf'});
+&lock_all_files();
 ($par, $host, $indent, $npar, $nindent) = get_branch('hst', $in{'new'});
 
 # check acls
@@ -48,7 +48,7 @@ else {
 	&error_setup($text{'shost_failsave'});
 
 	# Validate and save inputs
-	$in{'name'} =~ /^[a-z0-9\.\-]+$/i ||
+	$in{'name'} =~ /^[a-z0-9\.\-\_]+$/i ||
 		&error("'$in{'name'}' $text{'shost_invalidhn'}");
 	$host->{'comment'} = $in{'desc'};
 
@@ -77,7 +77,11 @@ else {
 
 		# Convert from Windows / Cisco formats
 		$in{'hardware'} =~ s/-/:/g;
-		if ($in{'hardware'} =~ /^([0-9a-f]{2})([0-9a-f]{2}).([0-9a-f]{2})([0-9a-f]{2}).([0-9a-f]{2})([0-9a-f]{2}).([0-9a-f]{2})([0-9a-f]{2})$/) {
+		if ($in{'hardware'} =~ /^([0-9a-f]{2})([0-9a-f]{2}).([0-9a-f]{2})([0-9a-f]{2}).([0-9a-f]{2})([0-9a-f]{2}).([0-9a-f]{2})([0-9a-f]{2})$/i) {
+			$in{'hardware'} = "$1:$2:$3:$4:$5:$6";
+			}
+		# Handle an Ethernet address with no formatting at all
+		if ($in{'hardware'} =~ /^([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i) {
 			$in{'hardware'} = "$1:$2:$3:$4:$5:$6";
 			}
 		$in{'hardware'} =~ /^([0-9a-f]{1,2}:)*[0-9a-f]{1,2}$/i ||
@@ -152,7 +156,7 @@ else {
 		}
 	}
 &flush_file_lines();
-&unlock_file($config{'dhcpd_conf'});
+&unlock_all_files();
 &webmin_log($in{'delete'} ? 'delete' : $in{'new'} ? 'create' : 'modify',
 	    'host', $host->{'values'}->[0], \%in);
 if ($in{'ret'} eq "group") {

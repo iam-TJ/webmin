@@ -35,3 +35,11 @@ Fixed several bugs related to YUM available package updates.
 Added the update_system_updates function to more efficiently find available packages for YUM and APT.
 ---- Changes since 1.530 ----
 Debian packages marked as "hold" are no longer offered as possible updates. This is visible in the Software Package Updates module.
+---- Changes since 1.620 ----
+Added support for updating and installing packages from FreeBSD ports.
+---- Changes since 1.700 ----
+Added support for the FreeBSD pkgng binary package repository as an alternative to ports.
+---- Changes since 1.740 ----
+MacOS systems with PKGsrc installed can now use this module to manage and install binary packages.
+---- Changes since 1.890 ----
+When installing a package, the list of other dependencies that will be also installed is displayed for confirmation.

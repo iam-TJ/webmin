@@ -9,9 +9,10 @@ if (&foreign_check("node-groups")) {
 	&foreign_require("node-groups", "node-groups-lib.pl");
 	}
 
-$dir_conf_file = "$config{'bacula_dir'}/bacula-dir.conf";
-$fd_conf_file = "$config{'bacula_dir'}/bacula-fd.conf";
-$sd_conf_file = "$config{'bacula_dir'}/bacula-sd.conf";
+$cmd_prefix = &has_command("bareos-dir") ? "bareos" : "bacula";
+$dir_conf_file = "$config{'bacula_dir'}/$cmd_prefix-dir.conf";
+$fd_conf_file = "$config{'bacula_dir'}/$cmd_prefix-fd.conf";
+$sd_conf_file = "$config{'bacula_dir'}/$cmd_prefix-sd.conf";
 $bconsole_conf_file = "$config{'bacula_dir'}/bconsole.conf";
 $console_conf_file = "$config{'bacula_dir'}/console.conf";
 $console_cmd = -r "$config{'bacula_dir'}/bconsole" ?
@@ -75,6 +76,15 @@ if (!defined($config_file_cache{$file})) {
 		if (/^\s*\@(.*\S)/) {
 			# An include file reference .. parse it
 			local $incfile = $1;
+			# A pipe command                                                                                                          
+                        if ($incfile =~ /^\|"(.*)"$/) {
+                            local $command = $1;
+                            local $incfiles = `$command`;
+                            foreach (split(/\s/,$incfiles)) {
+                                local $inc = &read_config_file(substr($_,1));
+                                push(@{$parent->{'members'}}, @$inc);
+                            }
+                        }
 			if ($incfile !~ /^\//) {
 				$incfile = "$config{'bacula_dir'}/$incfile";
 				}
@@ -215,7 +225,8 @@ return $config_file_parent_cache{$file};
 sub find
 {
 local ($name, $conf) = @_;
-local @rv = grep { lc($_->{'name'}) eq lc($name) } @$conf;
+local @rv = grep { &normalize_name($_->{'name'}) eq &normalize_name($name) }
+		 @$conf;
 return wantarray ? @rv : $rv[0];
 }
 
@@ -224,6 +235,17 @@ sub find_value
 local ($name, $conf) = @_;
 local @rv = map { $_->{'value'} } &find(@_);
 return wantarray ? @rv : $rv[0];
+}
+
+# normalize_name(name)
+# Convert a Bacula config name like "Run Before" to "runbefore" for comparison
+# purposes
+sub normalize_name
+{
+local ($name) = @_;
+$name = lc($name);
+$name =~ s/\s+//g;
+return $name;
 }
 
 sub find_by
@@ -384,7 +406,7 @@ if ($dir->{'type'}) {
 else {
 	# A single line
 	local $qstr = $dir->{'value'} =~ /^\S+$/ ||
-		       $dir->{'value'} =~ /^\d+\s+(secs|mins|hours|days|weeks|months|years)$/i ||
+		       $dir->{'value'} =~ /^\d+\s+(secs|seconds|mins|minutes|hours|days|weeks|months|years)$/i ||
 		       $dir->{'name'} eq 'Run' ? $dir->{'value'} :
 		      $dir->{'value'} =~ /"/ ? "'$dir->{'value'}'" :
 					       "\"$dir->{'value'}\"";
@@ -405,14 +427,14 @@ sub tape_select
 local $t;
 print "<select name=tape>\n";
 foreach $t (split(/\s+/, $config{'tape_device'})) {
-	print "<option>",&text('index_tapedev', $t),"\n";
+	print "<option>",&text('index_tapedev', $t),"</option>\n";
 	}
-print "<option value=''>$text{'index_other'}\n";
+print "<option value=''>$text{'index_other'}</option>\n";
 print "</select>\n";
 print "<input name=other size=40> ",&file_chooser_button("other", 1),"\n";
 }
 
-# job_select(&dbh, [volumne])
+# job_select(&dbh, [volume])
 # XXX needs value input?
 # XXX needs flag for use of 'any' field?
 sub job_select
@@ -432,10 +454,10 @@ else {
 	}
 $cmd->execute();
 print "<select name=job>\n";
-print "<option value=''>$text{'job_any'}\n";
+print "<option value=''>$text{'job_any'}</option>\n";
 while(my ($id, $name, $when) = $cmd->fetchrow()) {
 	$when =~ s/ .*$//;
-	print "<option value=$id>$name ($id) ($when)\n";
+	print "<option value=$id>$name ($id) ($when)</option>\n";
 	}
 print "</select>\n";
 }
@@ -447,7 +469,7 @@ local $cmd = $_[0]->prepare("select ClientId,Name from Client order by ClientId 
 $cmd->execute();
 print "<select name=client>\n";
 while(my ($id, $name) = $cmd->fetchrow()) {
-	print "<option value=$name>$name ($id)\n";
+	print "<option value=$name>$name ($id)</option>\n";
 	}
 print "</select>\n";
 }
@@ -512,9 +534,9 @@ return -r $sd_conf_file;
 }
 
 # Names of the Bacula programs
-@bacula_processes = ( &has_bacula_dir() ? ( "bacula-dir" ) : ( ),
-		      &has_bacula_sd() ? ( "bacula-sd" ) : ( ),
-		      &has_bacula_fd() ? ( "bacula-fd" ) : ( ),
+@bacula_processes = ( &has_bacula_dir() ? ( $cmd_prefix."-dir" ) : ( ),
+		      &has_bacula_sd() ? ( $cmd_prefix."-sd" ) : ( ),
+		      &has_bacula_fd() ? ( $cmd_prefix."-fd" ) : ( ),
 		    );
 if ($gconfig{'os_type'} eq 'windows') {
 	# On Windows, the bootup action is just called Bacula (for the FD)
@@ -539,7 +561,8 @@ sub is_bacula_running
 local ($proc) = @_;
 if (&has_command($bacula_cmd)) {
 	# Get status from bacula status command
-	$bacula_status_cache ||= `$bacula_cmd status 2>&1 </dev/null`;
+	$bacula_status_cache ||=
+		&backquote_command("$bacula_cmd status 2>&1 </dev/null");
 	if ($bacula_status_cache =~ /\Q$proc\E\s+\(pid\s+([0-9 ]+)\)\s+is\s+running/i ||
 	    $bacula_status_cache =~ /\Q$proc\E\s+is\s+running/i) {
 		return 1;
@@ -556,7 +579,7 @@ return @pids ? 1 : 0;
 sub start_bacula
 {
 undef($bacula_status_cache);
-if (&has_command($bacula_cmd)) {
+if (&has_command($bacula_cmd) && !$config{'init_start'}) {
 	local $out = &backquote_logged("$bacula_cmd start 2>&1 </dev/null");
 	return $? || $out =~ /failed|error/i ? "<pre>$out</pre>" : undef;
 	}
@@ -571,7 +594,7 @@ else {
 sub stop_bacula
 {
 undef($bacula_status_cache);
-if (&has_command($bacula_cmd)) {
+if (&has_command($bacula_cmd) && !$config{'init_start'}) {
 	local $out = &backquote_logged("$bacula_cmd stop 2>&1 </dev/null");
 	return $? || $out =~ /failed|error/i ? "<pre>$out</pre>" : undef;
 	}
@@ -586,7 +609,7 @@ else {
 sub restart_bacula
 {
 undef($bacula_status_cache);
-if (&has_command($bacula_cmd)) {
+if (&has_command($bacula_cmd) && !$config{'init_start'}) {
 	local $out = &backquote_logged("$bacula_cmd restart 2>&1 </dev/null");
 	return $? || $out =~ /failed|error/i ? "<pre>$out</pre>" : undef;
 	}
@@ -611,8 +634,8 @@ foreach my $i (@bacula_inits) {
 		      $action eq "restart" ? \&init::restart_action :
 					     undef;
 	$func || return "Unknown init action $action";
-	local $err = &$func($i);
-	if ($err) {
+	local ($ok, $err) = &$func($i);
+	if (!$ok) {
 		return &text('start_erun', "<tt>$i</tt>", "<pre>$err</pre>");
 		}
 	}
@@ -740,14 +763,14 @@ if ($cmd ne "quit") {
 local $out;
 while(1) {
         local $rv = &wait_for($h->{'outfh'},
-                        '^(\d+\-\S+\-\d+ \d+:\d+:\d+)\n',
+                        '^(\S+\s+)?(\d+\-\S+\-\d+ \d+:\d+:\d+)\n',
                         'Unable to connect to Director',
                         '.*\n');
         return undef if ($rv == 1 || $rv < 0);
         $out .= $wait_for_input;
         last if ($rv == 0);
         }
-$out =~ s/time\n(\d+\-\S+\-\d+ \d+:\d+:\d+)\n//;
+$out =~ s/time\n(\S+\s+)?(\d+\-\S+\-\d+ \d+:\d+:\d+)\n//;
 $out =~ s/^\Q$cmd\E\n//;
 return $out;
 }
@@ -806,14 +829,17 @@ local $jobs = &console_cmd($h, "show jobs");
 local @rv;
 local $job;
 foreach my $l (split(/\r?\n/, $jobs)) {
-	if ($l =~ /^Job:\s+name=([^=]*\S)\s/) {
+	if ($l =~ /^Job:\s+name=([^=]*\S)\s/i ||
+	    $l =~ /^\s*Name\s*=\s*"(.*)"/i) {
 		$job = { 'name' => $1 };
 		push(@rv, $job);
 		}
-	elsif ($l =~ /Client:\s+name=([^=]*\S)\s/ && $job) {
+	elsif (($l =~ /Client:\s+name=([^=]*\S)\s/i ||
+		$l =~ /^\s*Client\s*=\s*"(.*)"/i) && $job) {
 		$job->{'client'} = $1;
 		}
-	elsif ($l =~ /FileSet:\s+name=([^=]*\S)\s/ && $job) {
+	elsif (($l =~ /FileSet:\s+name=([^=]*\S)\s/i ||
+	        $l =~ /^FileSet\s*=\s*"(.*)"/i) && $job) {
 		$job->{'fileset'} = $1;
 		}
 	}
@@ -830,15 +856,22 @@ local $clients = &console_cmd($h, "show clients");
 local @rv;
 local $client;
 foreach my $l (split(/\r?\n/, $clients)) {
-	if ($l =~ /^Client:\s+name=([^=]*\S)\s/) {
+	if ($l =~ /^Client:\s+name=([^=]*\S)\s/i ||
+	    $l =~ /^\s*Name\s*=\s*"(.*)"/i) {
 		$client = { 'name' => $1 };
-		if ($l =~ /address=(\S+)/ && $client) {
+		if ($l =~ /address=(\S+)/i && $client) {
 			$client->{'address'} = $1;
 			}
-		if ($l =~ /FDport=(\d+)/ && $client) {
+		if ($l =~ /FDport=(\d+)/i && $client) {
 			$client->{'port'} = $1;
 			}
 		push(@rv, $client);
+		}
+	elsif ($l =~ /^\s*Address\s*=\s*"(.*)"/i && $client) {
+		$client->{'address'} = $1;
+		}
+	elsif ($l =~ /^\s*FDport\s*=\s*"(.*)"/i && $client) {
+		$client->{'port'} = $1;
 		}
 	}
 return @rv;
@@ -854,15 +887,22 @@ local $storages = &console_cmd($h, "show storages");
 local @rv;
 local $storage;
 foreach my $l (split(/\r?\n/, $storages)) {
-	if ($l =~ /^Storage:\s+name=([^=]*\S)\s/) {
+	if ($l =~ /^Storage:\s+name=([^=]*\S)\s/i ||
+	    $l =~ /^\s*Name\s*=\s*"(.*)"/i) {
 		$storage = { 'name' => $1 };
-		if ($l =~ /address=(\S+)/) {
+		if ($l =~ /address=(\S+)/i) {
 			$storage->{'address'} = $1;
 			}
-		if ($l =~ /SDport=(\d+)/) {
+		if ($l =~ /SDport=(\d+)/i) {
 			$storage->{'port'} = $1;
 			}
 		push(@rv, $storage);
+		}
+	elsif ($l =~ /^\s*Address\s*=\s*"(.*)"/i && $storage) {
+		$storage->{'address'} = $1;
+		}
+	elsif ($l =~ /^\s*SDport\s*=\s*"(.*)"/i && $storage) {
+		$storage->{'port'} = $1;
 		}
 	}
 return @rv;
@@ -878,12 +918,16 @@ local $pools = &console_cmd($h, "show pools");
 local @rv;
 local $pool;
 foreach my $l (split(/\r?\n/, $pools)) {
-	if ($l =~ /^Pool:\s+name=([^=]*\S)\s/) {
+	if ($l =~ /^Pool:\s+name=([^=]*\S)\s/i ||
+	    $l =~ /^\s*Name\s*=\s*"(.*)"/i) {
 		$pool = { 'name' => $1 };
-		if ($l =~ /PoolType=(\S+)/) {
+		if ($l =~ /PoolType=(\S+)/i) {
 			$pool->{'type'} = $1;
 			}
 		push(@rv, $pool);
+		}
+	elsif ($l =~ /^\s*PoolType\s*=\s*"(.*)"/i && $pool) {
+		$pool->{'type'} = $1;
 		}
 	}
 return @rv;
@@ -904,14 +948,28 @@ foreach my $l (split(/\r?\n/, $status)) {
 	elsif ($l =~ /^Running\s+Jobs/i) { $sect = 2; }
 	elsif ($l =~ /^Terminated\s+Jobs/i) { $sect = 3; }
 
-	if ($sect == 1 && $l =~ /^\s*(\S+)\s+(\S+)\s+(\d+)\s+(\S+\s+\S+)\s+(\S+)\s+(\S+)\s*$/) {
-		# Scheduled job
+	if ($sect == 1 && $l =~ /^\s*(\S+)\s+(\S+)\s+(\d+)\s+(\S+\s+\S+(\s+\d+:\d+)?)\s+(\S+)\s+(\S+)?\s*$/) {
+		# Scheduled job, like 
+		# Full Backup 10 27-Jun-14 17:30 ykfdc1-BackupJob wkly_1736
+		# copy jobs do not have any destination tape (=> ? on the latest field)
+		# Full Backup 11 19-Aug-16 17:50 ykfdc1-Copyjob
 		push(@sched, { 'level' => &full_level("$1"),
 			       'type' => $2,
 			       'pri' => $3,
 			       'date' => $4,
-			       'name' => $5,
-			       'volume' => $6 });
+			       'name' => $6,
+			       'volume' => $7 });
+		}
+	elsif ($sect == 2 && $l =~ /^\s*(\d+)\s+(\S+)\s+(\S+)\s+([0-9,]+)\s+([0-9,]+\.[0-9,]+\s+\S+|\d+)\s+(\S+)\s+(.*)/) {
+		# Running job, like
+		# 6252 Back Full 0 0 File1-BackupJob is running
+		push(@run, { 'id' => $1,
+			     'type' => $2,
+			     'level' => &full_level("$3"),
+			     'files' => &remove_comma("$4"),
+			     'bytes' => &remove_comma("$5"),
+			     'name' => $6,
+			     'status' => $7 });
 		}
 	elsif ($sect == 2 && $l =~ /^\s*(\d+)\s+(\S+)\s+(\S+)\.(\d+\-\d+\-\S+)\s+(.*)/) {
 		# Running job
@@ -965,7 +1023,7 @@ foreach my $l (split(/\r?\n/, $status)) {
 			     'name' => &job_name("$2"),
 			     'status' => $4 });
 		}
-	elsif ($sect == 2 && $l =~ /^\s*Backup\s+Job\s+started:\s+(\S+\s+\S+)/) {
+	elsif ($sect == 2 && $l =~ /^\s*Backup\s+Job\s+started:\s+(\S+\s+\S+)/i) {
 		$run[$#run]->{'date'} = $1;
 		}
 	elsif ($sect == 3 && $l =~ /^\s*(\d+)\s+(\S+)\s+([0-9,]+)\s+([0-9,]+\.[0-9,]+\s+\S+|\d+)\s+(\S+)\s+(\S+\s+\S+)\s+(\S+)\s*$/) {
@@ -1001,7 +1059,7 @@ foreach my $l (split(/\r?\n/, $status)) {
 	if ($l =~ /^Running\s+Jobs/i) { $sect = 2; }
 	elsif ($l =~ /^Terminated\s+Jobs/i) { $sect = 3; }
 
-	if ($sect == 2 && $l =~ /^\s*Backup\s+Job\s+(\S+)\.(\d+\-\d+\-\S+)\s+(.*)/) {
+	if ($sect == 2 && $l =~ /^\s*Backup\s+Job\s+(\S+)\.(\d+\-\d+\-\S+)\s+(.*)/i) {
 		push(@run, { 'name' => &job_name("$1"),
 			     'status' => $3 });
 		}
@@ -1015,7 +1073,7 @@ foreach my $l (split(/\r?\n/, $status)) {
 		$run[$#run]->{'volume'} = $4;
 		$run[$#run]->{'device'} = $6;
 		}
-	elsif ($sect == 3 && $l =~ /^\s*(\d+)\s+(\S+)\s+([0-9,]+)\s+([0-9,]+\.[0-9,]+\s+\S+|\d+)\s+(\S+)\s+(\S+\s+\S+)\s+(\S+)\s*$/) {
+	elsif ($sect == 3 && $l =~ /^\s*(\d+)\s+(\S+)\s+([0-9,]+)\s+([0-9,]+\.[0-9,]+\s+\S+|\d+)\s+(\S+)\s+(\S+\s+\S+)\s+(\S+)\s*$/i) {
 		push(@done, { 'id' => $1,
 			      'level' => &full_level("$2"),
 			      'files' => &remove_comma("$3"),
@@ -1175,7 +1233,11 @@ else {
 	$rv = $db;
 	}
 if ($host) {
+	($host, $port) = split(/:/, $host);
 	$rv .= ";host=$host";
+	if ($port) {
+		$rv .= ";port=$port";
+		}
 	}
 return $rv;
 }
@@ -1300,10 +1362,10 @@ if (!$job) {
 	}
 else {
 	if ($j) {
-		return "<a href='edit_gjob.cgi?name=".&urlize($j)."'>$j ($c)</a>";
+		return &ui_link("edit_gjob.cgi?name=".&urlize($j)."","$j ($c)");
 		}
 	else {
-		return "<a href='edit_job.cgi?name=".&urlize($name)."'>$name</a>";
+		return &ui_link("edit_job.cgi?name=".&urlize($name)."",$name);
 		}
 	}
 }

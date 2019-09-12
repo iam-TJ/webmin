@@ -167,7 +167,7 @@ local $idx = &indexof($_[1], @{$_[0]}) if ($_[1]);
 local $olen = $_[1]->{'eline'} - $_[1]->{'line'} + 1 if ($_[1]);
 local $conf = &get_mon_config();
 local @dirs = &directive_lines($_[2], $_[2]->{'indent'}) if ($_[2]);
-if ($_[1]) {
+if ($_[1] && $_[2]) {
 	# Replace the old directive
 	splice(@$lref, $_[1]->{'line'}, $_[1]->{'eline'} - $_[1]->{'line'} + 1,
 	       @dirs);
@@ -176,7 +176,7 @@ if ($_[1]) {
 	$_[2]->{'line'} = $_[1]->{'line'};
 	$_[2]->{'eline'} = $_[2]->{'line'} + @dirs - 1;
 	}
-elsif (!$_[2]) {
+elsif ($_[1] && !$_[2]) {
 	# Remove the old directive
 	splice(@$lref, $_[1]->{'line'}, $_[1]->{'eline'} - $_[1]->{'line'} + 1);
 	splice(@{$_[0]}, $idx, 1);
@@ -343,7 +343,7 @@ sub day_input
 local @days = ( 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun' );
 local $rv = "<select name=$_[0]>\n";
 foreach $d (@days) {
-	$rv .= sprintf "<option %s>%s\n",
+	$rv .= sprintf "<option %s>%s</option>\n",
 		lc($d) eq lc($_[1]) ? "selected" : "", $d;
 	}
 $rv .= "</select>\n";
@@ -360,7 +360,7 @@ if ($_[1] =~ /^([\d\.]+)(\S)$/) {
 $rv = "<input name=$_[0] size=6 value='$int'>\n";
 $rv .= "<select name=$_[0]_u>\n";
 foreach $u ('s', 'm', 'h', 'd') {
-	$rv .= sprintf "<option value=%s %s>%s\n",
+	$rv .= sprintf "<option value=%s %s>%s</option>\n",
 		$u, $units eq $u ? "selected" : "", $text{"service_units_$u"};
 	}
 $rv .= "</select>\n";

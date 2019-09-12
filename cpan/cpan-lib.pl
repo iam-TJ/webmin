@@ -5,8 +5,15 @@ BEGIN { push(@INC, ".."); };
 use WebminCore;
 &init_config();
 use Config;
+
 $packages_file = "$module_config_directory/packages.txt.gz";
+if (!-r $packages_file) {
+	$packages_file = "$module_var_directory/packages.txt.gz";
+	}
 $available_packages_cache = "$module_config_directory/available-cache";
+if (!-r $available_packages_cache) {
+	$available_packages_cache = "$module_var_directory/available-cache";
+	}
 
 # Get the paths to perl and perldoc
 $perl_path = &get_perl_path();
@@ -41,7 +48,6 @@ foreach $d (&expand_usr64($Config{'privlib'}),
 	next if ($donedir{$d});
 	local $f;
 	open(FIND, "find ".quotemeta($d)." -name .packlist -print |");
-	print STDERR "find ".quotemeta($d)." -name .packlist -print\n";
 	while($f = <FIND>) {
 		chop($f);
 		local @st = stat($f);
@@ -76,8 +82,6 @@ foreach $d (&expand_usr64($Config{'privlib'}),
 				local @rpath;
 				open(FIND2, "find ".quotemeta($d).
 					    " -name '$l' -print |");
-				print STDERR "find ".quotemeta($d).
-                                            " -name '$l' -print\n";
 				while(<FIND2>) {
 					chop;
 					push(@rpath, $_);
@@ -346,11 +350,16 @@ else {
 local @rv;
 foreach my $a (@avail) {
 	if ($a->{'name'} =~ /^lib(\S+)-perl$/ ||	# Debian
-	    $a->{'name'} =~ /^perl-(\S+)$/) {		# Redhat
+	    $a->{'name'} =~ /^perl-(\S+)$/ ||		# Redhat
+	    $a->{'name'} =~ /^p5-(\S+)$/) {		# FreeBSD
 		local $mod = $1;
 		$mod =~ s/-/::/g;
 		if ($mod eq "LDAP") {
 			# Special case for redhat-ish systems
+			$mod = "Net::LDAP";
+			}
+		elsif ($mod eq "perl::ldap") {
+			# Special case for FreeBSD
 			$mod = "Net::LDAP";
 			}
 		push(@rv, { 'mod' => $mod,

@@ -1,13 +1,13 @@
 #!/usr/local/bin/perl
 # Ask one PAM question
 
-BEGIN { push(@INC, ".."); };
+BEGIN { push(@INC, "."); };
 use WebminCore;
 
 $pragma_no_cache = 1;
 #$ENV{'MINISERV_INTERNAL'} || die "Can only be called by miniserv.pl";
 &init_config();
-&ReadParse();
+&ReadParse(undef, undef, undef, 2);
 if ($gconfig{'loginbanner'} && $ENV{'HTTP_COOKIE'} !~ /banner=1/ &&
     !$in{'logout'} && $in{'initial'}) {
 	# Show pre-login HTML page
@@ -23,6 +23,9 @@ if ($gconfig{'loginbanner'} && $ENV{'HTTP_COOKIE'} !~ /banner=1/ &&
 	return;
 	}
 $sec = uc($ENV{'HTTPS'}) eq 'ON' ? "; secure" : "";
+if (!$config{'no_httponly'}) {
+	$sec .= "; httpOnly";
+}
 &get_miniserv_config(\%miniserv);
 $sidname = $miniserv{'sidname'} || "sid";
 print "Set-Cookie: banner=0; path=/$sec\r\n" if ($gconfig{'loginbanner'});
@@ -61,7 +64,7 @@ else {
 
 if ($in{'message'}) {
 	# Showing a message
-	pirnt &ui_table_row(undef,
+	print &ui_table_row(undef,
 	      &html_escape($in{'message'}), 2);
 	print &ui_hidden("message", 1);
 	}

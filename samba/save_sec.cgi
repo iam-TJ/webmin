@@ -9,7 +9,7 @@ require './samba-lib.pl';
 
 # check acls
 
-&error_setup("<blink><font color=red>$text{'eacl_aviol'}</font></blink>");
+&error_setup("$text{'eacl_aviol'}ask_epass.cgi");
 &error("$text{'eacl_np'} $text{'eacl_pusec'}")
 	        unless &can('rwsS', \%access, $in{old_name});
 # save				
@@ -40,11 +40,11 @@ else {
 &setval("write list",
 	join(',', &split_input($in{'write_list_u'}),
 		  &split_input($in{'write_list_g'}, '@')));
-if (!$in{allow_hosts_all} && $in{allow_hosts} =~ /\S/) {
+if (!$in{allow_hosts_def} && $in{allow_hosts} =~ /\S/) {
 	&setval("allow hosts", $in{allow_hosts});
 	}
 else { &delval("allow hosts"); }
-if (!$in{deny_hosts_all} && $in{deny_hosts} =~ /\S/) {
+if (!$in{deny_hosts_def} && $in{deny_hosts} =~ /\S/) {
 	&setval("deny hosts", $in{deny_hosts});
 	}
 else { &delval("deny hosts"); }
@@ -65,6 +65,8 @@ sub split_input
 {
 local @rv;
 local $str = $_[0];
+# remove '@' if smb.conf was manually edited
+$str =~ s/(@)+//g;
 while($str =~ /^\s*(\S*"[^"]+"\S*)(.*)$/ || $str =~ /^\s*(\S+)(.*)$/) {
 	push(@rv, $_[1].$1);
 	$str = $2;

@@ -13,9 +13,10 @@ print &ui_columns_start([ $text{'pid'},
 @procs = sort { $a->{'pid'} <=> $b->{'pid'} } &list_processes();
 foreach $pr (@procs) {
 	$p = $pr->{'pid'}; $pp = $pr->{'ppid'};
+	$procmap{$p} = $pr;
 	$argmap{$p} = $pr->{'args'};
 	$usermap{$p} = $pr->{'user'};
-	$stimemap{$p} = $pr->{'_stime'};
+	$stimemap{$p} = &format_stime($pr);
 	push(@{$children{$pp}}, $p);
 	$inlist{$pr->{'pid'}}++;
 	}
@@ -37,10 +38,10 @@ sub walk_procs
 {
 next if ($done_proc{$_[1]}++);
 local(@ch, $_, $args);
-if (&can_view_process($usermap{$_[1]})) {
+if (&can_view_process($procmap{$_[1]})) {
 	local @cols;
 	if (&can_edit_process($usermap{$_[1]})) {
-		push(@cols, "$_[0]<a href=\"edit_proc.cgi?$_[1]\">$_[1]</a>");
+		push(@cols, $_[0].&ui_link("edit_proc.cgi?".$_[1], $_[1]) );
 		}
 	else {
 		push(@cols, "$_[0]$_[1]");

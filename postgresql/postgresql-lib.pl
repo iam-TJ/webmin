@@ -5,6 +5,7 @@
 BEGIN { push(@INC, ".."); };
 use WebminCore;
 &init_config();
+do 'view-lib.pl';
 if ($config{'plib'}) {
 	$ENV{$gconfig{'ld_env'}} .= ':' if ($ENV{$gconfig{'ld_env'}});
 	$ENV{$gconfig{'ld_env'}} .= $config{'plib'};
@@ -13,6 +14,7 @@ if ($config{'psql'} =~ /^(.*)\/bin\/psql$/ && $1 ne '' && $1 ne '/usr') {
 	$ENV{$gconfig{'ld_env'}} .= ':' if ($ENV{$gconfig{'ld_env'}});
 	$ENV{$gconfig{'ld_env'}} .= "$1/lib";
 	}
+$pg_shadow_cols = "usename,usesysid,usecreatedb,usesuper,usecatupd,passwd,valuntil";
 
 if ($module_info{'usermin'}) {
 	# Login and password is set by user in Usermin, and the module always
@@ -165,12 +167,13 @@ return $t->{'data'}->[0]->[0] ? 1 : 0;
 sub list_tables
 {
 if (&supports_schemas($_[0])) {
-	local $t = &execute_sql_safe($_[0], 'select schemaname,tablename from pg_tables where tablename not like \'pg_%\' and tablename not like \'sql_%\' order by tablename');
-	return map { ($_->[0] eq "public" ? "" : $_->[0].".").$_->[1] } @{$t->{'data'}};
+	local $t = &execute_sql_safe($_[0], 'select schemaname,tablename from pg_tables order by tablename');
+	return map { ($_->[0] eq "public" ? "" : $_->[0].".").$_->[1] }
+		   grep { $_->[1] !~ /^(pg|sql)_/ } @{$t->{'data'}};
 	}
 else {
-	local $t = &execute_sql_safe($_[0], 'select tablename from pg_tables where tablename not like \'pg_%\' and tablename not like \'sql_%\' order by tablename');
-	return map { $_->[0] } @{$t->{'data'}};
+	local $t = &execute_sql_safe($_[0], 'select tablename from pg_tables order by tablename');
+	return map { $_->[0] } grep { $_->[0] !~ /^(pg|sql)_/ } @{$t->{'data'}};
 	}
 }
 
@@ -277,7 +280,7 @@ if ($gconfig{'debug_what_sql'}) {
 		}
 	&webmin_debug_log('SQL', "db=$_[0] sql=$sql".$params);
 	}
-if ($sql !~ /^\s*\\/) {
+if ($sql !~ /^\s*\\/ && !$main::disable_postgresql_escaping) {
 	$sql =~ s/\\/\\\\/g;
 	}
 if ($driver_handle &&
@@ -695,10 +698,11 @@ return $_[0]->{'type'} eq 'text' || $_[0]->{'type'} eq 'bytea';
 # HUP postmaster if running, so that hosts file changes take effect
 sub restart_postgresql
 {
-if (open(PID, $config{'pid_file'})) {
-	($pid = <PID>) =~ s/\r|\n//g;
-	close(PID);
-	&kill_logged('HUP', $pid) if ($pid);
+foreach my $pidfile (glob($config{'pid_file'})) {
+	local $pid = &check_pid_file($pidfile);
+	if ($pid) {
+		&kill_logged('HUP', $pid);
+		}
 	}
 }
 
@@ -706,18 +710,23 @@ if (open(PID, $config{'pid_file'})) {
 # Does strftime-style date substitutions on a filename, if enabled
 sub date_subs
 {
+local ($path) = @_;
+local $rv;
 if ($config{'date_subs'}) {
         eval "use POSIX";
 	eval "use posix" if ($@);
         local @tm = localtime(time());
         &clear_time_locale();
-        local $rv = strftime($_[0], @tm);
+        $rv = strftime($path, @tm);
         &reset_time_locale();
-        return $rv;
         }
 else {
-        return $_[0];
+	$rv = $path;
         }
+if ($config{'webmin_subs'}) {
+	$rv = &substitute_template($rv, { });
+	}
+return $rv;
 }
 
 # execute_before(db, handle, escape, path, db-for-config)
@@ -913,13 +922,18 @@ if ($config{'stop_cmd'}) {
 		}
 	}
 else {
-	local $pid;
-	open(PID, $config{'pid_file'});
-	($pid = <PID>) =~ s/\r|\n//g;
-	close(PID);
-	$pid || return &text('stop_epidfile', "<tt>$config{'pid_file'}</tt>");
-	&kill_logged('TERM', $pid) ||
-		return &text('stop_ekill', "<tt>$pid</tt>", "<tt>$!</tt>");
+	local $pidcount = 0;
+	foreach my $pidfile (glob($config{'pid_file'})) {
+		local $pid = &check_pid_file($pidfile);
+		if ($pid) {
+			&kill_logged('TERM', $pid) ||
+				return &text('stop_ekill', "<tt>$pid</tt>",
+					     "<tt>$!</tt>");
+			$pidcount++;
+			}
+		}
+	$pidcount || return &text('stop_epidfile',
+				  "<tt>$config{'pid_file'}</tt>");
 	}
 return undef;
 }
@@ -1108,23 +1122,29 @@ return $config{'host'} eq '' || $config{'host'} eq 'localhost' ||
        &to_ipaddress($config{'host'}) eq &to_ipaddress(&get_system_hostname());
 }
 
-# backup_database(database, dest-path, format, [&only-tables])
+# backup_database(database, dest-path, format, [&only-tables], [run-as-user])
 # Executes the pg_dump command to backup the specified database to the
 # given destination path. Returns undef on success, or an error message
 # on failure.
 sub backup_database
 {
-local ($db, $path, $format, $tables) = @_;
+local ($db, $path, $format, $tables, $user) = @_;
 local $tablesarg = join(" ", map { " -t ".quotemeta($_) } @$tables);
 local $cmd = &quote_path($config{'dump_cmd'}).
 	     (!$postgres_login ? "" :
 	      &supports_pgpass() ? " -U $postgres_login" : " -u").
 	     ($config{'host'} ? " -h $config{'host'}" : "").
+	     ($config{'port'} ? " -p $config{'port'}" : "").
 	     ($format eq 'p' ? "" : " -b").
 	     $tablesarg.
 	     " -F$format -f ".&quote_path($path)." $db";
 if ($postgres_sameunix && defined(getpwnam($postgres_login))) {
+	# Postgres connections have to be made as the 'postgres' Unix user
 	$cmd = &command_as_user($postgres_login, 0, $cmd);
+	}
+elsif ($user) {
+	# Run as a specific Unix user
+	$cmd = &command_as_user($user, 0, $cmd);
 	}
 $cmd = &command_with_login($cmd);
 local $out = &backquote_logged("$cmd 2>&1");
@@ -1145,6 +1165,7 @@ local $cmd = &quote_path($config{'rstr_cmd'}).
 	     (!$postgres_login ? "" :
 	      &supports_pgpass() ? " -U $postgres_login" : " -u").
 	     ($config{'host'} ? " -h $config{'host'}" : "").
+	     ($config{'port'} ? " -p $config{'port'}" : "").
 	     ($only ? " -a" : "").
 	     ($clean ? " -c" : "").
 	     $tablesarg.
@@ -1196,6 +1217,7 @@ if (&supports_pgpass()) {
 		local $temphome = &transname();
 		&make_dir($temphome, 0755);
 		$pgpass = "$temphome/.pgpass";
+		push(@main::temporary_files, $pgpass);
 		$ENV{'HOME'} = $temphome;
 		}
 	$ENV{'PGPASSFILE'} = $pgpass;
@@ -1215,6 +1237,57 @@ else {
 	$cmd .= " <$loginfile";
 	}
 return $cmd;
+}
+
+# extract_grants(field)
+# Given a field from pg_class that contains grants either as a comma-separated
+# list or an array, return a list of tuples in user,grant format
+sub extract_grants
+{
+my ($f) = @_;
+my @rv;
+if (ref($f)) {
+	@rv = map { [ split(/=/, $_, 2) ] } @$f;
+	}
+else {
+	$f =~ s/^\{//;
+	$f =~ s/\}$//;
+	@rv = map { [ split(/=/, $_, 2) ] } map { s/\\"/"/g; s/"//g; $_ } grep { /=\S/ } split(/,/, $f);
+	}
+return @rv;
+}
+
+# delete_database_backup_job(db)
+# If there is a backup scheduled for some database, remove it
+sub delete_database_backup_job
+{
+my ($db) = @_;
+&foreign_require("cron");
+my @jobs = &cron::list_cron_jobs();
+my $cmd = "$cron_cmd $db";
+my ($job) = grep { $_->{'command'} eq $cmd } @jobs;
+if ($job) {
+	&lock_file(&cron::cron_file($job));
+	&cron::delete_cron_job($job);
+	&unlock_file(&cron::cron_file($job));
+	}
+}
+
+# get_pg_shadow_table()
+# Returns the table containing users, and the list of columns (comma-separated)
+sub get_pg_shadow_table
+{
+if (&get_postgresql_version() >= 9.5) {
+	my $cols = $pg_shadow_cols;
+	$cols =~ s/usecatupd/'t'/g;
+	return ("pg_user", $cols);
+	}
+elsif (&get_postgresql_version() >= 9.4) {
+	return ("pg_user", $pg_shadow_cols);
+	}
+else {
+	return ("pg_shadow", $pg_shadow_cols);
+	}
 }
 
 1;

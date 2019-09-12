@@ -152,51 +152,51 @@ sub show_backup_destination
 {
 my ($mode, $user, $pass, $server, $path, $port) = &parse_backup_url($_[1]);
 my $rv;
-$rv .= "<table cellpadding=1 cellspacing=0>";
+$rv .= "<table id='show_backup_destination' cellpadding=1 cellspacing=0>";
 
 # Local file field
 $rv .= "<tr><td>".&ui_oneradio("$_[0]_mode", 0, undef, $mode == 0)."</td>\n";
-$rv .= "<td colspan=2>$text{'backup_mode0'} ".
-	&ui_textbox("$_[0]_file", $mode == 0 ? $path : "", 40).
+$rv .= "<td>$text{'backup_mode0'}&nbsp;</td><td colspan='3'>".
+	&ui_textbox("$_[0]_file", $mode == 0 ? $path : "", 60).
 	" ".&file_chooser_button("$_[0]_file")."</td> </tr>\n";
 
 # FTP file fields
 $rv .= "<tr><td>".&ui_oneradio("$_[0]_mode", 1, undef, $mode == 1)."</td>\n";
-$rv .= "<td>$text{'backup_mode1'} ".
+$rv .= "<td>$text{'backup_mode1'}&nbsp;</td><td>".
 	&ui_textbox("$_[0]_server", $mode == 1 ? $server : undef, 20).
 	"</td>\n";
-$rv .= "<td>$text{'backup_path'} ".
-	&ui_textbox("$_[0]_path", $mode == 1 ? $path : undef, 40).
+$rv .= "<td>&nbsp;$text{'backup_path'}&nbsp;</td><td> ".
+	&ui_textbox("$_[0]_path", $mode == 1 ? $path : undef, 20).
 	"</td> </tr>\n";
 $rv .= "<tr> <td></td>\n";
-$rv .= "<td>$text{'backup_login'} ".
-	&ui_textbox("$_[0]_user", $mode == 1 ? $user : undef, 15).
+$rv .= "<td>$text{'backup_login'}&nbsp;</td><td> ".
+	&ui_textbox("$_[0]_user", $mode == 1 ? $user : undef, 20).
 	"</td>\n";
-$rv .= "<td>$text{'backup_pass'} ".
-	&ui_password("$_[0]_pass", $mode == 1 ? $pass : undef, 15).
+$rv .= "<td>&nbsp;$text{'backup_pass'}&nbsp;</td><td> ".
+	&ui_password("$_[0]_pass", $mode == 1 ? $pass : undef, 20).
 	"</td> </tr>\n";
 $rv .= "<tr> <td></td>\n";
-$rv .= "<td>$text{'backup_port'} ".
+$rv .= "<td colspan='4'>$text{'backup_port'} ".
 	&ui_opt_textbox("$_[0]_port", $mode == 1 ? $port : undef, 5,
 			$text{'default'})."</td> </tr>\n";
 
 # SCP file fields
 $rv .= "<tr><td>".&ui_oneradio("$_[0]_mode", 2, undef, $mode == 2)."</td>\n";
-$rv .= "<td>$text{'backup_mode2'} ".
+$rv .= "<td>$text{'backup_mode2'}&nbsp;</td><td>".
 	&ui_textbox("$_[0]_sserver", $mode == 2 ? $server : undef, 20).
 	"</td>\n";
-$rv .= "<td>$text{'backup_path'} ".
-	&ui_textbox("$_[0]_spath", $mode == 2 ? $path : undef, 40).
+$rv .= "<td>&nbsp;$text{'backup_path'}&nbsp;</td><td> ".
+	&ui_textbox("$_[0]_spath", $mode == 2 ? $path : undef, 20).
 	"</td> </tr>\n";
 $rv .= "<tr> <td></td>\n";
-$rv .= "<td>$text{'backup_login'} ".
-	&ui_textbox("$_[0]_suser", $mode == 2 ? $user : undef, 15).
+$rv .= "<td>$text{'backup_login'}&nbsp;</td><td> ".
+	&ui_textbox("$_[0]_suser", $mode == 2 ? $user : undef, 20).
 	"</td>\n";
-$rv .= "<td>$text{'backup_pass'} ".
-	&ui_password("$_[0]_spass", $mode == 2 ? $pass : undef, 15).
+$rv .= "<td>&nbsp;$text{'backup_pass'}&nbsp;</td><td> ".
+	&ui_password("$_[0]_spass", $mode == 2 ? $pass : undef, 20).
 	"</td> </tr>\n";
 $rv .= "<tr> <td></td>\n";
-$rv .= "<td>$text{'backup_port'} ".
+$rv .= "<td colspan='4'>$text{'backup_port'} ".
 	&ui_opt_textbox("$_[0]_sport", $mode == 2 ? $port : undef, 5,
 			$text{'default'})."</td> </tr>\n";
 
@@ -204,7 +204,7 @@ if ($_[2] == 1) {
 	# Uploaded file field
 	$rv .= "<tr><td>".&ui_oneradio("$_[0]_mode", 3, undef, $mode == 3).
 		"</td>\n";
-	$rv .= "<td colspan=2>$text{'backup_mode3'} ".
+	$rv .= "<td colspan=4>$text{'backup_mode3'} ".
 		&ui_upload("$_[0]_upload", 40).
 		"</td> </tr>\n";
 	}
@@ -212,7 +212,7 @@ elsif ($_[2] == 2) {
 	# Output to browser option
 	$rv .= "<tr><td>".&ui_oneradio("$_[0]_mode", 4, undef, $mode == 4).
 		"</td>\n";
-	$rv .= "<td colspan=2>$text{'backup_mode4'}</td> </tr>\n";
+	$rv .= "<td colspan=4>$text{'backup_mode4'}</td> </tr>\n";
 	}
 
 $rv .= "</table>\n";
@@ -227,10 +227,11 @@ Returns a backup destination string, or calls error.
 sub parse_backup_destination
 {
 my %in = %{$_[1]};
-my $mode = $in{"$_[0]_mode"};
+my $mode = $in{"$_[0]_mode"} || 0;
 if ($mode == 0) {
 	# Local file
-	$in{"$_[0]_file"} =~ /^\/\S/ || &error($text{'backup_edest'});
+	$in{"$_[0]_file"} && $in{"$_[0]_file"} =~ /^\/\S/ ||
+		&error($text{'backup_edest'});
 	return $in{"$_[0]_file"};
 	}
 elsif ($mode == 1) {
@@ -316,15 +317,30 @@ if (!$_[5]) {
 	foreach my $m (@mods) {
 		&foreign_require($m, "backup_config.pl");
 		my @mfiles = &foreign_call($m, "backup_config_files");
-		push(@files, @mfiles);
-		push(@{$manifestfiles{$m}}, @mfiles);
+		foreach my $f (@mfiles) {
+			next if (!$f);
+			if (-d $f) {
+				# A directory .. recursively expand
+				foreach my $sf (&expand_directory($f)) {
+					next if (!$sf);
+					push(@files, $sf);
+					push(@{$manifestfiles{$m}}, $sf);
+					}
+				}
+			else {
+				# Just one file
+				push(@files, $f);
+				push(@{$manifestfiles{$m}}, $f);
+				}
+			}
 		}
 	}
 
-# Add module config files
+# Add module config files and custom langs
 if ($_[4]) {
 	foreach $m (@mods) {
 		my @cfiles = ( "$config_directory/$m/config" );
+		push(@cfiles, glob("$config_directory/$m/custom-lang*"));
 		push(@files, @cfiles);
 		push(@{$manifestfiles{$m}}, @cfiles);
 		}
@@ -438,7 +454,8 @@ elsif ($mode == 2) {
 return undef;
 }
 
-=head2 execute_restore(&mods, source, &files, apply, [show-only])
+=head2 execute_restore(&mods, source, &files, apply, [show-only],
+		       [&other-files])
 
 Restore configuration files from the specified source for the listed modules.
 Returns undef on success, or an error message.
@@ -446,7 +463,7 @@ Returns undef on success, or an error message.
 =cut
 sub execute_restore
 {
-my ($mods, $src, $files, $apply, $show) = @_;
+my ($mods, $src, $files, $apply, $show, $others) = @_;
 
 # Fetch file if needed
 my ($mode, $user, $pass, $host, $path, $port) = &parse_backup_url($src);
@@ -503,7 +520,7 @@ my @tarfiles = map { "/$_" } split(/\r?\n/, $out);
 my %tarfiles = map { $_, 1 } @tarfiles;
 
 # Extract manifests for each module
-my %hasmod = map { $_, 1 } @{$_[0]};
+my %hasmod = map { $_, 1 } @$mods;
 $hasmod{"_others"} = 1;
 &execute_command("rm -rf ".quotemeta($manifests_dir));
 my $rel_manifests_dir = $manifests_dir;
@@ -533,6 +550,7 @@ while($m = readdir(DIR)) {
 	push(@files, @mfiles);
 	}
 closedir(DIR);
+push(@files, @$others) if ($others);
 if (!@files) {
 	&unlink_file($file) if ($mode != 0);
 	return $text{'backup_enone2'};
@@ -540,15 +558,15 @@ if (!@files) {
 
 # Get descriptions for each module
 my %desc;
-foreach my $m (@{$_[0]}) {
+foreach my $m (@$mods) {
 	my %minfo = &get_module_info($m);
 	$desc{$m} = $minfo{'desc'};
 	}
 
 # Call module pre functions
-foreach my $m (@{$_[0]}) {
+foreach my $m (@$mods) {
 	my $mdir = &module_root_directory($m);
-	if ($m && &foreign_check($m) && !$_[4] &&
+	if ($m && &foreign_check($m) && !$show &&
 	    -r "$mdir/backup_config.pl") {
 		&foreign_require($m, "backup_config.pl");
 		if (&foreign_defined($m, "pre_restore")) {
@@ -562,7 +580,7 @@ foreach my $m (@{$_[0]}) {
 	}
 
 # Lock all files being extracted
-if (!$_[4]) {
+if (!$show) {
 	my $f;
 	foreach $f (@files) {
 		&lock_file($f);
@@ -570,7 +588,7 @@ if (!$_[4]) {
 	}
 
 # Extract contents (only files specified by manifests)
-my $flag = $_[4] ? "t" : "x";
+my $flag = $show ? "t" : "xv";
 my $qfiles = join(" ", map { s/^\///; quotemeta($_) } &unique(@files));
 if ($gzipped) {
 	&execute_command("cd / ; gunzip -c $qfile | tar ${flag}f - $qfiles",
@@ -583,7 +601,7 @@ else {
 my $ex = $?;
 
 # Un-lock all files being extracted
-if (!$_[4]) {
+if (!$show) {
 	my $f;
 	foreach $f (@files) {
 		&unlock_file($f);
@@ -596,16 +614,16 @@ if ($ex) {
 	return &text('backup_euntar', "<pre>$out</pre>");
 	}
 
-if ($_[3] && !$_[4]) {
+if ($apply && !$show) {
 	# Call all module apply functions
-	foreach $m (@{$_[0]}) {
+	foreach $m (@$mods) {
 		if (&foreign_defined($m, "post_restore")) {
 			&foreign_call($m, "post_restore", \@files);
 			}
 		}
 	}
 
-@{$_[2]} = @files;
+@$files = split(/\n/, $out);
 return undef;
 }
 
@@ -690,21 +708,27 @@ elsif ($mode == 4) {
 
 =head2 date_subs(string)
 
-Given a string with strftime-style format characters in it like %Y and %S, 
+Given a string with strftime-style format characters in it like %Y and %S,
 replaces them with the correct values for the current date and time.
 
 =cut
 sub date_subs
 {
+my ($path) = @_;
+my $rv;
 if ($config{'date_subs'}) {
         eval "use POSIX";
         eval "use posix" if ($@);
         my @tm = localtime(time());
-        return strftime($_[0], @tm);
+        $rv = strftime($path, @tm);
         }
 else {
-        return $_[0];
+	$rv = $path;
         }
+if ($config{'webmin_subs'}) {
+	$rv = &substitute_template($rv, { });
+	}
+return $rv;
 }
 
 =head2 show_backup_what(name, webmin?, nofiles?, others)

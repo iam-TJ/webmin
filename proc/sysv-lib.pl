@@ -33,6 +33,7 @@ for($i=0; $line=<PS>; $i++) {
 	$plist[$i]->{"user"} = $w[0];
 	$plist[$i]->{"cpu"} = "$w[7] %";
 	$plist[$i]->{"size"} = "$w[8] kB";
+	$plist[$i]->{"bytes"} = $w[8]*1024;
 	local $ofs = 0;
 	if ($has_stime) {
 		$plist[$i]->{"_stime"} = $w[12+$ofs];
@@ -219,11 +220,14 @@ if (!&has_command("kstat")) {
 	return ( );
 	}
 local %stat;
-foreach my $s ("physmem", "freemem") {
+foreach my $s ("physmem", "freemem", "zone_memory_cap") {
 	local $out = &backquote_command("kstat -p -m unix -s $s");
 	if ($out =~ /\s+(\d+)/) {
 		$stat{$s} = $1;
 		}
+	}
+if ($stat{'zone_memory_cap'} > $stat{'physmem'}) {
+	delete($stat{'zone_memory_cap'});
 	}
 local ($swaptotal, $swapfree);
 &open_execute_command(SWAP, "swap -l", 1);
@@ -237,8 +241,10 @@ close(SWAP);
 local $pagesize = &backquote_command("pagesize 2>/dev/null");
 $pagesize = int($pagesize)/1024;
 $pagesize ||= 8;	# Fallback
-return ($stat{'physmem'}*$pagesize, $stat{'freemem'}*$pagesize,
-	$swaptotal/2, $swapfree/2);
+return (($stat{'zone_memory_cap'} || $stat{'physmem'})*$pagesize,
+	$stat{'freemem'}*$pagesize,
+	$swaptotal/2,
+	$swapfree/2);
 }
 
 

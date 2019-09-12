@@ -1,11 +1,13 @@
 # freebsd-lib.pl
 # Mount table functions for freebsd
 
-$uname_release = `uname -r`;
+$uname_release = &backquote_command("uname -r");
 if (&has_command("mount_smbfs")) {
 	$smbfs_support = 1;
 	$nsmb_conf = "/etc/nsmb.conf";
 	}
+$ide_device_prefix = $uname_release > 9 ? "ada" : "ad";
+&foreign_require("bsdfdisk");
 
 # Return information about a filesystem, in the form:
 #  directory, device, type, options, fsck_order, mount_at_boot
@@ -168,7 +170,7 @@ sub list_mounted
 {
 # get the list of mounted filesystems
 local(@rv, $_);
-local $cmd = $uname_release =~ /^[789]\.[0-9]/ ? "freebsd-mounts-7" :
+local $cmd = $uname_release =~ /^(\d+)\.[0-9]/ && $1 > 6 ? "freebsd-mounts-7" :
 	     $uname_release =~ /^[56]\.[0-9]/ ? "freebsd-mounts-5" :
 	     $uname_release =~ /^4\.[0-9]/ ? "freebsd-mounts-4" :
 	     $uname_release =~ /^3\.[1-9]/ ? "freebsd-mounts-3" :
@@ -374,69 +376,55 @@ return $_[0] eq "nfs" || $_[0] eq "smbfs";
 # Output HTML for editing the mount location of some filesystem.
 sub generate_location
 {
-if ($_[0] eq "nfs") {
+local ($type, $loc) = @_;
+if ($type eq "nfs") {
 	# NFS mount from some host and directory
-	$_[1] =~ /^([^:]+):(.*)$/;
-	print "<tr> <td><b>NFS Hostname</b></td>\n";
-	print "<td><input name=nfs_host size=20 value=\"$1\">\n";
-	&nfs_server_chooser_button("nfs_host");
-	print "</td>\n";
-	print "<td><b>NFS Directory</b></td>\n";
-	print "<td><input name=nfs_dir size=20 value=\"$2\">\n";
-	&nfs_export_chooser_button("nfs_host", "nfs_dir");
-	print "</td> </tr>\n";
+        local ($host, $dir) = $loc =~ /^([^:]+):(.*)$/ ? ( $1, $2 ) : ( );
+        print &ui_table_row(&hlink($text{'linux_nfshost'}, "nfshost"),
+                &ui_textbox("nfs_host", $host, 30).
+                &nfs_server_chooser_button("nfs_host").
+                "&nbsp;".
+                "<b>".&hlink($text{'linux_nfsdir'}, "nfsdir")."</b> ".
+                &ui_textbox("nfs_dir",
+                            ($type eq "nfs4") && ($dir eq "") ? "/" : $dir, 30).
+                &nfs_export_chooser_button("nfs_host", "nfs_dir"));
 	}
-elsif ($_[0] eq "smbfs") {
+elsif ($type eq "smbfs") {
 	# SMB mount from some server and share
-	$_[1] =~ /^\\\\(.*)\\(.*)$/;
-	print "<tr> <td><b>$text{'linux_smbserver'}</b></td>\n";
-	print "<td><input name=smbfs_server value=\"$1\" size=20>\n";
-	&smb_server_chooser_button("smbfs_server");
-	print "</td>\n";
-	print "<td><b>$text{'linux_smbshare'}</b></td>\n";
-	print "<td><input name=smbfs_share value=\"$2\" size=20>\n";
-	&smb_share_chooser_button("smbfs_server", "smbfs_share");
-	print "</td> </tr>\n";
+        local ($server, $share) = $loc =~ /^\\\\([^\\]*)\\(.*)$/ ?
+                                        ($1, $2) : ( );
+        print &ui_table_row($text{'linux_smbserver'},
+                &ui_textbox("smbfs_server", $server, 30)." ".
+                &smb_server_chooser_button("smbfs_server")." ".
+                "&nbsp;".
+                "<b>$text{'linux_smbshare'}</b> ".
+                &ui_textbox("smbfs_share", $share, 30)." ".
+                &smb_share_chooser_button("smbfs_server", "smbfs_share"));
 	}
 else {
-	if ($_[0] eq "swap") {
+	local $msg;
+	if ($type eq "swap") {
 		# Swap file or device
-		printf "<tr> <td valign=top><b>Swap File</b></td>\n";
+		$msg = $text{'linux_swapfile'};
 		}
 	else {
 		# Disk-based filesystem
-		printf "<tr> <td valign=top><b>%s Disk</b></td>\n",
-			&fstype_name($_[0]);
+		$msg = &fstype_name($type);
 		}
-	print "<td colspan=3>\n";
-	if ($_[1] =~ /^\/dev\/ad(\d)s(\d)([a-z]*)$/) {
-		$disk_dev = 0; $ide_t = $1; $ide_s = $2; $ide_p = $3;
-		}
-	elsif ($_[1] =~ /^\/dev\/da(\d)s(\d)([a-z]*)$/) {
-		$disk_dev = 1; $scsi_t = $1; $scsi_s = $2; $scsi_p = $3;
-		}
-	else { $disk_dev = 2; }
 
-	printf "<input type=radio name=disk_dev value=0 %s> IDE Hard Disk:\n",
-		$disk_dev == 0 ? "checked" : "";
-	print "Device <input name=ide_t size=3 value=\"$ide_t\">\n";
-	print "Slice <input name=ide_s size=3 value=\"$ide_s\">\n";
-	print "Partition <input name=ide_p size=3 value=\"$ide_p\"><br>\n";
-
-	printf "<input type=radio name=disk_dev value=1 %s> SCSI Disk:\n",
-		$disk_dev == 1 ? "checked" : "";
-	print "Device <input name=scsi_t size=3 value=\"$scsi_t\">\n";
-	print "Slice <input name=scsi_s size=3 value=\"$scsi_s\">\n";
-	print "Partition <input name=scsi_p size=3 value=\"$scsi_p\"><br>\n";
-
-	printf "<input type=radio name=disk_dev value=2 %s> Other Device:\n",
-		$disk_dev == 2 ? "checked" : "";
-	printf "<input size=20 name=dev_path value=\"%s\"><br>\n",
-		$disk_dev == 2 ? $_[1] : "";
-	print "</td> </tr>\n";
+	# Generate disk selection options
+	my @opts;
+	my $found;
+	my $sel = &bsdfdisk::partition_select(
+		"disk_select", $loc, 3, \$found);
+	push(@opts, [ 0, $text{'freebsd_select'}, $sel ]);
+	push(@opts, [ 1, $text{'freebsd_other'},
+		      &ui_textbox("dev_path", $found ? "" : $loc, 40).
+		      " ".&file_chooser_button("dev_path", 0) ]);
+	print &ui_table_row($msg,
+		&ui_radio_table("disk_dev", $found ? 0 : 1, \@opts));
 	}
 }
-
 
 # generate_options(type, newmount)
 # Output HTML for editing mount options for a particular filesystem 
@@ -696,23 +684,25 @@ sub check_location
 if ($_[0] eq "nfs") {
 	local($out, $temp, $mout, $dirlist);
 
-	# Use ping and showmount to see if the host exists and is up
-	if ($in{nfs_host} !~ /^\S+$/) {
-		&error("'$in{nfs_host}' is not a valid hostname");
-		}
-	&execute_command("ping -c 1 '$in{nfs_host}'", undef, \$out, \$out);
-	if ($out =~ /unknown host/i) {
-		&error("The host '$in{nfs_host}' does not exist");
-		}
-	elsif ($out =~ /100\% packet loss/) {
-		&error("The host '$in{nfs_host}' is down");
-		}
-	&execute_command("showmount -e '$in{nfs_host}'", undef, \$out, \$out);
-	if ($out =~ /Unable to receive/) {
-		&error("The host '$in{nfs_host}' does not support NFS");
-		}
-	elsif ($?) {
-		&error("Failed to get mount list : $out");
+	if ($config{'nfs_check'}) {
+		# Use ping and showmount to see if the host exists and is up
+		if ($in{nfs_host} !~ /^\S+$/) {
+			&error("'$in{nfs_host}' is not a valid hostname");
+			}
+		&execute_command("ping -c 1 '$in{nfs_host}'", undef, \$out, \$out);
+		if ($out =~ /unknown host/i) {
+			&error("The host '$in{nfs_host}' does not exist");
+			}
+		elsif ($out =~ /100\% packet loss/) {
+			&error("The host '$in{nfs_host}' is down");
+			}
+		&execute_command("showmount -e '$in{nfs_host}'", undef, \$out, \$out);
+		if ($out =~ /Unable to receive/) {
+			&error("The host '$in{nfs_host}' does not support NFS");
+			}
+		elsif ($?) {
+			&error("Failed to get mount list : $out");
+			}
 		}
 
 	# Validate directory name
@@ -756,25 +746,13 @@ elsif ($_[0] eq "smbfs") {
 else {
 	# This is some kind of disk-based filesystem.. get the device name
 	if ($in{'disk_dev'} == 0) {
-		$in{'ide_t'} =~ /^\d+$/ ||
-			&error("'$in{ide_t}' is not a valid device number");
-		$in{'ide_s'} =~ /^\d+$/ ||
-			&error("'$in{ide_s}' is not a valid slice number");
-		$in{'ide_p'} =~ /^[a-z]*$/ ||
-			&error("'$in{ide_p}' is not a valid partition letter");
-		$dv = "/dev/ad$in{ide_t}s$in{ide_s}$in{ide_p}";
-		}
-	elsif ($in{'disk_dev'} == 1) {
-		$in{'scsi_t'} =~ /^\d+$/ ||
-			&error("'$in{scsi_t}' is not a valid device number");
-		$in{'scsi_s'} =~ /^\d+$/ ||
-			&error("'$in{scsi_s}' is not a valid slice number");
-		$in{'scsi_p'} =~ /^[a-z]*$/ ||
-			&error("'$in{scsi_p}' is not a valid partition letter");
-		$dv = "/dev/da$in{scsi_t}s$in{scsi_s}$in{scsi_p}";
+		# From menu
+		$dv = $in{'disk_select'};
 		}
 	else {
+		# Manually entered
 		$dv = $in{'dev_path'};
+		$dv =~ /^\// || &error($text{'freebsd_edevpath'});
 		}
 
 	# If the device entered is a symlink, follow it
@@ -786,7 +764,7 @@ else {
 		}
 
 	# Check if the device actually exists and uses the right filesystem
-	(-r $dv) || &error("The device file '$dv' does not exist");
+	(-r $dv) || &error(&text('freebsd_edevfile', $dv));
 	return $dv;
 	}
 }
@@ -941,7 +919,8 @@ return &join_options();
 sub create_swap
 {
 local($out, $bl);
-$bl = $_[1] * ($_[2] eq "g" ? 1024*1024 :
+$bl = $_[1] * ($_[2] eq "t" ? 1024*1024*1024 :
+	       $_[2] eq "g" ? 1024*1024 :
 	       $_[2] eq "m" ? 1024 : 1);
 $out = &backquote_logged("dd if=/dev/zero of=$_[0] bs=1024 count=$bl 2>&1");
 if ($?) { return "dd failed : $out"; }
@@ -980,7 +959,8 @@ return "255.255.255.255";
 
 sub device_name
 {
-return $_[0];
+my ($dev) = @_;
+return &bsdfdisk::partition_description($dev);
 }
 
 sub files_to_lock

@@ -7,7 +7,8 @@ sub get_ps_version
 {
 if (!$get_ps_version_cache) {
 	local $out = &backquote_command("ps V 2>&1");
-	if ($out =~ /version\s+([0-9\.]+)\./) {
+	if ($out =~ /version\s+([0-9\.]+)\./ ||
+	    $out =~ /\S+\s+([3-9][0-9\.]+)\./) {
 		$get_ps_version_cache = $1;
 		}
 	}
@@ -27,6 +28,7 @@ if ($ver >= 2) {
 		}
 	open(PS, "ps --cols 2048 -eo user$width,ruser$width,group$width,rgroup$width,pid,ppid,pgid,pcpu,vsz,nice,etime,time,stime,tty,args 2>/dev/null |");
 	$dummy = <PS>;
+	my @now = localtime(time());
 	for($i=0; $line=<PS>; $i++) {
 		chop($line);
 		$line =~ s/^\s+//g;
@@ -48,8 +50,20 @@ if ($ver >= 2) {
 		$plist[$i]->{"user"} = $w[0];
 		$plist[$i]->{"cpu"} = "$w[7] %";
 		$plist[$i]->{"size"} = "$w[8] kB";
+		$plist[$i]->{"bytes"} = $w[8]*1024;
 		$plist[$i]->{"time"} = $w[11];
 		$plist[$i]->{"_stime"} = $w[12];
+		if ($w[12] =~ /^(\d+):(\d+)$/ ||
+		    $w[12] =~ /^(\d+):(\d+):(\d+)$/) {
+			# Started today
+			$plist[$i]->{"_stime_unix"} =
+			  timelocal($3 || 0, $2, $1, $now[3], $now[4], $now[5]);
+			}
+		elsif ($w[12] =~ /^(\S\S\S)\s*(\d+)$/) {
+			# Started on some other day
+			$plist[$i]->{"_stime_unix"} =
+			  timelocal(0, 0, 0, $2, &month_to_number($1), $now[5]);
+			}
 		$plist[$i]->{"nice"} = $w[9];
 		$plist[$i]->{"args"} = @w<15 ? "defunct" : join(' ', @w[14..$#w]);
 		$plist[$i]->{"_group"} = $w[2];
@@ -116,6 +130,7 @@ return undef;
 sub find_mount_processes
 {
 local($out);
+&has_command("fuser") || &error("fuser command is not installed");
 $out = &backquote_command("fuser -m ".quotemeta($_[0])." 2>/dev/null");
 $out =~ s/[^0-9 ]//g;
 $out =~ s/^\s+//g; $out =~ s/\s+$//g;
@@ -127,6 +142,7 @@ return split(/\s+/, $out);
 sub find_file_processes
 {
 local($out, $files);
+&has_command("fuser") || &error("fuser command is not installed");
 $files = join(' ', map { quotemeta($_) } map { glob($_) } @_);
 $out = &backquote_command("fuser $files 2>/dev/null");
 $out =~ s/[^0-9 ]//g;
@@ -222,17 +238,27 @@ ioctl($ttyfh, 0x540e, 0);
 }
 
 # get_memory_info()
-# Returns a list containing the real mem, free real mem, swap and free swap
-# (In kilobytes).
+# Returns a list containing the real mem, free real mem, swap and free swap,
+# and possibly cached memory and the burstable limit. All of these are in Kb.
 sub get_memory_info
 {
 local %m;
-if (open(BEAN, "/proc/user_beancounters")) {
+local $memburst;
+if (&running_in_openvz() && open(BEAN, "/proc/user_beancounters")) {
 	# If we are running under Virtuozzo, there may be a limit on memory
-	# use in force that is less than the real system's memory.
+	# use in force that is less than the real system's memory. Or it may be
+	# a higher 'burstable' limit. Use this, unless it is unreasonably
+	# high (like 1TB)
+	local $pagesize = 1024;
+	eval {
+		use POSIX;
+		$pagesize = POSIX::sysconf(POSIX::_SC_PAGESIZE);
+		};
 	while(<BEAN>) {
-		if (/^privvmpages\s+(\d+)\s+(\d+)\s+(\d+)/) {
-			return ($3, $3-$1, undef, undef);
+		if (/privvmpages\s+(\d+)\s+(\d+)\s+(\d+)/ &&
+                    $3 < 1024*1024*1024*1024) {
+			$memburst = $3 * $pagesize / 1024;
+			last;
 			}
 		}
 	close(BEAN);
@@ -244,9 +270,31 @@ while(<MEMINFO>) {
 		}
 	}
 close(MEMINFO);
-return ( $m{'memtotal'}, $m{'cached'} > $m{'memtotal'} ? $m{'memfree'}
-				: $m{'memfree'}+$m{'buffers'}+$m{'cached'},
-	 $m{'swaptotal'}, $m{'swapfree'} );
+local $memtotal;
+if ($memburst && $memburst > $m{'memtotal'}) {
+	# Burstable limit is higher than actual RAM
+	$memtotal = $m{'memtotal'};
+	}
+elsif ($memburst && $memburst < $m{'memtotal'}) {
+	# Limit is less than actual RAM
+	$memtotal = $memburst;
+	$memburst = undef;
+	}
+elsif ($memburst && $memburst == $m{'memtotal'}) {
+	# Same as actual RAM
+	$memtotal = $memburst;
+	$memburst = undef;
+	}
+elsif (!$memburst) {
+	# No burstable limit set, like on a real system
+	$memtotal = $m{'memtotal'};
+	}
+return ( $memtotal,
+	 $m{'cached'} > $memtotal ? $m{'memfree'} :
+		$m{'memfree'}+$m{'buffers'}+$m{'cached'},
+	 $m{'swaptotal'}, $m{'swapfree'},
+	 $m{'buffers'} + $m{'cached'},
+	 $memburst, );
 }
 
 # os_get_cpu_info()
@@ -272,7 +320,12 @@ if ($c{'cache size'} =~ /^(\d+)\s+KB/i) {
 elsif ($c{'cache size'} =~ /^(\d+)\s+MB/i) {
 	$c{'cache size'} = $1*1024*1024;
 	}
-if ($c{'cpu mhz'}) {
+if (!$c{'cpu mhz'} && $c{'model name'}) {
+	$c{'bogomips'} =~ s/\..*$//;
+	$c{'model name'} .= " @ ".$c{'bogomips'}." bMips";
+	}
+
+if ($c{'model name'}) {
 	return ( $load[0], $load[1], $load[2],
 		 int($c{'cpu mhz'}), $c{'model name'}, $c{'vendor_id'},
 		 $c{'cache size'}, $c{'processor'}+1 );
@@ -424,6 +477,53 @@ $cmd .= " -n ".quotemeta($prio) if (defined($prio));
 $cmd .= " -p ".quotemeta($pid);
 local $out = &backquote_logged("$cmd 2>&1 </dev/null");
 return $? ? $out : undef;
+}
+
+# get_current_cpu_temps()
+# Returns a list of hash refs containing CPU temperatures
+sub get_current_cpu_temps
+{
+my @rv;
+if (&has_command("sensors")) {
+        my $fh = "SENSORS";
+        &open_execute_command($fh, "sensors </dev/null 2>/dev/null", 1);
+        while(<$fh>) {
+                if (/Core\s+(\d+):\s+([\+\-][0-9\.]+)/) {
+                        push(@rv, { 'core' => $1,
+                                    'temp' => $2 });
+                        }
+                elsif (/CPU:\s+([\+\-][0-9\.]+)/) {
+                        push(@rv, { 'core' => 0,
+                                    'temp' => $1 });
+                        }
+                }
+        close($fh);
+        }
+return @rv;
+}
+
+# get_cpu_io_usage()
+# Returns a list containing CPU user, kernel, idle, io and VM time, and IO
+# blocks in and out
+sub get_cpu_io_usage
+{
+my $out,@lines,@w;
+if (&has_command("vmstat")) {
+        $out = &backquote_command("vmstat 1 2 2>/dev/null");
+        @lines = split(/\r?\n/, $out);
+        @w = split(/\s+/, $lines[$#lines]);
+        shift(@w) if ($w[0] eq '');
+        if ($w[8] =~ /^\d+$/ && $w[9] =~ /^\d+$/) {
+            return ( @w[12..16], $w[8], $w[9] );
+        }
+    } elsif (&has_command("dstat")) {
+        $out = &backquote_command("dstat 1 1 2>/dev/null");
+        @lines = split(/\r?\n/, $out);
+        @w = split(/[\s|]+/, $lines[$#lines]);
+        shift(@w) if ($w[0] eq '');
+        return( @w[0..4], @w[6..7]);
+    }
+    return undef;
 }
 
 1;

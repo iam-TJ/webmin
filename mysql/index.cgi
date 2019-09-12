@@ -6,10 +6,15 @@ require './mysql-lib.pl';
 &ReadParse();
 
 # Check for MySQL programs
+if ($config{'start_cmd'} =~ /^(\S+)/ && &is_mysql_local()) {
+	$start = $1;
+	}
 foreach $p ( [ $config{'mysqladmin'}, 'index_eadmin', 'index_mysqladmin' ],
 	     [ $config{'mysql'}, 'index_esql', 'index_mysql' ],
-	     [ $config{'mysqlshow'}, 'index_eshow', 'index_mysqlshow' ]) {
-	if (!-x $p->[0]) {
+	     [ $config{'mysqlshow'}, 'index_eshow', 'index_mysqlshow' ],
+	     $start ? ( [ $start, 'index_estart', 'index_mysqlstart' ] )
+		    : ( )) {
+	if (!&has_command($p->[0])) {
 		&ui_print_header(undef, $text{'index_title'}, "", "intro", 1, 1, 0,
 			&help_search_link("mysql", "man", "doc", "google"));
 		print &text($p->[1], "<tt>$p->[0]</tt>",
@@ -48,9 +53,7 @@ elsif (!$mysql_version) {
 	&ui_print_footer("/", $text{'index'});
 	exit;
 	}
-open(VERSION, ">$module_config_directory/version");
-print VERSION $mysql_version,"\n";
-close(VERSION);
+&save_mysql_version($mysql_version);
 
 # Check if MYSQL_PWD works
 ($r, $rout) = &is_mysql_running();
@@ -63,20 +66,31 @@ if ($r > 0 && !&working_env_pass()) {
 	exit;
 	}
 
+# Check if my.cnf was found
+if (&is_mysql_local() && $config{'my_cnf'} && !-r $config{'my_cnf'}) {
+	&ui_print_header(undef, $text{'index_title'}, "", "intro", 1, 1, 0,
+		&help_search_link("mysql", "man", "doc", "google"));
+	print &text('index_ecnf', "<tt>$config{'my_cnf'}</tt>",
+		    "../config.cgi?$module_name"),"<p>\n";
+	&ui_print_footer("/", $text{'index'});
+	exit;
+	}
+
 if ($r == 0) {
 	# Not running .. need to start it
 	&main_header();
 	print "<p> <b>$text{'index_notrun'}</b> <p>\n";
 
+	print &text('index_emsg', "<tt>$rout</tt>"),"<p>\n";
+
 	if ($access{'stop'} && &is_mysql_local()) {
 		print &ui_hr();
-		print "<form action=start.cgi>\n";
-		print "<table width=100%><tr><td>\n";
-		print "<input type=submit ",
-		      "value=\"$text{'index_start'}\"></td>\n";
-		print "<td>",&text('index_startmsg',
-		      "<tt>$config{'start_cmd'}</tt>"),"</td> </tr></table>\n";
-		print "</form>\n";
+		print &ui_buttons_start();
+		print &ui_buttons_row("start.cgi",
+			$text{'index_start'},
+			&text('index_startmsg',
+			      "<tt>$config{'start_cmd'}</tt>"));
+		print &ui_buttons_end();
 		}
 	}
 elsif ($r == -1) {
@@ -139,7 +153,10 @@ else {
 		if ($can_create);
 	if (!@icons) {
 		# No databases .. tell user
-		if (@alldbs) {
+		if ($in{'search'}) {
+			print "<b>$text{'index_nodbs3'}</b> <p>\n";
+			}
+		elsif (@alldbs) {
 			print "<b>$text{'index_nodbs'}</b> <p>\n";
 			}
 		else {
@@ -209,22 +226,26 @@ else {
 		print &ui_hr();
 		print &ui_subheading($text{'index_global'});
 		$canvars = &supports_variables();
-		@links = ( 'list_users.cgi', 'list_dbs.cgi', 'list_hosts.cgi',
+		$canhosts = &supports_hosts();
+		@links = ( 'list_users.cgi', 'list_dbs.cgi',
+			   $canhosts ? ( 'list_hosts.cgi' ) : ( ),
 			   'list_tprivs.cgi', 'list_cprivs.cgi',
-			   'edit_cnf.cgi', 'list_procs.cgi',
+			   'edit_cnf.cgi', 'edit_manual.cgi', 'list_procs.cgi',
 			   $canvars ? ( 'list_vars.cgi' ) : ( ),
 			   'root_form.cgi',
 			 );
 		@titles = ( $text{'users_title'}, $text{'dbs_title'},
-			    $text{'hosts_title'}, $text{'tprivs_title'},
-			    $text{'cprivs_title'},$text{'cnf_title'},
+			    $canhosts ? ( $text{'hosts_title'} ) : ( ),
+			    $text{'tprivs_title'}, $text{'cprivs_title'},
+			    $text{'cnf_title'}, $text{'manual_title'},
 			    $text{'procs_title'},
 			    $canvars ? ( $text{'vars_title'} ) : ( ),
 			    $text{'root_title'},
 			  );
 		@images = ( 'images/users.gif', 'images/dbs.gif',
-			    'images/hosts.gif', 'images/tprivs.gif',
-			    'images/cprivs.gif', 'images/cnf.gif',
+			    $canhosts ? ( 'images/hosts.gif' ) : ( ),
+			    'images/tprivs.gif', 'images/cprivs.gif',
+			    'images/cnf.gif', 'images/manual.gif',
 			    'images/procs.gif',
 			    $canvars ? ( 'images/vars.gif' ) : ( ),
 			    'images/root.gif',
@@ -282,6 +303,9 @@ sub main_header
 {
 &ui_print_header(undef, $text{'index_title'}, "", "intro", 1, 1, 0,
 	&help_search_link("mysql", "man", "doc", "google"),
-	undef, undef, &text('index_version', $mysql_version));
+	undef, undef,
+	$config{'host'} ?
+		&text('index_version2', $mysql_version, $config{'host'}) :
+		&text('index_version', $mysql_version));
 }
 

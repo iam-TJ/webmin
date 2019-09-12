@@ -40,13 +40,12 @@ if (&get_product_name() eq 'usermin') {
 		}
 
 	&create_user_config_dirs();
-	&foreign_require("procmail", "procmail-lib.pl");
+	&foreign_require("mailbox");
 	}
 else {
 	# Running under Webmin, so different modules are used
-	&foreign_require("procmail", "procmail-lib.pl");
-	&foreign_require("mailboxes", "mailboxes-lib.pl");
-	&foreign_require("usermin", "usermin-lib.pl");
+	&foreign_require("mailboxes");
+	&foreign_require("usermin");
 	$mail_system_module =
 		$mailboxes::config{'mail_system'} == 1 ? "postfix" :
 		$mailboxes::config{'mail_system'} == 2 ? "qmailadmin" :
@@ -54,6 +53,8 @@ else {
 	$autoreply_cmd = "$config_directory/$mail_system_module/autoreply.pl";
 	$user_autoreply_cmd = "$usermin::config{'usermin_dir'}/forward/autoreply.pl";
 	}
+&foreign_require("spam");
+&foreign_require("procmail");
 
 # list_filters([file])
 # Returns a list of filter objects, which have a 1-to-1 correlation with
@@ -113,7 +114,7 @@ foreach my $r (@pmrc) {
 	# Finally create the simple object
 	local $simple = { 'condtype' => $condtype,
 			  'cond' => $cond,
-			  'nocond' => !scalar(@{$r->{'conds'}}),
+			  'nocond' => !scalar(@conds),
 			  'body' => $flags{'B'},
 			  'continue' => $flags{'c'},
 			  'actiontype' => $r->{'type'},
@@ -248,7 +249,6 @@ elsif ($filter->{'cond'}) {
 
 # Set action section
 if ($filter->{'actionspam'}) {
-	&foreign_require("spam", "spam-lib.pl");
 	$recipe->{'type'} = '|';
 	$recipe->{'action'} = &spam::get_procmail_command();
 	push(@flags, "f", "w");
@@ -347,7 +347,6 @@ return $folder;
 sub get_global_spamassassin
 {
 return $global_spamassassin if ($global_spamassassin);
-&foreign_require("spam", "spam-lib.pl");
 local @recipes = &procmail::parse_procmail_file(
 	$spam::config{'global_procmailrc'});
 return &spam::find_spam_recipe(\@recipes) ? 1 : 0;
@@ -358,7 +357,6 @@ return &spam::find_spam_recipe(\@recipes) ? 1 : 0;
 # Virtualmin per-domain procmail file
 sub get_global_spam_path
 {
-&foreign_require("spam", "spam-lib.pl");
 if ($virtualmin_domain_id) {
 	# Read the Virtualmin procmailrc for the domain
 	local $vmpmrc = "$config{'virtualmin_config'}/procmail/".
@@ -386,7 +384,6 @@ else {
 # Virtualmin per-domain procmail file
 sub get_global_spam_delete
 {
-&foreign_require("spam", "spam-lib.pl");
 if ($virtualmin_domain_id) {
 	# Read the Virtualmin procmailrc for the domain
 	local $vmpmrc = "$config{'virtualmin_config'}/procmail/".
@@ -536,6 +533,7 @@ return wantarray ? ( $cond, $lastalways ) : $cond;
 
 # prettify_regexp(string)
 # If a string contains only \ quoted special characters, remove the \s
+# Also, undo any mimewords encoding.
 sub prettify_regexp
 {
 my ($str) = @_;
@@ -544,7 +542,17 @@ $re =~ s/\\./x/g;
 if ($re =~ /^[a-zA-Z0-9_ ]*$/) {
 	$str =~ s/\\(.)/$1/g;
 	}
-return $str;
+if (&get_product_name() eq "webmin") {
+	&foreign_require("mailboxes");
+	return &mailboxes::decode_mimewords($str);
+	}
+elsif (&get_product_name() eq "usermin") {
+	&foreign_require("mailbox");
+	return &mailbox::decode_mimewords($str);
+	}
+else {
+	return $str;
+	}
 }
 
 # describe_action(&filter, &folder, [homedir])
@@ -564,7 +572,7 @@ elsif ($f->{'actiondefault'}) {
 	}
 elsif ($f->{'actiontype'} eq '!') {
 	$action = &text('index_aforward',
-		"<tt>$f->{'action'}</tt>");
+		"<tt>".&html_escape($f->{'action'})."</tt>");
 	}
 elsif ($f->{'actionreply'}) {
 	$action = &text('index_areply',
@@ -576,7 +584,6 @@ else {
 	local $folder = &file_to_folder($f->{'action'}, $folders, $home);
 	if ($folder) {
 		if (&get_product_name() eq 'usermin') {
-			&foreign_require("mailbox", "mailbox-lib.pl");
 			local $id = &mailbox::folder_name($folder);
 			$action = &text('index_afolder',
 			   "<a href='../mailbox/index.cgi?id=$id'>".

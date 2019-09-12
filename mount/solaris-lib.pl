@@ -414,65 +414,59 @@ return ($_[0] eq "nfs" || $_[0] eq "tmpfs" || $_[0] eq "cachefs" ||
 # Output HTML for editing the mount location of some filesystem.
 sub generate_location
 {
-if ($_[0] eq "nfs") {
+local ($type, $loc) = @_;
+if ($type eq "nfs") {
 	# NFS mount from some host and directory
-	if ($_[1] =~ /^nfs:/) { $nfsmode = 2; }
-	elsif (!$_[1] || $_[1] =~ /^([A-z0-9\-\.]+):([^,]+)$/) {
+	local ($nfsmode, $nfshost, $nfspath);
+	if ($loc =~ /^nfs:/) { $nfsmode = 2; }
+	elsif (!$loc) {
+		$nfsmode = 0;
+		}
+	elsif ($loc =~ /^([A-z0-9\-\.]+):([^,]+)$/) {
 		$nfsmode = 0; $nfshost = $1; $nfspath = $2;
 		}
 	else { $nfsmode = 1; }
 	if ($gconfig{'os_version'} >= 2.6) {
 		# Solaris 2.6 can list multiple NFS servers in mount
-		print "<tr> <td><b>$text{'solaris_nsource'}</b></td>\n";
-		printf "<td><input type=radio name=nfs_serv value=0 %s>\n",
-			$nfsmode == 0 ? "checked" : "";
-		print "<b>$text{'solaris_nhost'}</b></td>\n";
-		print "<td><input name=nfs_host size=20 value=\"$nfshost\">\n";
-		&nfs_server_chooser_button("nfs_host");
-		print "&nbsp;<b>$text{'solaris_ndir'}</b>\n";
-		print "<input name=nfs_dir size=20 value=\"$nfspath\">\n";
-		&nfs_export_chooser_button("nfs_host", "nfs_dir");
-		print "</td> </tr>\n";
+		local @opts;
+		push(@opts, [ 0, $text{'solaris_nhost'},
+			&ui_textbox("nfs_host", $nfshost, 30).
+			&nfs_server_chooser_button("nfs_host").
+			"&nbsp;".
+			"<b>".$text{'solaris_ndir'}."</b> ".
+			&ui_textbox("nfs_dir", $nfspath, 30).
+			&nfs_export_chooser_button("nfs_host", "nfs_dir") ]);
 
-		print "<tr> <td></td>\n";
-		printf "<td><input type=radio name=nfs_serv value=1 %s>\n",
-			$nfsmode == 1 ? "checked" : "";
-		print "<b>$text{'solaris_nmult'}</b></td>\n";
-		printf "<td><input name=nfs_list size=40 value=\"%s\">\n",
-			$nfsmode == 1 ? $_[1] : "";
-		print "</td> </tr>\n";
+		push(@opts, [ 1, $text{'solaris_nmult'},
+			&ui_textbox("nfs_list",
+				    $nfsmode == 1 ? $loc : "", 40) ]);
 
 		if ($gconfig{'os_version'} >= 7) {
-			print "<tr> <td></td> <td>\n";
-			printf "<input type=radio name=nfs_serv value=2 %s>\n",
-				$nfsmode == 2 ? "checked" : "";
-			print "<b>$text{'solaris_webnfs'}</b></td> <td>\n";
-			printf "<input name=nfs_url size=40 value=\"%s\">\n",
-				$nfsmode == 2 ? $_[1] : "";
-			print "</td> </tr>\n";
+			push(@opts, [ 2, $text{'solaris_webnfs'},
+				&ui_textbox("nfs_url",
+					    $nfsmode == 2 ? $loc : "", 40) ]);
 			}
+		print &ui_table_row($text{'solaris_nsource'},
+			&ui_radio_table("nfs_serv", $nfsmode, \@opts));
 		}
 	else {
-		print "<tr> <td><b>$text{'solaris_nhost'}</b></td>\n";
-		print "<td><input name=nfs_host size=20 value=\"$nfshost\">\n";
-		&nfs_server_chooser_button("nfs_host");
-		print "</td>\n";
-		print "<td><b>$text{'solaris_ndir'}</b></td>\n";
-		print "<td><input name=nfs_dir size=20 value=\"$nfspath\">\n";
-		&nfs_export_chooser_button("nfs_host", "nfs_dir");
-		print "</td> </tr>\n";
+		print &ui_table_row($text{'solaris_nhost'},
+			&ui_textbox("nfs_host", $nfshost, 30).
+			&nfs_server_chooser_button("nfs_host").
+			"&nbsp;".
+			"<b>".$text{'solaris_ndir'}."</b> ".
+			&ui_textbox("nfs_dir", $nfspath, 30).
+			&nfs_export_chooser_button("nfs_host", "nfs_dir"));
 		}
 	}
-elsif ($_[0] eq "tmpfs" || $_[0] eq "xmemfs") {
+elsif ($type eq "tmpfs" || $type eq "xmemfs") {
 	# Location is irrelevant for tmpfs and xmemfs filesystems
 	}
-elsif ($_[0] eq "ufs") {
+elsif ($type eq "ufs") {
 	# Mounted from a normal disk, raid (MD) device or from
 	# somewhere else
-	print "<tr> <td valign=top><b>$text{'solaris_ufs'}</b></td>\n";
-	print "<td colspan=3>\n";
 	&foreign_require("format");
-
+	local ($ufs_dev, $ufs_md);
 	if ($_[1] =~ /^\/dev\/dsk\/c([0-9]+)t([0-9]+)d([0-9]+)s([0-9]+)$/ ||
 	    $_[1] =~ /^\/dev\/dsk\/c([0-9]+)d([0-9]+)s([0-9]+)$/) {
 		$ufs_dev = 0;
@@ -482,99 +476,96 @@ elsif ($_[0] eq "ufs") {
 		}
 	elsif ($_[1] =~ /^\/dev\/md\/dsk\/d([0-9]+)$/) {
 		$ufs_dev = 1;
+		$ufs_md = $1;
 		}
 	else {
 		$ufs_dev = 2;
 		}
+	local @opts;
 
+	# Regular disk
 	local $found;
 	local $sel = &format::partition_select("ufs_disk", $_[1], 0,
 					       $ufs_dev ? \$found : undef);
-	printf "<input type=radio name=ufs_dev value=0 %s> %s : %s<br>\n",
-		$ufs_dev == 0 ? "checked" : "", $text{'solaris_scsi'}, $sel;
+	push(@opts, [ 0, $text{'solaris_scsi'}, $sel ]);
 
-	printf "<input type=radio name=ufs_dev value=1 %s> %s :\n",
-		$ufs_dev == 1 ? "checked" : "",
-		$text{'solaris_raid'};
-	printf "%s <input name=ufs_md size=3 value=\"%s\"><br>\n",
-		$text{'solaris_unit'},
-		 $_[1] =~ /^\/dev\/md\/dsk\/d([0-9]+)$/ ? $1 : "";
 
-	printf "<input type=radio name=ufs_dev value=2 %s> %s :\n",
-		$ufs_dev == 2 ? "checked" : "", $text{'solaris_otherdev'};
-	printf "<input name=ufs_path size=20 value=\"%s\"><br>\n",
-		$ufs_dev == 2 ? $_[1] : "";
-	print "</td> </tr>\n";
+	# RAID device
+	push(@opts, [ 1, $text{'solaris_raid'},
+		      $text{'solaris_unit'}." ".
+		      &ui_textbox("ufs_md", $ufs_md, 5) ]);
+
+	# Something else
+	push(@opts, [ 2, $text{'solaris_otherdev'},
+		      &ui_textbox("ufs_path", $ufs_dev == 2 ? $loc : "", 40) ]);
+	print &ui_table_row($text{'solaris_ufs'},
+		&ui_radio_table("ufs_dev", $ufs_dev, \@opts));
 	}
-elsif ($_[0] eq "swap") {
+elsif ($type eq "swap") {
 	# Swapping to a disk partition or a file
-	print "<tr> <td valign=top><b>$text{'solaris_swapfile'}</b></td>\n";
-	print "<td colspan=3>\n";
 	&foreign_require("format");
-
-	if ($_[1] =~ /^\/dev\/dsk\/c([0-9]+)t([0-9]+)d([0-9]+)s([0-9]+)$/ ||
-	    $_[1] =~ /^\/dev\/dsk\/c([0-9]+)d([0-9]+)s([0-9]+)$/) {
+	local ($swap_dev);
+	if ($loc =~ /^\/dev\/dsk\/c([0-9]+)t([0-9]+)d([0-9]+)s([0-9]+)$/ ||
+	    $loc =~ /^\/dev\/dsk\/c([0-9]+)d([0-9]+)s([0-9]+)$/) {
 		$swap_dev = 0;
 		}
-	elsif ($_[1] eq "") {
+	elsif ($loc eq "") {
 		$swap_dev = 0;
 		}
 	else {
 		$swap_dev = 1;
 		}
+	local @opts;
 
+	# Regular disk
 	local $found;
 	local $sel = &format::partition_select("swap_disk", $_[1], 0,
 					       $swap_dev ? \$found : undef);
-	printf "<input type=radio name=swap_dev value=0 %s> %s : %s<br>\n",
-		$swap_dev == 0 ? "checked" : "", $text{'solaris_scsi'}, $sel;
+	push(@opts, [ 0, $text{'solaris_scsi'}, $sel ]);
 
-	printf "<input type=radio name=swap_dev value=1 %s> %s :\n",
-		$swap_dev == 1 ? "checked" : "", $text{'solaris_file'};
-	printf "<input name=swap_path size=20 value=\"%s\"><br>\n",
-		$swap_dev == 1 ? $_[1] : "";
-	print "</td> </tr>\n";
+	# Other path
+	push(@opts, [ 1, $text{'solaris_file'},
+		      &ui_textbox("swap_path", $swap_dev == 1 ? $loc : "", 40)
+		    ]);
+	print &ui_table_row($text{'solaris_swapfile'},
+		&ui_radio_table("swap_dev", $swap_dev, \@opts));
 	}
-elsif ($_[0] eq "hsfs" || $_[0] eq "udfs") {
+elsif ($type eq "hsfs" || $type eq "udfs") {
 	# Mounting a SCSI cdrom or DVD
-	if ($_[0] eq "hsfs") {
-		print "<tr> <td valign=top><b>$text{'solaris_cdrom'}</b></td>\n";
-		}
-	else {
-		print "<tr> <td valign=top><b>$text{'solaris_dvd'}</b></td>\n";
-		}
-	print "<td colspan=3>\n";
-	if ($_[1] =~ /^\/dev\/dsk\/c([0-9]+)t([0-9]+)d([0-9]+)s([0-9]+)$/) {
+	local ($hsfs_dev, $scsi_c, $scsi_t, $scsi_d, $scsi_s, $scsi_path);
+	if ($loc =~ /^\/dev\/dsk\/c([0-9]+)t([0-9]+)d([0-9]+)s([0-9]+)$/) {
 		$hsfs_dev = 0;
 		$scsi_c = $1; $scsi_t = $2; $scsi_d = $3; $scsi_s = $4;
 		}
-	elsif ($_[1] eq "") {
+	elsif ($loc eq "") {
 		$hsfs_dev = 0;
 		$scsi_c = 0; $scsi_t = 6; $scsi_d = 0; $scsi_s = 0;
 		}
 	else {
 		$hsfs_dev = 2; $scsi_path = $_[1];
 		}
-	printf "<input type=radio name=ufs_dev value=0 %s> $text{'solaris_scsi'}:\n",
-		$hsfs_dev == 0 ? "checked" : "";
-	print "$text{'solaris_ctrlr'} <input name=ufs_c size=3 value=\"$scsi_c\">\n";
-	print "$text{'solaris_target'} <input name=ufs_t size=3 value=\"$scsi_t\">\n";
-	print "$text{'solaris_unit'} <input name=ufs_d size=3 value=\"$scsi_d\">\n";
-	print "$text{'solaris_part'} <input name=ufs_s size=3 value=\"$scsi_s\"><br>\n";
-
-	printf "<input type=radio name=ufs_dev value=2 %s> $text{'solaris_otherdev'}:\n",
-		$hsfs_dev == 2 ? "checked" : "";
-	print "<input name=ufs_path size=20 value=\"$scsi_path\"><br>\n";
-	print "</td> </tr>\n";
+	local @opts;
+	push(@opts, [ 0, $text{'solaris_scsi'},
+		      $text{'solaris_ctrlr'}." ".
+		        &ui_textbox("ufs_c", $scsi_c, 4)." ".
+		      $text{'solaris_target'}.
+		        &ui_textbox("ufs_t", $scsi_t, 4)." ".
+		      $text{'solaris_unit'}.
+		        &ui_textbox("ufs_d", $scsi_d, 4)." ".
+		      $text{'solaris_part'}.
+		        &ui_textbox("ufs_s", $scsi_s, 4) ]);
+	push(@opts, [ 2, $text{'solaris_otherdev'},
+		      &ui_textbox("ufs_path", $scsi_path, 40) ]);
+	print &ui_table_row($type eq "hsfs" ? $text{'solaris_cdrom'}
+					    : $text{'solaris_dvd'},
+		&ui_radio_table("ufs_dev", $hsfs_dev, \@opts));
 	}
-elsif ($_[0] eq "pcfs") {
+elsif ($type eq "pcfs") {
 	# Mounting a SCSI msdos filesystem
-	print "<tr> <td valign=top><b>$text{'solaris_msdos'}</b></td>\n";
-	print "<td colspan=3>\n";
+	local ($pcfs_dev);
 	&foreign_require("format");
-
-	if ($_[1] =~ /^\/dev\/dsk\/c([0-9]+)t([0-9]+)d([0-9]+)s([0-9]+)$/ ||
-	    $_[1] =~ /^\/dev\/dsk\/c([0-9]+)d([0-9]+)s([0-9]+)$/) {
+	if ($loc =~ /^\/dev\/dsk\/c([0-9]+)t([0-9]+)d([0-9]+)s([0-9]+)$/ ||
+	    $loc =~ /^\/dev\/dsk\/c([0-9]+)d([0-9]+)s([0-9]+)$/) {
 		$pcfs_dev = 0;
 		}
 	elsif ($_[1] eq "") {
@@ -583,57 +574,52 @@ elsif ($_[0] eq "pcfs") {
 	else {
 		$pcfs_dev = 2;
 		}
+	local @opts;
 
 	local $found;
 	local $sel = &format::partition_select("ufs_disk", $_[1], 0,
 					       $pcfs_dev ? \$found : undef);
-	printf "<input type=radio name=ufs_dev value=0 %s> %s : %s<br>\n",
-		$pcfs_dev == 0 ? "checked" : "", $text{'solaris_scsi'}, $sel;
+	push(@opts, [ 0, $text{'solaris_scsi'}, $sel ]);
 
-	printf "<input type=radio name=ufs_dev value=2 %s> %s :\n",
-		$pcfs_dev == 2 ? "checked" : "", $text{'solaris_file'};
-	printf "<input name=ufs_path size=20 value=\"%s\"><br>\n",
-		$pcfs_dev == 2 ? $_[1] : "";
-	print "</td> </tr>\n";
+	push(@opts, [ 2, $text{'solaris_file'},
+		      &ui_textbox("ufs_path", $pcfs_dev == 2 ? $loc : "", 40)]);
+	print &ui_table_row($text{'solaris_msdos'},
+		&ui_radio_table("ufs_dev", $pcfs_dev, \@opts));
 	}
-elsif ($_[0] eq "lofs") {
+elsif ($type eq "lofs") {
 	# Mounting some directory to another location
-	print "<tr> <td><b>$text{'solaris_orig'}</b></td>\n";
-	print "<td><input name=lofs_src size=30 value=\"$_[1]\">\n";
-	print &file_chooser_button("lofs_src", 1);
-	print "</td> </tr>\n";
+	print &ui_table_row($text{'solaris_orig'},
+		&ui_textbox("lofs_src", 40, $loc)." ".
+		&file_chooser_button("lofs_src", 1));
 	}
-elsif ($_[0] eq "cachefs") {
+elsif ($type eq "cachefs") {
 	# Mounting a cached filesystem of some type.. need a location for
 	# the source of the mount
-	print "<tr> <td><b>$text{'solaris_cache'}</b></td>\n";
-	print "<td><input name=cfs_src size=20 value=\"$_[1]\"></td> </tr>\n";
+	print &ui_table_row($text{'solaris_cache'},
+		&ui_textbox("cfs_src", 40, $loc));
 	}
-elsif ($_[0] eq "autofs") {
+elsif ($type eq "autofs") {
 	# An automounter entry.. can be -hosts, -xfn or from some mapping
-	print "<tr> <td valign=top><b>$text{'solaris_automap'}</b></td>\n";
-	printf "<td><input type=radio name=autofs_type value=0 %s>\n",
-		$_[1] eq "-hosts" || $_[1] eq "-xfn" ? "" : "checked";
-	printf "Use map <input name=autofs_map size=20 value=\"%s\"><br>\n",
-		$_[1] eq "-hosts" || $_[1] eq "-xfn" ? "" : $_[1];
-	printf "<input type=radio name=autofs_type value=1 %s>\n",
-		$_[1] eq "-hosts" ? "checked" : "";
-	print "$text{'solaris_autohosts'}<br>\n";
-	printf "<input type=radio name=autofs_type value=2 %s>\n",
-		$_[1] eq "-xfn" ? "checked" : "";
-	print "$text{'solaris_autoxfn'}</td> </tr>\n";
+	local $mode = $loc eq "-hosts" ? 1 :
+		      $loc eq "-xfn" ? 2 : 0;
+	print &ui_table_row($text{'solaris_automap'},
+	    &ui_radio_table("autofs_type", $mode,
+		[ [ 0, $text{'linux_map'},
+		    &ui_textbox("autofs_map", 30, $mode == 0 ? $loc : "") ],
+		  [ 1, $text{'solaris_autohosts'} ],
+		  [ 2, $text{'solaris_autoxfn'} ] ]));
 	}
-elsif ($_[0] eq "rumba") {
+elsif ($type eq "rumba") {
 	# Windows filesystem
-	$_[1] =~ /^\\\\(.*)\\(.*)$/;
-	print "<tr> <td><b>$text{'solaris_server'}</b></td>\n";
-	print "<td><input name=rumba_server value=\"$1\" size=20>\n";
-	&smb_server_chooser_button("rumba_server");
-	print "</td>\n";
-	print "<td><b>$text{'solaris_share'}</b></td>\n";
-	print "<td><input name=rumba_share value=\"$2\" size=20>\n";
-	&smb_share_chooser_button("rumba_server", "rumba_share");
-	print "</td> </tr>\n";
+	local ($server, $share) = $loc =~ /^\\\\([^\\]*)\\(.*)$/ ?
+					($1, $2) : ( );
+	print &ui_table_row($text{'solaris_server'},
+		&ui_textbox("rumba_server", $server, 30)." ".
+		&smb_server_chooser_button("rumba_server")." ".
+		"&nbsp;".
+		"<b>$text{'solaris_share'}</b> ".
+		&ui_textbox("rumba_share", $share, 30)." ".
+		&smb_share_chooser_button("rumba_server", "rumba_share"));
 	}
 }
 
@@ -696,12 +682,12 @@ if ($_[0] eq "nfs") {
 
 	print "<tr> <td><b>$text{'solaris_proto'}</b></td>\n";
 	print "<td nowrap><select name=proto>\n";
-	printf "<option value=\"\" %s> $text{'default'}\n",
+	printf "<option value=\"\" %s>$text{'default'}</option>\n",
 		defined($options{"proto"}) ? "" : "selected";
 	&open_tempfile(NETCONFIG, "/etc/netconfig");
 	while(<NETCONFIG>) {
 		if (!/^([A-z0-9\_\-]+)\s/) { next; }
-		printf "<option value=\"$1\" %s> $1\n",
+		printf "<option value=\"$1\" %s>$1</option>\n",
 			$options{"proto"} eq $1 ? "selected" : "";
 		}
 	&close_tempfile(NETCONFIG);
@@ -733,11 +719,11 @@ if ($_[0] eq "nfs") {
 		    defined($options{"secure"}) ? "dh" :
 		    defined($options{"kerberos"}) ? "krb" : "";
 	print "<td><select name=nfs_auth>\n";
-	printf "<option value=\"\" %s> $text{'solaris_none'}\n",
+	printf "<option value=\"\" %s>$text{'solaris_none'}</option>\n",
 		$nfs_auth eq "" ? "selected" : "";
-	printf "<option value=dh %s> $text{'solaris_des'}\n",
+	printf "<option value=dh %s>$text{'solaris_des'}</option>\n",
 		$nfs_auth eq "dh" ? "selected" : "";
-	printf "<option value=krb %s> $text{'solaris_krb'}\n",
+	printf "<option value=krb %s>$text{'solaris_krb'}</option>\n",
 		$nfs_auth eq "krb" ? "selected" : "";
 	print "</select></td>\n";
 
@@ -783,7 +769,7 @@ if ($_[0] eq "ufs") {
 	print "<td><select name=ufs_onerror>\n";
 	foreach ('panic', 'lock', 'umount', 'repair') {
 		next if ($_ eq "repair" && $gconfig{'os_version'} >= 10);
-		printf "<option value=\"$_\" %s> $_\n",
+		printf "<option value=\"$_\" %s>$_</option>\n",
 		 $options{onerror} eq $_ ||
 		 !defined($options{onerror}) && $_ eq "panic" ? "selected" : "";
 		}
@@ -831,7 +817,7 @@ if ($_[0] eq "ufs") {
 		print "<td nowrap><input size=5 name=ufs_toosoon_time value='$1'>\n";
 		print "<select name=ufs_toosoon_units>\n";
 		foreach $u ('s', 'm', 'h', 'd', 'w', 'y') {
-			printf "<option value=%s %s> %s\n",
+			printf "<option value=%s %s>%s</option>\n",
 				$u, $2 eq $u ? "selected" : "", $text{"solaris_time_$u"};
 			}
 		print "</select></td> </tr>\n";
@@ -906,11 +892,11 @@ if ($_[0] eq "tmpfs") {
 	($tmpsz = $options{size}) =~ s/[A-z]+$//g;
 	print "<input name=tmpfs_size size=6 value=\"$tmpsz\">\n";
 	print "<select name=tmpfs_unit>\n";
-	printf "<option value=m %s> MB\n",
+	printf "<option value=m %s>MB</option>\n",
 		$options{"size"} =~ /m$/ ? "selected" : "";
-	printf "<option value=k %s> kB\n",
+	printf "<option value=k %s>kB</option>\n",
 		$options{"size"} =~ /k$/ ? "selected" : "";
-	printf "<option value=b %s> bytes\n",
+	printf "<option value=b %s>bytes</option>\n",
 		$options{"size"} !~ /(k|m)$/ ? "selected" : "";
 	print "</select></td>\n";
 
@@ -935,7 +921,7 @@ if ($_[0] eq "cachefs") {
 	if (!defined($options{backfstype})) { $options{backfstype} = "nfs"; }
 	foreach (&list_fstypes()) {
 		if ($_ eq "cachefs") { next; }
-		printf "<option value=\"$_\" %s>$_\n",
+		printf "<option value=\"$_\" %s>$_</option>\n",
 			$_ eq $options{backfstype} ? "selected" : "";
 		}
 	print "</select></td>\n";
@@ -960,10 +946,10 @@ if ($_[0] eq "cachefs") {
 
 	print "<tr> <td><b>$text{'solaris_con'}</b></td>\n";
 	print "<td><select name=cfs_con>\n";
-	print "<option value=1> $text{'solaris_period'}\n";
-	printf "<option value=0 %s> $text{'solaris_never'}\n",
+	print "<option value=1>$text{'solaris_period'}</option>\n";
+	printf "<option value=0 %s>$text{'solaris_never'}</option>\n",
 		defined($options{"noconst"}) ? "selected" : "";
-	printf "<option value=2 %s> $text{'solaris_demand'}\n",
+	printf "<option value=2 %s>$text{'solaris_demand'}</option>\n",
 		defined($options{"demandconst"}) ? "selected" : "";
 	print "</select></td>\n";
 
@@ -1089,11 +1075,11 @@ if ($_[0] eq "xmemfs") {
 	($tmpsz = $options{size}) =~ s/[A-z]+$//g;
 	print "<input name=xmemfs_size size=6 value=\"$tmpsz\">\n";
 	print "<select name=xmemfs_unit>\n";
-	printf "<option value=m %s> MB\n",
+	printf "<option value=m %s>MB</option>\n",
 		$options{"size"} =~ /m$/ ? "selected" : "";
-	printf "<option value=k %s> kB\n",
+	printf "<option value=k %s>kB</option>\n",
 		$options{"size"} =~ /k$/ ? "selected" : "";
-	printf "<option value=b %s> bytes\n",
+	printf "<option value=b %s>bytes</option>\n",
 		$options{"size"} !~ /(k|m)$/ ? "selected" : "";
 	print "</select></td>\n";
 

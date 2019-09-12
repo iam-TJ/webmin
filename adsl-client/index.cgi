@@ -7,7 +7,7 @@
 require './adsl-client-lib.pl';
 $vers = &get_pppoe_version(\$out);
 &ui_print_header(undef, $text{'index_title'}, "", "intro", 1, 1, 0,
-	&help_search_link("pppoe", "man", "doc"), undef, undef,
+	&help_search_link("pppoe", "man", "doc", "google"), undef, undef,
 	$vers ? &text('index_version', $vers) : undef);
 
 if (!$vers) {
@@ -59,11 +59,13 @@ else {
 		next if ($i->{'fullname'} !~ /^eth(\d+)$/);
 		printf "<option value='%s' %s>%s\n",
 			$i->{'name'}, $eth eq $i->{'name'} ? "selected" : "",
-			$i->{'name'};
+			$i->{'name'},
+			"</option>";
 		$found++ if ($eth eq $i->{'name'});
 		}
 	printf "<option value='' %s>%s\n",
-		$found ? "" : "selected", $text{'index_other'};
+		$found ? "" : "selected", $text{'index_other'},
+		"</option>";
 	print "</select>\n";
 	printf "<input name=other size=6 value='%s'></td>\n",
 		$found ? "" : $eth;
@@ -127,7 +129,8 @@ else {
 		foreach $f ('NONE', 'STANDALONE', 'MASQUERADE') {
 			printf "<option value=%s %s>%s\n",
 				$f, lc($f) eq lc($fw) ? "selected" : "",
-				$text{'index_fw_'.lc($f)};
+				$text{'index_fw_'.lc($f)},
+				"</option>";
 			}
 		print "</select></td> </tr>\n";
 		}

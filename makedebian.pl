@@ -76,7 +76,7 @@ system("cd $usr_dir && rm -f mount/openbsd-mounts*");
 if ($product eq "webmin") {
 	system("cd $usr_dir && rm -f mount/macos-mounts*");
 	system("cd $usr_dir && rm -f webmin-gentoo-init");
-	system("cd $usr_dir && rm -rf format bsdexports hpuxexports sgiexports zones rbac");
+	system("cd $usr_dir && rm -rf format bsdexports hpuxexports sgiexports zones rbac bsdfdisk");
 	system("cd $usr_dir && rm -rf acl/Authen-SolarisRBAC-0.1*");
 	}
 
@@ -92,7 +92,7 @@ if ($< == 0) {
 $size = int(`du -sk $tmp_dir`);
 
 # Create the control file
-@deps = ( "perl", "libnet-ssleay-perl", "openssl", "libauthen-pam-perl", "libpam-runtime", "libio-pty-perl", "apt-show-versions" );
+@deps = ( "perl", "libnet-ssleay-perl", "openssl", "libauthen-pam-perl", "libpam-runtime", "libio-pty-perl", "apt-show-versions", "unzip", "shared-mime-info" );
 if ($baseproduct eq "webmin") {
 	push(@deps, "python");
 	}
@@ -112,7 +112,7 @@ Provides: $baseproduct
 EOF
 if ($product eq "webmin") {
 	print CONTROL <<EOF;
-Replaces: webmin-adsl, webmin-apache, webmin-bandwidth, webmin-bind, webmin-burner, webmin-cfengine, webmin-cluster, webmin-core, webmin-cpan, webmin-dhcpd, webmin-exim, webmin-exports, webmin-fetchmail, webmin-firewall, webmin-freeswan, webmin-frox, webmin-fsdump, webmin-grub, webmin-heartbeat, webmin-htaccess, webmin-inetd, webmin-jabber, webmin-ldap-netgroups, webmin-ldap-user-simple, webmin-ldap-useradmin, webmin-lilo, webmin-logrotate, webmin-lpadmin, webmin-lvm, webmin-mailboxes, webmin-mon, webmin-mysql, webmin-nis, webmin-openslp, webmin-postfix, webmin-postgresql, webmin-ppp, webmin-pptp-client, webmin-pptp-server, webmin-procmail, webmin-proftpd, webmin-pserver, webmin-quota, webmin-samba, webmin-sarg, webmin-sendmail, webmin-shorewall, webmin-slbackup, webmin-smart-status, webmin-snort, webmin-software, webmin-spamassassin, webmin-squid, webmin-sshd, webmin-status, webmin-stunnel, webmin-updown, webmin-usermin, webmin-vgetty, webmin-webalizer, webmin-wuftpd, webmin-wvdial, webmin-xinetd
+Replaces: webmin-adsl, webmin-apache, webmin-bandwidth, webmin-bind, webmin-burner, webmin-cfengine, webmin-cluster, webmin-core, webmin-cpan, webmin-dhcpd, webmin-exim, webmin-exports, webmin-fetchmail, webmin-firewall, webmin-freeswan, webmin-frox, webmin-fsdump, webmin-grub, webmin-heartbeat, webmin-htaccess, webmin-inetd, webmin-jabber, webmin-ldap-netgroups, webmin-ldap-user-simple, webmin-ldap-useradmin, webmin-lilo, webmin-logrotate, webmin-lpadmin, webmin-lvm, webmin-mailboxes, webmin-mon, webmin-mysql, webmin-nis, webmin-openslp, webmin-postfix, webmin-postgresql, webmin-ppp, webmin-pptp-client, webmin-pptp-server, webmin-procmail, webmin-proftpd, webmin-pserver, webmin-quota, webmin-samba, webmin-sarg, webmin-sendmail, webmin-shorewall, webmin-slbackup, webmin-smart-status, webmin-snort, webmin-software, webmin-spamassassin, webmin-squid, webmin-sshd, webmin-status, webmin-stunnel, webmin-updown, webmin-usermin, webmin-vgetty, webmin-webalizer, webmin-wuftpd, webmin-wvdial, webmin-xinetd, webmin-filemin, webmin-authentic-theme
 Description: web-based administration interface for Unix systems
   Using Webmin you can configure DNS, Samba, NFS, local/remote filesystems
   and more using your web browser.  After installation, enter the URL
@@ -122,7 +122,7 @@ EOF
 	}
 else {
 	print CONTROL <<EOF;
-Replaces: usermin-at, usermin-changepass, usermin-chfn, usermin-commands, usermin-cron, usermin-cshrc, usermin-fetchmail, usermin-forward, usermin-gnupg, usermin-htaccess, usermin-htpasswd, usermin-mailbox, usermin-man, usermin-mysql, usermin-plan, usermin-postgresql, usermin-proc, usermin-procmail, usermin-quota, usermin-schedule, usermin-shell, usermin-spamassassin, usermin-ssh, usermin-tunnel, usermin-updown, usermin-usermount
+Replaces: usermin-at, usermin-changepass, usermin-chfn, usermin-commands, usermin-cron, usermin-cshrc, usermin-fetchmail, usermin-forward, usermin-gnupg, usermin-htaccess, usermin-htpasswd, usermin-mailbox, usermin-man, usermin-mysql, usermin-plan, usermin-postgresql, usermin-proc, usermin-procmail, usermin-quota, usermin-schedule, usermin-shell, usermin-spamassassin, usermin-ssh, usermin-tunnel, usermin-updown, usermin-usermount, usermin-filemin, usermin-authentic-theme
 Description: web-based user account administration interface for Unix systems
   After installation, enter the URL http://localhost:20000/ into your browser
   and login as any user on your system.
@@ -239,7 +239,7 @@ print SCRIPT <<EOF;
 perl <<EOD;
 $maketemp
 EOD
-if [ "\$1" != "upgrade" ]; then
+if [ "\$1" != "upgrade" -a "\$1" != "abort-upgrade" ]; then
 	if [ "\$WEBMIN_PORT\" != \"\" ]; then
 		port=\$WEBMIN_PORT
 	else
@@ -260,7 +260,7 @@ open(SCRIPT, ">$postinstall_file");
 print SCRIPT <<EOF;
 #!/bin/sh
 inetd=`grep "^inetd=" /etc/$baseproduct/miniserv.conf 2>/dev/null | sed -e 's/inetd=//g'`
-if [ "\$1" = "upgrade" ]; then
+if [ "\$1" = "upgrade" -a "\$1" != "abort-upgrade" ]; then
 	# Upgrading the package, so stop the old webmin properly
 	if [ "\$inetd" != "1" ]; then
 		/etc/$baseproduct/stop >/dev/null 2>&1 </dev/null
@@ -307,8 +307,10 @@ fi
 rm -f /var/lock/subsys/$baseproduct
 if [ "$inetd" != "1" ]; then
 	if [ -x "`which invoke-rc.d 2>/dev/null`" ]; then
+		invoke-rc.d $baseproduct stop >/dev/null 2>&1 </dev/null
 		invoke-rc.d $baseproduct start >/dev/null 2>&1 </dev/null
 	else
+		/etc/$baseproduct/stop >/dev/null 2>&1 </dev/null
 		/etc/$baseproduct/start >/dev/null 2>&1 </dev/null
 	fi
 fi
@@ -355,7 +357,7 @@ system("chmod 755 $postinstall_file");
 open(SCRIPT, ">$preuninstall_file");
 print SCRIPT <<EOF;
 #!/bin/sh
-if [ "\$1" != "upgrade" ]; then
+if [ "\$1" != "upgrade" -a "\$1" != "abort-upgrade" ]; then
 	grep root=/usr/share/$baseproduct /etc/$baseproduct/miniserv.conf >/dev/null 2>&1
 	if [ "\$?" = 0 ]; then
 		# Package is being removed, and no new version of webmin
@@ -376,7 +378,7 @@ system("chmod 755 $preuninstall_file");
 open(SCRIPT, ">$postuninstall_file");
 print SCRIPT <<EOF;
 #!/bin/sh
-if [ "\$1" != "upgrade" ]; then
+if [ "\$1" != "upgrade" -a "\$1" != "abort-upgrade" ]; then
 	grep root=/usr/share/$baseproduct /etc/$baseproduct/miniserv.conf >/dev/null 2>&1
 	if [ "\$?" = 0 ]; then
 		# Package is being removed, and no new version of webmin
@@ -426,10 +428,16 @@ Files:
 
 EOF
 close(DSC);
+print "Creating signature deb/${product}_$ver$rel.dsc\n";
 unlink("deb/${product}_$ver$rel.dsc");
-system("gpg --output deb/${product}_$ver$rel.dsc --clearsign deb/${product}_$ver$rel.plain");
-unlink("deb/${product}_$ver$rel.plain");
-print "Wrote source deb/${product}_$ver$rel.dsc\n";
+$ex = system("gpg --output deb/${product}_$ver$rel.dsc --clearsign deb/${product}_$ver$rel.plain");
+if ($ex) {
+	print "Failed to create deb/${product}_$ver$rel.dsc\n";
+	}
+else {
+	unlink("deb/${product}_$ver$rel.plain");
+	print "Wrote source deb/${product}_$ver$rel.dsc\n";
+	}
 
 $dir = "sarge";
 if (-d "/usr/local/webadmin/deb/repository") {
@@ -441,8 +449,10 @@ if (-d "/usr/local/webadmin/deb/repository") {
 	}
 
 # Create PGP signature
+print "Signing sigs/${product}_${ver}${rel}_all.deb-sig.asc\n";
 unlink("sigs/${product}_${ver}${rel}_all.deb-sig.asc");
 system("gpg --armor --output sigs/${product}_${ver}${rel}_all.deb-sig.asc --default-key jcameron\@webmin.com --detach-sig deb/${product}_${ver}${rel}_all.deb");
+print "Wrote sigs/${product}_${ver}${rel}_all.deb-sig.asc\n";
 
 # read_file(file, &assoc, [&order], [lowercase])
 # Fill an associative array with name=value pairs from a file

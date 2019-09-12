@@ -25,6 +25,10 @@ while(<PKGINFO>) {
 			$packages{$i,'epoch'} = $1;
 			$packages{$i,'version'} = $2;
 			}
+		if ($packages{$i,'name'} =~ /^(\S+):(\S+)$/) {
+			$packages{$i,'name'} = $1;
+			$packages{$i,'arch'} = $2;
+			}
 		$i++;
 		}
 	}
@@ -57,7 +61,14 @@ if ($lines[$#lines] !~ /^.[ih]/) {
 	}
 
 # Get full status
-local $out = &backquote_command("dpkg --print-avail $qm 2>&1", 1);
+local $out;
+if (&has_command("apt-cache")) {
+	$out = &backquote_command("apt-cache show $qm 2>&1", 1);
+	$out =~ s/[\0-\177]*\r?\n\r?\n(Package:)/\\1/;	# remove available ver
+	}
+else {
+	$out = &backquote_command("dpkg --print-avail $qm 2>&1", 1);
+	}
 return () if ($? || $out =~ /Package .* is not available/i);
 local @rv = ( $_[0], &alphabet_name($_[0]) );
 push(@rv, $out =~ /Description:\s+([\0-\177]*\S)/i ? $1
@@ -120,7 +131,7 @@ sub installed_file
 {
 local $qm = quotemeta($_[0]);
 local $out = &backquote_command("dpkg --search $qm 2>&1", 1);
-return 0 if ($out =~ /not found/i);
+return 0 if ($out =~ /not\s+found|no\s+path\s+found/i);
 $out =~ s/:\s+\S+\n$//;
 local @pkgin = split(/[\s,]+/, $out);
 local $real = &translate_filename($_[0]);
@@ -195,13 +206,36 @@ if ($?) {
 return undef;
 }
 
-# delete_package(package)
+# delete_options(package)
+# Outputs HTML for package uninstall options
+sub delete_options
+{
+print "<b>$text{'delete_purge'}</b>\n";
+print &ui_yesno_radio("purge", 0),"<br>\n";
+
+if ($update_system eq "apt") {
+	print "<b>$text{'delete_depstoo'}</b>\n";
+	print &ui_yesno_radio("depstoo", 0),"<br>\n";
+	}
+}
+
+# delete_package(package, [&options], version)
 # Totally remove some package
 sub delete_package
 {
 local $qm = quotemeta($_[0]);
 $ENV{'DEBIAN_FRONTEND'} = 'noninteractive';
-local $out = &backquote_logged("dpkg --remove $qm 2>&1 </dev/null");
+local $out;
+if ($_[1]->{'depstoo'}) {
+	# Use apt-get
+	local $flag = $_[1]->{'purge'} ? "--purge" : "";
+	$out = &backquote_logged("apt-get -y autoremove $flag $qm 2>&1 </dev/null");
+	}
+else {
+	# Use dpkg command
+	local $flag = $_[1]->{'purge'} ? "--purge" : "--remove";
+	$out = &backquote_logged("dpkg $flag $qm 2>&1 </dev/null");
+	}
 if ($? || $out =~ /which isn.t installed/i) {
 	return "<pre>$out</pre>";
 	}

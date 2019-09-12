@@ -7,7 +7,9 @@ $access{'perms'} == 1 || &error($text{'cnf_ecannot'});
 &ReadParse();
 
 # Get the mysqld section
-&lock_file($config{'my_cnf'});
+foreach my $l (&get_all_mysqld_files()) {
+	&lock_file($l);
+	}
 $conf = &get_mysql_config();
 ($mysqld) = grep { $_->{'name'} eq 'mysqld' } @$conf;
 $mysqld || &error($text{'cnf_emysqld'});
@@ -57,15 +59,21 @@ if ($fpt || $in{'fpt'}) {
 			[ $in{'fpt'} ]);
 	}
 
-&save_directive($conf, $mysqld, "skip-locking",
-		$in{'skip-locking'} ? [ "" ] : [ ]);
+if ($in{'ilt_def'}) {
+	&save_directive($conf, $mysqld, "innodb_lock_wait_timeout", [ ]);
+	}
+else {
+	$in{'ilt'} =~ /^\d+$/ || &error($text{'cnf_eilt'});
+	&save_directive($conf, $mysqld, "innodb_lock_wait_timeout",
+			[ $in{'ilt'} ]);
+	}
 
 &save_directive($conf, $mysqld, "big-tables",
 		$in{'big-tables'} ? [ "" ] : [ ]);
 
 # Save set variables
 %vars = &parse_set_variables(&find_value("set-variable", $mems));
-foreach $w (@mysql_set_variables, @mysql_number_variables) {
+foreach $w (@mysql_set_variables) {
 	if ($in{$w."_def"}) {
 		delete($vars{$w});
 		}
@@ -80,9 +88,24 @@ foreach $v (keys %vars) {
 	}
 &save_directive($conf, $mysqld, "set-variable", \@sets);
 
+# Save numeric variables
+foreach $w (@mysql_number_variables, @mysql_byte_variables) {
+	if ($in{$w."_def"}) {
+		delete($vars{$w});
+		&save_directive($conf, $mysqld, $w, [ ]);
+		}
+	else {
+		$in{$w} =~ /^\d+[kmgt]?$/i || &error($text{"cnf_e".$w});
+		&save_directive($conf, $mysqld, $w,
+				[ $in{$w}.$in{$w."_units"} ]);
+		}
+	}
+
 # Write out file
-&flush_file_lines($config{'my_cnf'});
-&unlock_file($config{'my_cnf'});
+foreach my $l (&get_all_mysqld_files()) {
+	&flush_file_lines($l);
+	&unlock_file($l);
+	}
 if ($in{'restart'} && &is_mysql_running() > 0) {
 	&stop_mysql();
 	$err = &start_mysql();

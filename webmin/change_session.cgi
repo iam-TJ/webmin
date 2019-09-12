@@ -5,6 +5,7 @@
 require './webmin-lib.pl';
 &ReadParse();
 &error_setup($text{'session_err'});
+&foreign_require("acl");
 
 &lock_file($ENV{'MINISERV_CONFIG'});
 &get_miniserv_config(\%miniserv);
@@ -38,7 +39,8 @@ else {
 $miniserv{'blocklock'} = $in{'blocklock'};
 
 $miniserv{'syslog'} = $in{'syslog'};
-if ($in{'session'} && $ENV{'HTTP_COOKIE'} !~ /sessiontest=1/i) {
+if ($in{'session'} && $ENV{'HTTP_COOKIE'} !~ /sessiontest=1/i &&
+    !$ENV{'HTTP_WEBMIN_SERVERS'}) {
 	&error($text{'session_ecookie'});
 	}
 $miniserv{'session'} = $in{'session'};
@@ -73,6 +75,7 @@ else {
 	delete($miniserv{'passwd_pindex'});
 	}
 $miniserv{'pam_conv'} = $in{'pam_conv'};
+$miniserv{'pam_end'} = $in{'pam_end'};
 if ($in{'cmd_def'}) {
 	delete($gconfig{'passwd_cmd'});
 	}
@@ -93,6 +96,7 @@ if (defined($in{'passwd_mode'})) {
 	$miniserv{'passwd_mode'} = $in{'passwd_mode'};
 	}
 $miniserv{'utmp'} = $in{'utmp'};
+$miniserv{'session_ip'} = $in{'session_ip'};
 &put_miniserv_config(\%miniserv);
 &unlock_file($ENV{'MINISERV_CONFIG'});
 
@@ -117,11 +121,15 @@ else {
 	-r $in{'banner'} || &error($text{'session_ebanner'});
 	$gconfig{'loginbanner'} = $in{'banner'};
 	}
-if ($in{'md5pass'}) {
+if ($in{'md5pass'} == 1) {
 	# MD5 enabled .. but is it supported by this system?
-	&foreign_require("acl", "acl-lib.pl");
 	$need = &acl::check_md5();
 	$need && &error(&text('session_emd5mod', "<tt>$need</tt>"));
+	}
+elsif ($in{'md5pass'} == 2) {
+	# SHA512 enabled .. check support
+	$need = &acl::check_sha512();
+	$need && &error(&text('session_esha512mod', "<tt>$need</tt>"));
 	}
 $gconfig{'md5pass'} = $in{'md5pass'};
 &write_file("$config_directory/config", \%gconfig);

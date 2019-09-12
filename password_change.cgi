@@ -2,7 +2,7 @@
 # password_change.cgi
 # Actually update a user's password by directly modifying /etc/shadow
 
-BEGIN { push(@INC, ".."); };
+BEGIN { push(@INC, "."); };
 use WebminCore;
 
 $ENV{'MINISERV_INTERNAL'} || die "Can only be called by miniserv.pl";
@@ -19,14 +19,16 @@ $in{'new1'} eq $in{'new2'} || &pass_error($text{'password_enew2'});
 if (&foreign_check("acl")) {
 	&foreign_require("acl", "acl-lib.pl");
 	($wuser) = grep { $_->{'name'} eq $in{'user'} } &acl::list_users();
-	if ($wuser->{'pass'} eq 'x') {
-		# A Webmin user, but using Unix authentication
-		$wuser = undef;
-		}
-	elsif ($wuser->{'pass'} eq '*LK*' ||
-	       $wuser->{'pass'} =~ /^\!/) {
-		&pass_error("Webmin users with locked accounts cannot change ".
-		       	    "their passwords!");
+	if ($wuser) {
+		if ($wuser->{'pass'} eq 'x') {
+			# A Webmin user, but using Unix authentication
+			$wuser = undef;
+			}
+		elsif ($wuser->{'pass'} eq '*LK*' ||
+		       $wuser->{'pass'} =~ /^\!/) {
+			&pass_error("Webmin users with locked accounts cannot change ".
+				    "their passwords!");
+			}
 		}
 	}
 if (!$in{'pam'} && !$wuser) {
@@ -190,9 +192,10 @@ else {
 # Change password in Usermin too
 if (&get_product_name() eq 'usermin' &&
     &foreign_check("changepass")) {
-	# XXX remote user??
 	&foreign_require("changepass", "changepass-lib.pl");
 	&changepass::change_mailbox_passwords(
+		$in{'user'}, $in{'old'}, $in{'new1'});
+	&changepass::change_samba_password(
 		$in{'user'}, $in{'old'}, $in{'new1'});
 	}
 
@@ -250,7 +253,7 @@ while ( @_ ) {
 	elsif ($code == PAM_PROMPT_ECHO_OFF()) {
 		# Assume asking for a password (old first, then new)
 		push @res, PAM_SUCCESS();
-		if ($msg =~ /old|current/i) {
+		if ($msg =~ /old|current|login/i) {
 			push @res, $in{'old'};
 			}
 		else {

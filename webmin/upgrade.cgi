@@ -234,12 +234,12 @@ if ($in{'mode'} eq 'rpm') {
 	print "<pre>";
 	if ($in{'force'}) {
 		&proc::safe_process_exec(
-			"rpm -U --force $qfile", 0, 0,
+			"rpm -U --force --nodeps $qfile", 0, 0,
 			STDOUT, undef, 1, 1);
 		}
 	else {
 		&proc::safe_process_exec(
-			"rpm -U --ignoreos --ignorearch $qfile", 0, 0,
+			"rpm -U --ignoreos --ignorearch --nodeps $qfile", 0, 0,
 			STDOUT, undef, 1, 1);
 		}
 	unlink($file) if ($need_unlink);
@@ -271,8 +271,12 @@ elsif ($in{'mode'} eq 'deb') {
 	$ENV{'tempdir'} = $gconfig{'tempdir'};
 	print "<p>",$text{'upgrade_setupdeb'},"<p>\n";
 	print "<pre>";
-	&proc::safe_process_exec("dpkg --install $qfile", 0, 0,
-				 STDOUT, undef, 1, 1);
+	$ENV{'DEBIAN_FRONTEND'} = 'noninteractive';
+	my $cmd = "dpkg --install --force-depends $qfile";
+	if (&has_command("apt-get")) {
+		$cmd = "apt-get install $qfile || $cmd";
+		}
+	&proc::safe_process_exec($cmd, 0, 0, STDOUT, undef, 1, 1);
 	unlink($file) if ($need_unlink);
 	print "</pre>\n";
 	}
@@ -284,7 +288,7 @@ elsif ($in{'mode'} eq 'solaris-pkg' || $in{'mode'} eq 'sun-pkg') {
 	my @p = &foreign_call("software", "file_packages", $file);
 	#
 	# The package name will always include "webmin" in lower case,
-	# but may be preceeded by the source package source ("WS" for the
+	# but may be preceded by the source package source ("WS" for the
 	# Webmin.com package, "SUNW" for the Sun distributed package).
 	# and it could have trailing characters to define a set of items
 	# that are installed separately ("r" for the Sun "root" package,
@@ -354,30 +358,6 @@ elsif ($in{'mode'} eq 'solaris-pkg' || $in{'mode'} eq 'sun-pkg') {
 		"cd $dir && ./setup.sh", 0, 0, STDOUT, undef, 1, 1);
 	&proc::safe_process_exec_logged(
 		"$config_directory/start", 0, 0, STDOUT, undef, 1,1);
-	print "</pre>\n";
-	}
-elsif ($in{'mode'} eq 'caldera') {
-	# Check if it is a Caldera RPM of Webmin
-	$out = `rpm -qp $file`;
-	$out =~ /^webmin-(\d+\.\d+)/ ||
-		&inst_error($text{'upgrade_erpm'});
-	if ($1 <= &get_webmin_version() && !$in{'force'}) {
-		&inst_error(&text('upgrade_eversion', "$1"));
-		}
-	my $wfound = 0;
-	open(OUT, "rpm -qpl $file |");
-	while(<OUT>) {
-		$wfound++ if (/^\/etc\/webmin/);
-		}
-	close(OUT);
-	$wfound || &inst_error($text{'upgrade_ecaldera'});
-
-	# Install the RPM
-	print "<p>",$text{'upgrade_setuprpm'},"<p>\n";
-	print "<pre>";
-	&proc::safe_process_exec("rpm -U --ignoreos --ignorearch '$file'", 0, 0,
-			   STDOUT, undef, 1, 1);
-	unlink($file) if ($need_unlink);
 	print "</pre>\n";
 	}
 elsif ($in{'mode'} eq 'gentoo') {
@@ -532,6 +512,10 @@ else {
 			# Can delete the temporary source directory
 			system("rm -rf \"$extract\"");
 			}
+		&lock_file("$config_directory/config");
+		$gconfig{'upgrade_delete'} = $in{'delete'};
+		&write_file("$config_directory/config", \%gconfig);
+		&unlock_file("$config_directory/config");
 		}
 	}
 &webmin_log("upgrade", undef, undef, { 'version' => $version,
@@ -557,6 +541,16 @@ $updates = &filter_updates($updates, $version);
 if (scalar(@$updates)) {
 	print "<br>",&text('upgrade_updates', scalar(@$updates),
 		"update.cgi?source=0&show=0&missing=0"),"<p>\n";
+	}
+
+# Force refresh of cached updates, in case webmin was included
+if (&foreign_check("system-status")) {
+	&foreign_require("system-status");
+	&system_status::refresh_possible_packages([ "webmin" ]);
+	}
+if (&foreign_check("virtual-server") && @got) {
+	&foreign_require("virtual-server");
+	&virtual_server::refresh_possible_packages([ "webmin" ]);
 	}
 
 &ui_print_footer("", $text{'index_return'});

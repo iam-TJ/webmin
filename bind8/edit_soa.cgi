@@ -1,30 +1,35 @@
 #!/usr/local/bin/perl
 # edit_soa.cgi
 # Display the SOA for an existing master zone
+use strict;
+use warnings;
+our (%access, %in, %text, %config);
 
 require './bind8-lib.pl';
 &ReadParse();
-$zone = &get_zone_name($in{'index'}, $in{'view'});
-$dom = $zone->{'name'};
+my $zone = &get_zone_name_or_error($in{'zone'}, $in{'view'});
+my $dom = $zone->{'name'};
 &can_edit_zone($zone) ||
 	&error($text{'master_ecannot'});
 $access{'params'} || &error($text{'master_esoacannot'});
-$desc = &ip6int_to_net(&arpa_to_ip($dom));
+my $desc = &ip6int_to_net(&arpa_to_ip($dom));
 &ui_print_header($desc, $text{'master_params'}, "",
 		 undef, undef, undef, undef, &restart_links($zone));
 
-@recs = &read_zone_file($zone->{'file'}, $dom);
-foreach $r (@recs) {
+my @recs = &read_zone_file($zone->{'file'}, $dom);
+my $soa;
+my $defttl;
+foreach my $r (@recs) {
 	$soa = $r if ($r->{'type'} eq "SOA");
 	$defttl = $r if ($r->{'defttl'});
 	}
-$v = $soa->{'values'};
+my $v = $soa->{'values'};
 
 # form for editing SOA record
 print &ui_form_start("save_soa.cgi", "post");
 print &ui_hidden("num", $soa->{'num'});
 print &ui_hidden("origin", $dom);
-print &ui_hidden("index", $in{'index'});
+print &ui_hidden("zone", $in{'zone'});
 print &ui_hidden("view", $in{'view'});
 print &ui_table_start($text{'master_params'}, "width=100%", 4);
 
@@ -38,7 +43,7 @@ print &ui_table_row($text{'master_email'},
 	&ui_textbox("email", $v->[1], 30));
 
 # Refresh time
-@u = &extract_time_units($v->[3], $v->[4], $v->[5], $v->[6]);
+my @u = &extract_time_units($v->[3], $v->[4], $v->[5], $v->[6]);
 print &ui_table_row($text{'master_refresh'},
 	&ui_textbox("refresh", $v->[3], 10)." ".
 	&time_unit_choice("refunit", $u[0]));
@@ -59,8 +64,8 @@ print &ui_table_row($text{'master_minimum'},
 	&time_unit_choice("minunit", $u[3]));
 
 # Default TTL
-$ttl = $defttl->{'defttl'} if ($defttl);
-($ttlu) = &extract_time_units($ttl);
+my $ttl = $defttl->{'defttl'} if ($defttl);
+my ($ttlu) = &extract_time_units($ttl);
 print &ui_table_row($text{'master_defttl'},
 	&ui_radio("defttl_def", $defttl ? 0 : 1,
 		  [ [ 1, $text{'default'} ], [ 0, " " ] ])."\n".
@@ -76,6 +81,6 @@ if (!$config{'updserial_on'}) {
 print &ui_table_end();
 print &ui_form_end($access{'ro'} ? [ ] : [ [ undef, $text{'save'} ] ]);
 
-&ui_print_footer("edit_master.cgi?index=$in{'index'}&view=$in{'view'}",
+&ui_print_footer("edit_master.cgi?zone=$in{'zone'}&view=$in{'view'}",
 	$text{'master_return'});
 

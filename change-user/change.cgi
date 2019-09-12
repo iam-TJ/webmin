@@ -8,6 +8,8 @@ require './change-user-lib.pl';
 our (%text, %in, %gconfig, $base_remote_user, %access);
 &ReadParse();
 
+&ui_print_unbuffered_header(undef, $text{'change_title'}, "");
+
 my @users = &acl::list_users();
 my ($user) = grep { $_->{'name'} eq $base_remote_user } @users;
 my $oldtheme = $user->{'theme'};
@@ -74,7 +76,12 @@ if ($access{'pass'} && &can_change_pass($user) && !$in{'pass_def'}) {
 	$user->{'temppass'} = 0;
 	}
 
-&ui_print_unbuffered_header(undef, $text{'change_title'}, "");
+if ($access{'theme'} &&
+    ($newtheme ne $oldtheme || $newoverlay ne $oldoverlay)) {
+        if (defined(&theme_pre_change_theme)) {
+                &theme_pre_change_theme();
+                }
+	}
 
 print "$text{'change_user'}<br>\n";
 &acl::modify_user($user->{'name'}, $user);
@@ -86,6 +93,9 @@ print "$text{'change_done'}<p>\n";
 
 if ($access{'theme'} &&
     ($newtheme ne $oldtheme || $newoverlay ne $oldoverlay)) {
+	if (defined(&theme_post_change_theme)) {
+		&theme_post_change_theme();
+		}
 	print "$text{'change_redirect'}<br>\n";
 	print &js_redirect("/", "top");
 	print "$text{'change_done'}<p>\n";

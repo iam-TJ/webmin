@@ -137,6 +137,7 @@ if ($in{'new'} && !$access{'gmultiple'}) {
 
 $pfx = $config{'md5'} == 1 || $config{'md5'} == 3 ? "{md5}" :
        $config{'md5'} == 4 ? "{ssha}" :
+       $config{'md5'} == 5 ? "{sha}" :
        $config{'md5'} == 0 ? "{crypt}" : "";
 if ($in{'passmode'} == 0) {
 	$pass = "";
@@ -241,12 +242,15 @@ if (!$in{'new'}) {
 	elsif ($olddesc) {
 		push(@rprops, "description");
 		}
+	if (!$pass && $ginfo->get_value("userPassword")) {
+		push(@rprops, "userPassword");
+		}
 
 	# Update group properties
 	$rv = $ldap->modify($newdn, replace =>
 			    { "gidNumber" => $gid,
 			      "cn" => $group,
-			      "userPassword" => $pass,
+			      $pass ? ( "userPassword" => $pass ) : ( ),
 			      @members ? ( "memberUid" => \@members ) : ( ),
 			      @props,
 			      "objectClass" => \@classes },
@@ -301,7 +305,7 @@ else {
 	$rv = $ldap->add($newdn, attr =>
 			 [ "cn" => $group,
 			   "gidNumber" => $gid,
-			   "userPassword" => $pass,
+			   $pass ? ( "userPassword" => $pass ) : ( ),
 			   @members ? ( "memberUid" => \@members ) : ( ),
 			   @props,
 			   "objectClass" => \@classes ] );

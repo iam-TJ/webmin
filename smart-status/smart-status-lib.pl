@@ -34,6 +34,9 @@ sub list_smart_disks_partitions
 if (&foreign_check("fdisk")) {
 	return &list_smart_disks_partitions_fdisk();
 	}
+elsif (&foreign_check("bsdfdisk")) {
+	return &list_smart_disks_partitions_bsdfdisk();
+	}
 elsif (&foreign_check("mount")) {
 	return &list_smart_disks_partitions_fstab();
 	}
@@ -54,7 +57,7 @@ my $twcount = 0;
 foreach my $d (sort { $a->{'device'} cmp $b->{'device'} }
 		    &fdisk::list_disks_partitions()) {
 	if (($d->{'type'} eq 'scsi' || $d->{'type'} eq 'raid') &&
-	    $d->{'model'} =~ /3ware|amcc/i) {
+	    $d->{'model'} =~ /3ware|amcc|9750/i) {
 		# A 3ware hardware RAID device.
 
 		# First find the controllers.
@@ -75,6 +78,9 @@ foreach my $d (sort { $a->{'device'} cmp $b->{'device'} }
 			if (!-r $dev) {
 				$dev = "/dev/twe".$cidx;
 				}
+			if (!-r $dev) {
+				$dev = "/dev/twl".$cidx;
+				}
 			push(@rv, { 'device' => $dev,
 				    'prefix' => $dev,
 				    'desc' => '3ware physical disk unit '.
@@ -87,6 +93,22 @@ foreach my $d (sort { $a->{'device'} cmp $b->{'device'} }
 			$i++;
 			}
 		$twcount++;
+		}
+	elsif (($d->{'type'} eq 'scsi' || $d->{'type'} eq 'raid') &&
+	       $d->{'model'} =~ /LSI/i && $d->{'model'} !~ /9750/) {
+		# A LSI megaraid device.
+		local @units = &list_megaraid_subdisks(0);
+
+		foreach my $i (@units) {
+			push(@rv, { 'device' => $d->{'device'},
+				    'prefix' => $d->{'device'},
+				    'desc' => 'LSI Array '.$i->[1].' physical disk ID '.$i->[0],
+				    'type' => 'scsi',
+				    'subtype' => 'sat+megaraid',
+				    'subdisk' => $i->[0],
+				    'id' => $d->{'id'},
+				  });
+			}
 		}
 	elsif ($d->{'device'} =~ /^\/dev\/cciss\/(.*)$/) {
 		# HP Smart Array .. add underlying disks
@@ -111,6 +133,25 @@ return sort { $a->{'device'} cmp $b->{'device'} ||
 	      $a->{'subdisk'} <=> $b->{'subdisk'} } @rv;
 }
 
+=head2 list_megaraid_subdisks(adapter)
+
+Returns a list, each element of which is a unit, controller and list of subdisks
+
+=cut
+sub list_megaraid_subdisks
+{
+local ($adap) = @_;
+local $out = &backquote_command("megacli -pdlist -a$adap");
+return () if ($?);
+my @rv;
+foreach my $l (split(/\r?\n/, $out)) {
+	if ($l =~ /^Device\sId:\s(\d+)$/) {
+		push(@rv, [ $1, $adap, [ ] ]);
+		}
+	}
+return @rv;
+}
+
 =head2 list_3ware_subdisks(controller)
 
 Returns a list, each element of which is a unit, controller and list of subdisks
@@ -119,7 +160,7 @@ Returns a list, each element of which is a unit, controller and list of subdisks
 sub list_3ware_subdisks
 {
 local ($ctrl) = @_;
-local $out = &backquote_command("tw_cli info $ctrl");
+local $out = &backquote_command("tw_cli info $ctrl 2>/dev/null");
 return () if ($?);
 my @rv;
 foreach my $l (split(/\r?\n/, $out)) {
@@ -144,7 +185,7 @@ Returns a list of 3ware controllers, each of which is just a string like c0
 =cut
 sub list_3ware_controllers
 {
-local $out = &backquote_command("tw_cli show");
+local $out = &backquote_command("tw_cli show 2>/dev/null");
 return () if ($?);
 my @rv;
 foreach my $l (split(/\r?\n/, $out)) {
@@ -185,7 +226,7 @@ sub list_smart_disks_partitions_fstab
 &foreign_require("mount");
 my @rv;
 foreach my $m (&mount::list_mounted(1)) {
-	if ($m->[1] =~ /^(\/dev\/(da|ad)([0-9]+))/ &&
+	if ($m->[1] =~ /^(\/dev\/(da|ad|ada)([0-9]+))/ &&
 	    $m->[2] ne 'cd9660') {
 		# FreeBSD-style disk name
 		push(@rv, { 'device' => $1,
@@ -211,6 +252,25 @@ my %done;
 return @rv;
 }
 
+=head2 list_smart_disks_partitions_bsdfdisk
+
+Returns a sorted list of disks that can support SMART, using the FreeBSD
+fdisk module
+
+=cut
+sub list_smart_disks_partitions_bsdfdisk
+{
+&foreign_require("bsdfdisk");
+local @rv;
+foreach my $d (sort { $a->{'device'} cmp $b->{'device'} }
+		    &bsdfdisk::list_disks_partitions()) {
+	if ($d->{'type'} eq 'scsi' || $d->{'type'} eq 'ide') {
+		push(@rv, $d);
+		}
+	}
+return sort { $a->{'device'} cmp $b->{'device'} } @rv;
+}
+
 =head2 get_drive_status(device-name, [&drive])
 
 Returns a hash reference containing the status of some drive
@@ -219,6 +279,12 @@ Returns a hash reference containing the status of some drive
 sub get_drive_status
 {
 local ($device, $drive) = @_;
+if ($device =~ /^(\/dev\/nvme\d+)n\d+$/) {
+	# For NVME drives, try the underlying device first
+	local $nd = $1;
+	local $st = &get_drive_status($nd, $drive);
+	return $st if ($st->{'support'} && $st->{'enabled'});
+	}
 local %rv;
 local $qd = quotemeta($device);
 local $extra_args = &get_extra_args($device, $drive);
@@ -250,6 +316,13 @@ if (&get_smart_version() > 5.0) {
 	else {
 		# Not enabled!
 		$rv{'enabled'} = 0;
+		}
+	if ($device =~ /^\/dev\/nvme/ &&
+	    $out =~ /(Model\s+Number|Device\s+Model):/i) {
+		# For NVME devices, surprisingly smart support/enabled info is
+		# not shown. So assume they work
+		$rv{'support'} = 1;
+		$rv{'enabled'} = 1;
 		}
 	if (!$rv{'support'} || !$rv{'enabled'}) {
 		# No point checking further!
@@ -305,6 +378,18 @@ if ($config{'attribs'}) {
 	open(OUT, "$config{'smartctl'} $extra_args -a $qd |");
 	while(<OUT>) {
 		s/\r|\n//g;
+		if (/Model\s+Family:\s+(.*)/i) {
+			$rv{'family'} = $1;
+			}
+		elsif (/Device\s+Model:\s+(.*)/i) {
+			$rv{'model'} = $1;
+			}
+		elsif (/Serial\s+Number:\s+(.*)/i) {
+			$rv{'serial'} = $1;
+			}
+		elsif (/User\s+Capacity:\s+(.*)/i) {
+			$rv{'capacity'} = $1;
+			}
 		if (/^\((\s*\d+)\)(.*)\s(0x\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)/) {
 			# An old-style vendor attribute
 			$doneknown = 1;
@@ -313,7 +398,7 @@ if ($config{'attribs'}) {
 		elsif (/^\s*(\d+)\s+(\S+)\s+(0x\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)/) {
 			# A new-style vendor attribute
 			$doneknown = 1;
-			push(@attribs, [ $2, $10 ]);
+			push(@attribs, [ $2, $10, undef, $4 ]);
 			$attribs[$#attribs]->[0] =~ s/_/ /g;
 			}
 		elsif (/^(\S.*\S):\s+\(\s*(\S+)\)\s*(.*)/ && !$doneknown) {

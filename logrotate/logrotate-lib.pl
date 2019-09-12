@@ -49,7 +49,7 @@ open($fh, $file);
 while(<$fh>) {
 	s/\r|\n//g;
 	s/#.*$//;
-	if (/^\s*(.*){\s*$/) {
+	if (/^\s*(.*)\{\s*$/) {
 		# Start of a section
 		push(@name, &split_words($1));
 		$section = { 'name' => [ @name ],
@@ -96,7 +96,6 @@ while(<$fh>) {
 				map { $_->{'index'} += @$addto } @$inc;
 				push(@$addto, @$inc);
 				}
-			closedir(DIR);
 			}
 		else {
 			# A single file
@@ -349,11 +348,17 @@ local $out = &backquote_logged("$config{'logrotate'} -f $temp 2>&1");
 return ($?, $out);
 }
 
-# get_add_file()
+# get_add_file([filename])
 # Returns the file to which new logrotate sections should be added
 sub get_add_file
 {
-if ($config{'add_file'}) {
+local ($filename) = @_;
+$filename =~ s/\*/ALL/g;
+if ($config{'add_file'} && -d $config{'add_file'} && $filename) {
+	# Adding to a new file in a directory
+	return "$config{'add_file'}/$filename.conf";
+	}
+elsif ($config{'add_file'} && !-d $config{'add_file'}) {
 	# Make sure file is valid
 	local ($conf, $lnum, $files) = &get_config();
 	if (&indexof($config{'add_file'}, @$files) >= 0) {

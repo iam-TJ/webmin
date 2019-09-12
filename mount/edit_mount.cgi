@@ -38,24 +38,22 @@ else {
 $msave = ($mmodes[0]==0 ? 0 : $msave);
 $mnow = ($mmodes[1]==0 ? $msave : $mnow);
 
-print "<form action=\"save_mount.cgi\">\n";
-print "<input name=return type=hidden value='$in{'return'}'>\n";
+# Start of the form
+print &ui_form_start("save_mount.cgi", "post");
+print &ui_hidden("return", $in{'return'});
 if (!$newm) {
-	print "<input type=hidden name=old value=\"$in{index}\">\n";
-	print "<input type=hidden name=temp value=\"$in{temp}\">\n";
-
-	print "<input type=hidden name=oldmnow value=$mnow>\n";
-	print "<input type=hidden name=oldmsave value=$msave>\n";
+	print &ui_hidden("old", $in{'index'});
+	print &ui_hidden("temp", $in{'temp'});
+	print &ui_hidden("oldmnow", $mnow);
+	print &ui_hidden("oldmsave", $msave);
 	}
-print "<input type=hidden name=type value=\"$type\">\n";
-print "<table border width=100%>\n";
-print "<tr $tb> <td><b>",&text('edit_header', &fstype_name($type)),
-      "</b></td> </tr>\n";
-print "<tr $cb> <td><table>\n";
+print &ui_hidden("type", $type);
+print &ui_table_start(&text('edit_header', &fstype_name($type)),
+		      "width=100%", 2, [ "width=20%" ]);
 
-print "<tr> <td>",&hlink("<b>$text{'edit_dir'}</b>", "edit_dir"), "</td>\n";
+# Mount point
 if ($type eq "swap") {
-	print "<td colspan=3><i>$text{'edit_swap'}</i></b>\n";
+	$mfield = "<i>$text{'edit_swap'}</i>";
 	}
 else {
 	local $dir = $minfo[0] || $in{'newdir'};
@@ -63,152 +61,94 @@ else {
 		# Make relative to first allowed dir
 		$dir =~ s/^$access_fs[0]\///;
 		}
-	print "<td colspan=3><input size=30 name=directory value=\"",
-		$dir,"\">\n";
+	$mfield = &ui_textbox("directory", $dir, 40);
 	if ($access{'browse'}) {
-		print &file_chooser_button("directory", 1);
+		$mfield .= " ".&file_chooser_button("directory", 1);
 		}
 	}
-if (!$newm && (($size,$free) = &disk_space($type, $minfo[0]))) {
-	print "&nbsp;" x 8;
-	printf "<b>$text{'edit_size'}</b> <i>%s</i> / \n",
-		&nice_size($size*1024);
-	printf "<b>$text{'edit_free'}</b> <i>%s</i></td>\n",
-		&nice_size($free*1024);
+print &ui_table_row(&hlink($text{'edit_dir'}, "edit_dir"),
+		    $mfield);
+
+# Total and free space
+if (!$newm) {
+	($size,$free) = &disk_space($type, $minfo[0]);
+	if ($size) {
+		print &ui_table_row($text{'edit_usage'},
+			"<b>$text{'edit_size'}</b> ".
+			&nice_size($size*1024)." ".
+			"<b>$text{'edit_free'}</b> ".
+			&nice_size($free*1024));
+		}
 	}
-print "</td> </tr>\n";
 
 # Show save mount options
-if ($mmodes[0] != 0 && !$access{'simple'}) {
-	print "<tr> <td><b>$text{'edit_savemount'}</b></td> <td colspan=3>\n";
-	printf "<input type=radio name=msave value=2 %s> $text{'edit_boot'}\n",
-		$minfo[5] eq "yes" || $newm ? "checked" : "";
+if ($mmodes[0] != 0) {
+	@opts = ( [ 2, $text{'edit_boot'} ] );
 	if ($mmodes[0] != 1) {
-		printf "<input type=radio name=msave value=1 %s> %s\n",
-			$minfo[5] eq "no" ? "checked" : "", $text{'edit_save'};
+		push(@opts, [ 1, $text{'edit_save'} ]);
 		}
 	if (!$newm && $mmodes[1] == 0) {
-		printf "<input type=radio name=msave value=0 %s> %s\n",
-			$minfo[5] eq "" && !$newm ? "checked" : "",
-			$text{'edit_delete'};
+		push(@opts, [ 0, $text{'edit_delete'} ]);
 		}
 	else {
-		printf "<input type=radio name=msave value=0 %s> %s\n",
-			$minfo[5] eq "" && !$newm ? "checked" : "",
-			$text{'edit_dont'};
+		push(@opts, [ 0, $text{'edit_dont'} ]);
 		}
-	print "</td> </tr>\n";
+	print &ui_table_row($text{'edit_savemount'},
+		&ui_radio("msave", $minfo[5] eq "yes" || $newm ? 2 :
+				   $minfo[5] eq "no" ? 1 :
+				   $minfo[5] eq "" && !$newm ? 0 : undef,
+			  \@opts));
 	}
 
 # Show mount now options
-if ($mmodes[1] == 1 && ($mmodes[3] == 0 || !$mnow) && !$access{'simple'}) {
-	print "<tr> <td><b>$text{'edit_now'}</b></td> <td colspan=3>\n";
-	printf "<input type=radio name=mmount value=1 %s> %s\n",
-		$mnow || $newm ? "checked" : "", $text{'edit_mount'};
-	if ($mmodes[0] == 0) {
-		printf "<input type=radio name=mmount value=0 %s> %s\n",
-			$mnow || $newm ? "" : "checked", $text{'edit_delete'};
-		}
-	else {
-		printf "<input type=radio name=mmount value=0 %s> %s\n",
-			$mnow || $newm ? "" : "checked",
-			$newm ? $text{'edit_dont2'} : $text{'edit_unmount'};
-		}
-	print "</td> </tr>\n";
+if ($mmodes[1] == 1 && ($mmodes[3] == 0 || !$mnow)) {
+	print &ui_table_row($text{'edit_now'},
+		&ui_radio("mmount", $mnow || $newm ? 1 : 0,
+			  [ [ 1, $text{'edit_mount'} ],
+			    [ 0, $mmodes[0] == 0 ? $text{'edit_delete'} :
+				 $newm ? $text{'edit_dont2'} :
+					 $text{'edit_unmount'} ] ]));
 	}
 
 # Show fsck order options
-if ($mmodes[2] && !$access{'simple'}) {
-	print "<tr> <td><b>$text{'edit_order'}</b></td>\n";
-	printf "<td colspan=3><input type=radio name=order value=0 %s> %s\n",
-		$newm || $minfo[4] == 0 ? "checked" : "", $text{'no'};
-	printf "<input type=radio name=order value=1 %s> %s\n",
-		$minfo[4] == 1 ? "checked" : "", $text{'edit_first'};
-	printf "<input type=radio name=order value=%s %s> %s</td\n",
-		$minfo[4] > 1 ? $minfo[4] : 2 , $minfo[4] > 1 ? "checked" : "",
-		$text{'edit_second'};
-	print "</tr>\n";
+if ($mmodes[2]) {
+	$second = $minfo[4] > 1 ? $minfo[4] : 2;
+	print &ui_table_row($text{'edit_order'},
+		&ui_radio("order", $newm || $minfo[4] == 0 ? 0 :
+				   $minfo[4] == 1 ? 1 :
+				   $second,
+			  [ [ 0, $text{'no'} ],
+			    [ 1, $text{'edit_first'} ],
+			    [ $second, $text{'edit_second'} ] ]));
 	}
 
 # Show filesystem-specific mount source
 &generate_location($type, $minfo[1] || $in{'newdev'});
-print "</table></td> </tr></table><p>\n";
+print &ui_table_end();
 
-if (!$access{'simple'} || !defined($access{'opts'}) ||
-    $access{'opts'} =~ /$type/) {
+if (!defined($access{'opts'}) || $access{'opts'} =~ /$type/) {
 	# generate mount options
-	if ($in{'advanced'}) {
-		$access{'simopts'} = 0;
-		print &ui_hidden("nosimopts", 1),"\n";
-		}
-	print "<table border width=100%>\n";
-	print "<tr $tb> <td><b>$text{'edit_adv'}</b></td> </tr>\n";
-	print "<tr $cb> <td><table width=100%>\n";
+	print &ui_table_start($text{'edit_adv'}, "width=100%", 4,
+			      [ "width=20%" ]);
 	&parse_options($type, $minfo[3]);
 	&generate_options($type, $newm);
-	if ($access{'simopts'}) {
-		print "<tr> <td colspan=4>",
-			&ui_submit($text{'edit_advanced'}, "advanced"),
-			"</td> </tr>\n";
-		}
-	print "</table></td> </tr></table>\n";
+	print &ui_table_end();
 	}
 
-if ($access{'simple'}) {
-	# buttons for mounting/unmounting
-	print "<table width=100%><tr>\n";
-	if ($newm) {
-		print "<td><input type=submit ",
-		      "value=\"$text{'edit_create'}\"></td>";
-		}
-	elsif ($msave && $mnow) {
-		print "<td width=33%><input type=submit ",
-		      "value=\"$text{'edit_save_apply'}\"></td>\n";
-		if ($mmodes[1]) {
-			print "<td align=center width=33%><input type=submit ",
-			   "value=\"$text{'edit_umount'}\" name=umount></td>\n";
-			}
-		print "<td align=right width=33%><input type=submit ",
-		      "value=\"$text{'edit_del_umount'}\" name=delete></td>\n";
-		}
-	elsif ($msave) {
-		print "<td width=33%><input type=submit ",
-		      "value=\"$text{'save'}\"></td>\n";
-		print "<td align=center width=33%><input type=submit ",
-		      "value=\"$text{'edit_mount'}\" name=mount></td>\n";
-		print "<td align=right width=33%><input type=submit ",
-		      "value=\"$text{'edit_delete'}\" name=delete></td>\n";
-		}
-	else {
-		print "<td width=33%><input type=submit ",
-		      "value=\"$text{'save'}\"></td>\n";
-		if ($mmodes[0]) {
-			print "<td align=middle width=33%><input type=submit ",
-			      "value=\"$text{'edit_perm'}\" name=perm></td>\n";
-			}
-		print "<td align=right width=33%><input type=submit ",
-		      "value=\"$text{'edit_umount'}\" name=umount></td>\n";
-		}
-	print "</tr></table></form>\n";
+# Save and other buttons
+if ($newm) {
+	print &ui_form_end([ [ undef, $text{'create'} ] ]);
+	}
+elsif ($mnow && $minfo[2] ne "swap") {
+	&foreign_require("proc");
+	print &ui_hidden("lsoffs", $minfo[0]);
+	print &ui_form_end([ [ undef, $text{'save'} ],
+			     $proc::has_fuser_command ?
+				( [ 'lsof', $text{'edit_list'} ] ) : ( ) ]);
 	}
 else {
-	# Save and other buttons
-	print "<table width=100%><tr>\n";
-	if ($newm) {
-		print "<td><input type=submit value=\"$text{'create'}\"></td>";
-		}
-	elsif ($mnow && $minfo[2] ne "swap") {
-		print "<td><input type=submit value=\"$text{'save'}\"></td>\n";
-		print "</form><form action=../proc/index_search.cgi>\n";
-		print "<input type=hidden name=mode value=3>\n";
-		print "<input type=hidden name=fs value=$minfo[0]>\n";
-		print "<td align=right><input type=submit ",
-		      "value=\"$text{'edit_list'}\"></td>\n";
-		}
-	else {
-		print "<td><input type=submit value=\"$text{'save'}\"></td>";
-		}
-	print "</tr></table></form>\n";
+	print &ui_form_end([ [ undef, $text{'save'} ] ]);
 	}
+
 &ui_print_footer($in{'return'}, $text{'index_return'});
 

@@ -8,7 +8,7 @@ $conf = &get_config();
 @sources = &find("source", $conf);
 @links = ( &select_all_link("d"),
 	   &select_invert_link("d"),
-	   "<a href='edit_source.cgi?new=1'>$text{'sources_add'}</a>" );
+	   &ui_link("edit_source.cgi?new=1",$text{'sources_add'}) );
 if (@sources) {
 	@tds = ( "width=5" );
 	print &ui_form_start("delete_sources.cgi", "post");
@@ -20,7 +20,7 @@ if (@sources) {
 	foreach $f (@sources) {
 		$desc = &nice_source_desc($f);
 		print &ui_checked_columns_row([
-			"<a href='edit_source.cgi?name=$f->{'value'}'>$f->{'value'}</a>",
+			&ui_link("edit_source.cgi?name=$f->{'value'}",$f->{'value'}),
 			$desc || "<i>$text{'sources_none2'}</i>",
 			], \@tds, "d", $f->{'value'});
 		}

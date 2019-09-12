@@ -6,7 +6,7 @@ require './cluster-copy-lib.pl';
 
 @links = ( &select_all_link("d"),
 	   &select_invert_link("d"),
-	   "<a href='edit.cgi?new=1'>$text{'index_add'}</a>" );
+	   &ui_link("edit.cgi?new=1",$text{'index_add'}) );
 
 # Get and sort jobs
 @jobs = &list_copies();
@@ -49,12 +49,12 @@ if (@jobs) {
 			$files = join(", ", @files);
 			}
 		print &ui_checked_columns_row(
-			[ "<a href='edit.cgi?id=$j->{'id'}'>$files</a>",
+			[ &ui_link("edit.cgi?id=$j->{'id'}",$files),
 			  $servers,
 			  $j->{'sched'} ?
 				&text('index_when', &cron::when_text($j)) :
 				$text{'no'},
-			  "<a href='exec.cgi?id=$j->{'id'}'>$text{'index_exec'}</a>",
+			  &ui_link("exec.cgi?id=$j->{'id'}",$text{'index_exec'}),
 			], \@tds, "d", $j->{'id'});
 		}
 	print &ui_columns_end();

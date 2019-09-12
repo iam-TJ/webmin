@@ -9,9 +9,9 @@ sub acl_security_form
 print "<tr> <td valign=top><b>$text{'acl_avail'}</b></td>\n";
 print "<td><select name=avail rows=6 multiple>\n";
 local %avail = map { $_, 1 } split(/,/, $_[0]->{'avail'});
-foreach $a ('white', 'score', 'report', 'user', 'header', 'setup', 'procmail',
-	    'db', 'awl') {
-	printf "<option value=%s %s>%s\n",
+foreach $a ('white', 'score', 'report', 'user', 'header', 'priv', 'setup', 'procmail',
+	    'amavisd', 'db', 'awl', 'manual') {
+	printf "<option value=%s %s>%s</option>\n",
 		$a, $avail{$a} ? "selected" : "", $text{$a."_title"};
 	}
 print "</select></td> </tr>\n";

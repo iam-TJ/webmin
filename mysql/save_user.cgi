@@ -19,39 +19,60 @@ else {
 		&error($text{'user_euser'});
 	$in{'host_def'} || $in{'host'} =~ /^\S+$/ ||
 		&error($text{'user_ehost'});
+	if ($in{'mysqlpass_mode'} == 0 && $in{'mysqlpas'} =~ /\\/) {
+		&error($text{'user_eslash'});
+		}
 
-	map { $perms[$_]++ } split(/\0/, $in{'perms'});
+	%perms = map { $_, 1 } split(/\0/, $in{'perms'});
 	@desc = &table_structure($master_db, 'user');
+	%fieldmap = map { $_->{'field'}, $_->{'index'} } @desc;
 	$host = $in{'host_def'} ? '%' : $in{'host'};
 	$user = $in{'mysqluser_def'} ? '' : $in{'mysqluser'};
+	@pfields = map { $_->[0] } &priv_fields('user');
+	my @ssl_field_names = &ssl_fields();
+	my @ssl_field_values = map { '' } @ssl_field_names;
+	my @other_field_names = &other_user_fields();
+	my @other_field_values = map { '' } @other_field_names;
 	if ($in{'new'}) {
 		# Create a new user
-		for($i=3; $i<=&user_priv_cols()+3-1; $i++) {
-			push(@yesno, $perms[$i] ? "'Y'" : "'N'");
-			}
-		$sql = sprintf "insert into user (%s) values ('%s', '%s', '', %s)",
-			join(",", map { $desc[$_]->{'field'} } (0 .. &user_priv_cols()+3-1)),
+		$sql = "insert into user (host, user, ".
+		       join(", ", @pfields, @ssl_field_names,
+				  @other_field_names).
+		       ") values (?, ?, ".
+		       join(", ", map { "?" } (@pfields, @ssl_field_names,
+					       @other_field_names)).")";
+		&execute_sql_logged($master_db, $sql,
 			$host, $user,
-			join(",", @yesno);
+			(map { $perms{$_} ? 'Y' : 'N' } @pfields),
+			@ssl_field_values, @other_field_values);
 		}
 	else {
 		# Update existing user
-		for($i=3; $i<=&user_priv_cols()+3-1; $i++) {
-			push(@yesno, $desc[$i]->{'field'}."=".
-				     ($perms[$i] ? "'Y'" : "'N'"));
-			}
-		$sql = sprintf "update user set host = '%s', user = '%s', ".
-			       "%s where user = '%s' and host = '%s'",
-		    $host, $user,
-		    join(" , ", @yesno), $in{'olduser'}, $in{'oldhost'};
+		$sql = "update user set host = ?, user = ?, ".
+		       join(", ",map { "$_ = ?" } @pfields).
+		       " where host = ? and user = ?";
+		&execute_sql_logged($master_db, $sql,
+			$host, $user,
+			(map { $perms{$_} ? 'Y' : 'N' } @pfields),
+			$in{'oldhost'}, $in{'olduser'});
 		}
-	&execute_sql_logged($master_db, $sql);
+	&execute_sql_logged($master_db, 'flush privileges');
+
+	# Update the password using the correct syntax for the mysql version
+	($ver, $variant) = &get_remote_mysql_variant();
 	if ($in{'mysqlpass_mode'} == 0) {
 		$esc = &escapestr($in{'mysqlpass'});
-		&execute_sql_logged($master_db,
-			"update user set password = $password_func('$esc') ".
-			"where user = ? and host = ?",
-			$user, $host);
+		if ($variant eq "mysql" &&
+		    &compare_version_numbers($ver, "8") >= 0) {
+			&execute_sql_logged($master_db,
+				"set password for '".$user."'\@'".$host."' = ".
+				"'$esc'");
+			}
+		else {
+			&execute_sql_logged($master_db,
+				"set password for '".$user."'\@'".$host."' = ".
+				"$password_func('$esc')");
+			}
 		}
 	elsif ($in{'mysqlpass_mode'} == 2) {
 		&execute_sql_logged($master_db,
@@ -63,7 +84,8 @@ else {
 	# Save various limits
 	foreach $f ('max_user_connections', 'max_connections',
 		    'max_questions', 'max_updates') {
-		next if ($mysql_version < 5 || !defined($in{$f.'_def'}));
+		next if (&compare_version_numbers($ver, 5) < 0 ||
+			 !defined($in{$f.'_def'}));
 		$in{$f.'_def'} || $in{$f} =~ /^\d+$/ ||
 		       &error($text{'user_e'.$f});
 		&execute_sql_logged($master_db,
@@ -73,11 +95,17 @@ else {
 		}
 
 	# Set SSL fields
-	if ($mysql_version >= 5 && defined($in{'ssl_type'})) {
+	if (&compare_version_numbers($ver, 5) >= 0 &&
+	    defined($in{'ssl_type'}) &&
+	    (!$in{'new'} || $in{'ssl_type'} || $in{'ssl_cipher'})) {
 		&execute_sql_logged($master_db,
 			"update user set ssl_type = ? ".
 			"where user = ? and host = ?",
 			$in{'ssl_type'}, $user, $host);
+		&execute_sql_logged($master_db,
+			"update user set ssl_cipher = ? ".
+			"where user = ? and host = ?",
+			$in{'ssl_cipher'}, $user, $host);
 		}
 	}
 &execute_sql_logged($master_db, 'flush privileges');

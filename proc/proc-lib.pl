@@ -66,12 +66,7 @@ local @links;
 foreach $l ("tree", "user", "size", "cpu", ($has_zone ? ("zone") : ()),
 	    "search", "run") {
 	next if ($l eq "run" && !$access{'run'});
-	local $link;
-	if ($l ne $_[0]) { $link .= "<a href=index_$l.cgi>"; }
-	else { $link .= "<b>"; }
-	$link .= $text{"index_$l"};
-	if ($l ne $_[0]) { $link .= "</a>"; }
-	else { $link .= "</b>"; }
+	my $link = ( $l ne $_[0] ? &ui_link("index_".$l.".cgi", $text{"index_$l"}) : "<b>".$text{"index_$l"}."</b>" );
 	push(@links, $link);
 	}
 print &ui_links_row(\@links);
@@ -533,11 +528,13 @@ else {
 	}
 }
 
-# can_view_process(user)
+# can_view_process(&process)
 # Returns 1 if processes belong to this user can be seen
 sub can_view_process
 {
-local ($user) = @_;
+local ($p) = @_;
+return 0 if ($p->{'pid'} == $$ && $config{'hide_self'});
+local $user = $p->{'user'};
 if ($hide{$user}) {
 	return 0;
 	}
@@ -641,6 +638,22 @@ elsif ($out =~ /up\s+(\d+)\s+min/) {
 	}
 else {
 	return ( );
+	}
+}
+
+# format_stime(&proc)
+# Returns the process start time in human-readable format
+sub format_stime
+{
+my ($p) = @_;
+if (!$p->{'_stime_unix'}) {
+	return $p->{'_stime'}
+	}
+elsif (time() - $p->{'_stime_unix'} > 86400) {
+	return &make_date($p->{'_stime_unix'}, 1);
+	}
+else {
+	return &make_date($p->{'_stime_unix'});
 	}
 }
 

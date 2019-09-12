@@ -8,7 +8,14 @@ do 'package-updates-lib.pl';
 sub parse_webmin_log
 {
 my ($user, $script, $action, $type, $object, $p) = @_;
-if ($action eq 'update') {
+if ($type eq 'repos') {
+	return &text('log_'.$action.'_repos', $object);
+	}
+elsif ($type eq 'repo') {
+	return &text('log_'.$action.'_repo',
+		     "<tt>".&html_escape($object)."</tt>");
+	}
+elsif ($action eq 'update') {
 	return &text('log_update', $object);
 	}
 elsif ($action eq 'sched') {

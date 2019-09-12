@@ -1,7 +1,6 @@
 #!/usr/local/bin/perl
 # Show a form in a popup window for selecting a package from the update system
 
-$trust_unknown_referers = 1;
 require './software-lib.pl';
 &ReadParse();
 
@@ -55,7 +54,7 @@ if (defined($search)) {
 			$sel = $a->{'select'} || $a->{'name'};
 			$epoch = $a->{'epoch'} ? "$a->{'epoch'}:" : "";
 			print &ui_columns_row(
-				[ "<a href='' onClick='sel(\"$sel\")'>$a->{'name'}</a>",
+				[ &ui_link("#", $a->{'name'}, undef, "onClick='sel(\"$sel\");'"),
 				  $hasver ? ($epoch.$a->{'version'}) : ( ),
 				  $hasdesc ? ($a->{'desc'}) : ( ) ]);
 			}

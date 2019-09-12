@@ -25,7 +25,7 @@ foreach $s (@sub) {
         $mail = $amail;
         }
 
-dbmopen(%read, "$module_config_directory/$in{'user'}.read", 0600);
+dbmopen(%read, &user_read_dbm_file($in{'user'}), 0600);
 eval { $read{$mail->{'header'}->{'message-id'}} = 1 }
 	if (!$read{$mail->{'header'}->{'message-id'}});
 
@@ -61,17 +61,24 @@ if ($body && $body eq $htmlbody) {
 	$headstuff = &head_html($body->{'data'});
 	}
 
-# Set the character set for the page to match email
-$main::force_charset = &get_mail_charset($mail, $body);
+$mail_charset = &get_mail_charset($mail, $body);
+if (&get_charset() eq 'UTF-8' && &can_convert_to_utf8(undef, $mail_charset)) {
+        # Convert to UTF-8
+        $body->{'data'} = &convert_to_utf8($body->{'data'}, $mail_charset);
+        }
+else {
+        # Set the character set for the page to match email
+	$main::force_charset = &get_mail_charset($mail, $body);
+	}
 
 &mail_page_header($text{'view_title'}, $headstuff, undef,
 		  &folder_link($in{'user'}, $folder));
-print &check_clicks_function();
 &show_arrows();
 
 # Start of the form
 print &ui_form_start("reply_mail.cgi");
 print &ui_hidden("user", $in{'user'});
+print &ui_hidden("dom", $in{'dom'});
 print &ui_hidden("idx", $in{'idx'});
 print &ui_hidden("folder", $in{'folder'});
 print &ui_hidden("mod", &modification_time($folder));
@@ -92,13 +99,13 @@ if ($config{'top_buttons'} == 2 && &editable_mail($mail)) {
 	}
 
 # Start of headers section
-$hbase = "view_mail.cgi?idx=$in{'idx'}&body=$in{'body'}&".
-	 "folder=$in{'folder'}&user=$uuser$subs";
+$hbase = "view_mail.cgi?idx=$in{'idx'}&".
+	 "folder=$in{'folder'}&dom=$in{'dom'}&user=$uuser$subs";
 if ($in{'headers'}) {
-	push(@hmode, "<a href='$hbase&headers=0'>$text{'view_noheaders'}</a>");
+	push(@hmode, "<a href='$hbase&headers=0&body=$in{'body'}'>$text{'view_noheaders'}</a>");
 	}
 else {
-	push(@hmode, "<a href='$hbase&headers=1'>$text{'view_allheaders'}</a>");
+	push(@hmode, "<a href='$hbase&headers=1&body=$in{'body'}'>$text{'view_allheaders'}</a>");
 	}
 push(@hmode, "<a href='$hbase&raw=1'>$text{'view_raw'}</a>");
 print &ui_table_start($text{'view_headers'},
@@ -130,8 +137,7 @@ else {
 		&eucconv_and_escape(
                         &simplify_date($mail->{'header'}->{'date'})));
 	print &ui_table_row($text{'mail_subject'},
-		&eucconv_and_escape(&decode_mimewords(
-                                        $mail->{'header'}->{'subject'})));
+		&convert_header_for_display($mail->{'header'}->{'subject'}));
 	}
 print &ui_table_end();
 
@@ -169,6 +175,11 @@ if ($bodycontents) {
 	print &ui_table_row(undef, $bodycontents);
 	print &ui_table_end();
 	}
+else {
+	print &ui_table_start($text{'view_body'}, "width=100%", 1);
+	print &ui_table_row(undef, "<b>$text{'view_nobody'}</b>");
+	print &ui_table_end();
+	}
 
 # Show delivery status
 if ($dstatus) {
@@ -188,11 +199,11 @@ if (@attach) {
 	# Links to download all / slideshow
 	@links = ( );
 	if (@attach > 1) {
-		push(@links, "<a href='detachall.cgi/attachments.zip?folder=$in{'folder'}&idx=$in{'idx'}&user=$uuser$subs'>$text{'view_aall'}</a>");
+		push(@links, &ui_link("detachall.cgi/attachments.zip?folder=$in{'folder'}&idx=$in{'idx'}&user=$uuser$subs","$text{'view_aall'}"));
 		}
 	@iattach = grep { $_->{'type'} =~ /^image\// } @attach;
 	if (@iattach > 1) {
-		push(@links, "<a href='slideshow.cgi?folder=$in{'folder'}&idx=$in{'idx'}&user=$uuser$subs'>$text{'view_aslideshow'}</a>");
+		push(@links, &ui_link("slideshow.cgi?folder=$in{'folder'}&idx=$in{'idx'}&user=$uuser$subs",$text{'view_aslideshow'}));
 		}
 	print &ui_links_row(\@links) if (@links);
 
@@ -227,18 +238,19 @@ local @sr = !@sub ? ( ) :
 $s = int((@mail - $in{'idx'} - 1) / $config{'perpage'}) *
 	$config{'perpage'};
 &mail_page_footer(
-	@sub ? ("view_mail.cgi?idx=$in{'idx'}&folder=$in{'folder'}&user=$uuser",
-		$text{'view_return'}) : ( ),
-	"list_mail.cgi?folder=$in{'folder'}&user=$uuser", $text{'mail_return'},
-	"", $text{'index_return'});
+	@sub ? ("view_mail.cgi?idx=$in{'idx'}&folder=$in{'folder'}&".
+		"user=$uuser&dom=$in{'dom'}", $text{'view_return'})
+	     : ( ),
+	"list_mail.cgi?folder=$in{'folder'}&user=$uuser&dom=$in{'dom'}",
+	  $text{'mail_return'},
+	&user_list_link(), $text{'index_return'});
 
 # show_mail_buttons(pos, submode)
 sub show_mail_buttons
 {
 local $spacer = "&nbsp;\n";
 if (!$_[1]) {
-	print "<input type=submit value=\"$text{'view_delete'}\" name=delete ",
-	      "onClick='return check_clicks(form)'>";
+	print "<input type=submit value=\"$text{'view_delete'}\" name=delete>";
 	print $spacer;
 
 	if (!$folder->{'sent'} && !$folder->{'drafts'}) {
@@ -317,7 +329,11 @@ print "</center><br>\n";
 # address_link(address)
 sub address_link
 {
-local @addrs = &split_addresses(&decode_mimewords($_[0]));
+local ($mw, $cs) = &decode_mimewords($_[0]);
+if (&get_charset() eq 'UTF-8' && &can_convert_to_utf8($mw, $cs)) {
+        $mw = &convert_to_utf8($mw, $cs);
+        }
+local @addrs = &split_addresses($mw);
 local @rv;
 foreach $a (@addrs) {
 	push(@rv, &eucconv_and_escape($a->[2]));

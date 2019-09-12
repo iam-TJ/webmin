@@ -75,7 +75,7 @@ Spaces are now allowed in Host Information records.
 ---- Changes since 1.420 ----
 The default TTL for multiple zones can now be changed on the Update Records in Zones page.
 When adding a cluster slave server, multiple views can be entered to have slave zones created in all of them.
-Record names or values entered like ns.foo.com in the domain foo.com automatically have a . added to make them absolute as the user presumably expected, rather than being coverted to ns.foo.com.foo.com.
+Record names or values entered like ns.foo.com in the domain foo.com automatically have a . added to make them absolute as the user presumably expected, rather than being converted to ns.foo.com.foo.com.
 Update serial number (by default) when editing records manually.
 Try downloading root zone files from the IP for rs.internic.net if the hostname cannot be resolved, to avoid catch-22 problem.
 Access control lists are now automatically re-ordered to handle dependencies.
@@ -130,3 +130,25 @@ Added the Test Zone Transfer button to the slave zone page, to check if zone tra
 ---- Changes since 1.550 ----
 Links for editing and deleting records now using the record name instead of an index, which makes editing more reliable if records are also being updated by dynamic DNS or some other tool.
 When a zone is reloaded, it is now frozed first and then thawed afterwards with the rndc command, to better support dynamic DNS.
+---- Changes since 1.580 ----
+The source IP and port for zone transfers can now be specific on the Addresses and Topology page.
+Added support for zone signing using the DNSSEC-Tools suite, thanks to a patch from Suresh Krishnaswamy.
+---- Changes since 1.600 ----
+Changed all links to zones to use the zone name instead of an index, to prevent incorrect modification during concurrent access to the module.
+---- Changes since 1.620 ----
+Added a module configuration option to use the SPF type for Sender Permitted From records.
+---- Changes since 1.660 ----
+Added a warning if the chroot directory that Webmin thinks BIND is using looks wrong.
+Slave zone files in raw format can now be displayed by Webmin.
+---- Changes since 1.720 ----
+Added support for NSEC3PARAM records.
+---- Changes since 1.730 ----
+Added support for editing DMARC records, which are specially encoded TXT records for defining the response to SPF and DKIM violations.
+---- Changes since 1.770 ----
+Automatic creation and deletion of reverse records in partial delegation zones now works the same as in full reverse zones.
+---- Changes since 1.810 ----
+Added support for editing TLSA (SSL Certificate) records.
+---- Changes since 1.830 ----
+Added support for editing SSHFP (SSH Public Key) records.
+---- Changes since 1.880 ----
+Before a zone is updated, BIND will be told to freeze it and thaw afterwards. This ensures that dynamic updates are preserved.

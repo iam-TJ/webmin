@@ -10,41 +10,48 @@ if ($in{'move'}) {
 	# Re-queuing messages
 	foreach $f (split(/\0/, $in{'file'})) {
 		&system_logged("$config{'postfix_super_command'} -r ".
-				quotemeta($f));
+				quotemeta($f)." >/dev/null 2>&1 </dev/null");
 		}
 	}
 elsif ($in{'hold'}) {
 	# Holding messages
 	foreach $f (split(/\0/, $in{'file'})) {
 		&system_logged("$config{'postfix_super_command'} -h ".
-				quotemeta($f));
+				quotemeta($f)." >/dev/null 2>&1 </dev/null");
 		}
 	}
 elsif ($in{'unhold'}) {
 	# Un-holding messages
 	foreach $f (split(/\0/, $in{'file'})) {
 		&system_logged("$config{'postfix_super_command'} -H ".
-				quotemeta($f));
+				quotemeta($f)." >/dev/null 2>&1 </dev/null");
 		}
 	}
 else {
-	@files = split(/\0/, $in{'file'});
+	if ($in{'all'}) {
+		# All the files
+		@files = map { $_->{'id'} } &list_queue(1);
+		}
+	else {
+		# Selected files
+		@files = split(/\0/, $in{'file'});
+		}
 	if ($in{'confirm'} || !$config{'delete_confirm'}) {
 		# Deleting messages
-		if ($postfix_version < 1.1) {
+		if (&compare_version_numbers($postfix_version, 1.1) < 0) {
 			@qfiles = &recurse_files($config{'mailq_dir'});
 			}
 		foreach $f (@files) {
 			$f =~ /^[A-Za-z0-9]+$/ || next;
-			if ($postfix_version >= 1.1) {
-				&system_logged("$config{'postfix_super_command'} -d ".quotemeta($f));
+			if (&compare_version_numbers($postfix_version, 1.1) >= 0) {
+				&system_logged("$config{'postfix_super_command'} -d ".quotemeta($f)." >/dev/null 2>&1 </dev/null");
 				}
 			else {
 				&unlink_file(grep { $_ =~ /\/$f$/ } @qfiles);
 				}
 			}
-		if ($postfix_version < 1.1) {
-			&system_logged("$config{'postfix_super_command'} -p >/dev/null 2>&1");
+		if (&compare_version_numbers($postfix_version, 1.1) < 0) {
+			&system_logged("$config{'postfix_super_command'} -p >/dev/null 2>&1 </dev/null");
 			}
 		&webmin_log("delqs", undef, scalar(@files));
 		}

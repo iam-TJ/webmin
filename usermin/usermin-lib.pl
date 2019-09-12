@@ -29,7 +29,7 @@ $standard_usermin_dir = "/etc/usermin";
 $latest_rpm = "http://www.webmin.com/download/usermin-latest.noarch.rpm";
 $latest_tgz = "http://www.webmin.com/download/usermin-latest.tar.gz";
 
-$default_key_size = 512;
+$default_key_size = 2048;
 
 $cron_cmd = "$module_config_directory/update.pl";
 
@@ -157,6 +157,28 @@ foreach $m (readdir(DIR)) {
 	push(@rv, \%tinfo);
 	}
 closedir(DIR);
+return @rv;
+}
+
+=head2 list_visible_themes([current-theme])
+
+Lists all themes the user should be able to use, possibly including their
+current theme if one is set.
+
+=cut
+sub list_visible_themes
+{
+my ($curr) = @_;
+my @rv;
+my %done;
+foreach my $theme (&list_themes()) {
+        my $iscurr = $curr && $theme->{'dir'} eq $curr;
+        next if (-l $root_directory."/".$theme->{'dir'} &&
+                 $theme->{'dir'} =~ /\d+$/ &&
+                 !$iscurr);
+        next if ($done{$theme->{'desc'}}++ && !$iscurr);
+        push(@rv, $theme);
+        }
 return @rv;
 }
 
@@ -481,7 +503,7 @@ else {
 		return $text{'install_enone'};
 		}
 
-	# Get the module.info files to check dependancies
+	# Get the module.info files to check dependencies
 	local $ver = &get_usermin_version();
 	local $tmpdir = &transname();
 	mkdir($tmpdir, 0700);
@@ -815,7 +837,7 @@ sub flush_modules_cache
 
 =head2 stop_usermin
 
-Kills the running Usermin server process, returning undef on sucess or an
+Kills the running Usermin server process, returning undef on success or an
 error message on failure.
 
 =cut

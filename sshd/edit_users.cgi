@@ -84,7 +84,7 @@ if ($version{'type'} ne 'ssh' || $version{'number'} < 3) {
 
 # SSH 2 DSA authentication
 if ($version{'type'} eq 'openssh' && $version{'number'} >= 3) {
-	$rsa = &find_value("PubkeyAuthentication", $conf);
+	$dsa = &find_value("PubkeyAuthentication", $conf);
 	print &ui_table_row($text{'users_dsa'},
 		&ui_yesno_radio('dsa', lc($dsa) ne 'no'));
 	}
@@ -140,7 +140,12 @@ if ($version{'type'} eq 'openssh' && $version{'number'} >= 5) {
 				$text{'default'}." (6)"));
 	}
 
-print &ui_table_hr();
+if ($version{'type'} eq 'openssh' && $version{'number'} >= 5) {
+	# Challenge-response support
+	$chal = &find_value("ChallengeResponseAuthentication", $conf);
+	print &ui_table_row($text{'users_chal'},
+		&ui_yesno_radio('chal', lc($chal) eq 'yes'));
+	}
 
 if ($version{'type'} eq 'openssh' && $version{'number'} < 3.7 ||
     $version{'type'} eq 'ssh' && $version{'number'} < 2) {

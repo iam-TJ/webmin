@@ -38,14 +38,7 @@ else {
 		# Modifying an interface
 		$oldb = $boot[$in{'idx'}];
 		&can_iface($oldb) || &error($text{'ifcs_ecannot_this'});
-		$b->{'name'} = $oldb->{'name'};
-		$b->{'file'} = $oldb->{'file'};
-		$b->{'gateway'} = $oldb->{'gateway'};
-		$b->{'virtual'} = $oldb->{'virtual'}
-			if (defined($oldb->{'virtual'}));
-		$b->{'code'} = $oldb->{'code'};
-		$b->{'fullname'} = $oldb->{'fullname'};
-		$b->{'bridge'} = $oldb->{'bridge'};
+		$b = { %$oldb };
 		}
 	elsif (defined($in{'virtual'})) {
 		# creating a virtual interface
@@ -66,18 +59,19 @@ else {
 		&can_create_iface() || &error($text{'ifcs_ecannot'});
 		&can_iface($b) || &error($text{'ifcs_ecannot'});
 		}
-	elsif ($in{'name'} =~ /^([a-z]+\d*(\.\d+)?):(\d+)$/) {
+	elsif ($in{'name'} =~ /^([a-z]+\d*(s\d*)?(\.\d+)?):(\d+)$/ ||
+	       $in{'name'} =~ /^(en[0-9a-z]+(s\d*)?(\.\d+)?):(\d+)$/) {
 		# also creating a virtual interface
 		foreach $eb (@boot) {
-			if ($eb->{'name'} eq $1 &&
-			    $eb->{'virtual'} eq $3) {
+			if ($eb->{'name'} eq $2 &&
+			    $eb->{'virtual'} eq $4) {
 				&error(&text('bifc_evirtdup', $in{'name'}));
 				}
 			}
-		$3 >= $min_virtual_number ||
+		$4 >= $min_virtual_number ||
 			&error(&text('aifc_evirtmin', $min_virtual_number));
 		$b->{'name'} = $1;
-		$b->{'virtual'} = $3;
+		$b->{'virtual'} = $4;
 		$b->{'fullname'} = $b->{'name'}.":".$b->{'virtual'};
 		}
 	elsif ($in{'bridge'}) {
@@ -86,7 +80,14 @@ else {
 		$b->{'name'} = $b->{'fullname'} = "br".$in{'name'};
 		$b->{'bridge'} = 1;
 		}
-	elsif ($in{'name'} =~/^[a-z]+\d*(\.\d+)?$/) {
+	elsif ($in{'bond'}) {
+		# Creating a bond interface
+		$in{'name'} =~ /^\d+$/ || &error($text{'bifc_ebond'});
+		$b->{'name'} = $b->{'fullname'} = "bond".$in{'name'};
+		$b->{'bond'} = 1;
+		}
+	elsif ($in{'name'} =~ /^[a-z]+\d*(s\d*)?(\.\d+)?$/ ||
+	       $in{'name'} =~ /^en[0-9a-z]+(s\d*)?(\.\d+)?$/) {
 		# creating a real interface
 		$b->{'name'} = $in{'name'};
 		$b->{'fullname'} = $in{'name'};
@@ -124,6 +125,9 @@ else {
 		}
 
 	# Validate and store inputs
+	delete($b->{'dhcp'});
+	delete($b->{'bootp'});
+	delete($b->{'address'});
 	if ($in{'mode'} eq 'dhcp' || $in{'mode'} eq 'bootp') {
 		$in{'activate'} && !defined(&apply_interface) &&
 			&error($text{'bifc_eapply'});
@@ -143,6 +147,9 @@ else {
 	if (defined($in{'desc'})) {
 		$b->{'desc'} = $in{'desc'};
 		}
+	else {
+		delete($b->{'desc'});
+		}
 
 	if ($in{'mode'} eq 'none') {
 		# No netmask needed
@@ -154,13 +161,14 @@ else {
 		}
 	elsif (!$access{'netmask'}) {
 		# Use default netmask
-		$b->{'netmask'} = $in{'new'} ?
-			$config{'def_netmask'} || "255.255.255.0" :
-			$oldb->{'netmask'};
+		if ($in{'new'}) {
+			$b->{'netmask'} = $config{'def_netmask'} ||
+					  "255.255.255.0";
+			}
 		}
 	elsif (&can_edit("netmask", $b) && $access{'netmask'}) {
 		$auto && !$in{'netmask'} ||
-		    &check_netmask($in{'netmask'},$in{'address'}) ||
+		    &check_netmask($in{'netmask'}, $in{'address'}) ||
 			&error(&text('bifc_emask', $in{'netmask'}));
 		$b->{'netmask'} = $in{'netmask'};
 		}
@@ -171,9 +179,10 @@ else {
 		}
 	elsif (!$access{'broadcast'} || $in{'broadcast_def'}) {
 		# Work out broadcast
-		$b->{'broadcast'} = $in{'new'} ? 
-			&compute_broadcast($b->{'address'}, $b->{'netmask'}) :
-			$oldb->{'broadcast'};
+		if ($in{'new'}) {
+			$b->{'broadcast'} = &compute_broadcast(
+				$b->{'address'}, $b->{'netmask'});
+			}
 		}
 	elsif (&can_edit("broadcast", $b)) {
 		# Manually entered broadcast
@@ -183,14 +192,11 @@ else {
 		$b->{'broadcast'} = $in{'broadcast'};
 		}
 
-	if ($in{'mode'} eq 'none') {
-		# No MTU needed
-		delete($b->{'mtu'});
-		}
-	elsif (!$access{'mtu'}) {
-		# Use default MTU
-		$b->{'mtu'} = $in{'new'} ? $config{'def_mtu'}
-					 : $oldb->{'mtu'};
+	if (!$access{'mtu'}) {
+		# Use default MTU or leave unchanged
+		if ($in{'new'}) {
+			$b->{'mtu'} = $config{'def_mtu'};
+			}
 		}
 	elsif (&can_edit("mtu", $b) && $access{'mtu'}) {
 		$auto && !$in{'mtu'} ||
@@ -206,84 +212,78 @@ else {
 			&error(&text('aifc_ehard', $in{'ether'}));
 		$b->{'ether'} = $in{'ether'};
 		}
+	else {
+		delete($b->{'ether'});
+		}
 
 	# Activate at boot flag
-	if ($in{'new'} && !$access{'up'} ||
-	    &can_edit("up", $b) && $in{'up'} && $access{'up'}) {
-		$b->{'up'}++;
+	if ($in{'new'} && !$access{'up'}) {
+		# If cannot edit up flag, assume enabled for new interfaces
+		$b->{'up'} = 1;
 		}
-	elsif (!$access{'up'}) {
-		$b->{'up'} = $oldb->{'up'};
+	elsif (&can_edit("up", $b) && $access{'up'}) {
+		# If can edit, respect the user
+		$b->{'up'} = $in{'up'};
 		}
 
 	# Save IPv6 addresses
-	if (&supports_address6($b) && $in{'mode6'} eq 'auto') {
-		# Dynamic configuration
+	if (&supports_address6($b)) {
 		delete($b->{'address6'});
 		delete($b->{'netmask6'});
-		$b->{'auto6'} = 1;
-		}
-	elsif (&supports_address6($b) && $in{'mode6'} eq 'address') {
-		# Static addresses
-		@address6 = ( );
-		@netmask6 = ( );
-		%clash6 = ( );
-		foreach $eb (@boot) {
-			if ($eb->{'fullname'} ne $b->{'fullname'}) {
-				foreach $a6 (@{$eb->{'address6'}}) {
-					$clash6{$a6} = $eb;
+		delete($b->{'auto6'});
+		if ($in{'mode6'} eq 'auto') {
+			# Dynamic configuration
+			$b->{'auto6'} = 1;
+			}
+		elsif ($in{'mode6'} eq 'address') {
+			# Static addresses
+			@address6 = ( );
+			@netmask6 = ( );
+			%clash6 = ( );
+			foreach $eb (@boot) {
+				if ($eb->{'fullname'} ne $b->{'fullname'}) {
+					foreach $a6 (@{$eb->{'address6'}}) {
+						$clash6{$a6} = $eb;
+						}
 					}
 				}
+			for($i=0; defined($in{'address6_'.$i}); $i++) {
+				next if ($in{'address6_'.$i} !~ /\S/);
+				&check_ip6address($in{'address6_'.$i}) ||
+					&error(&text('aifc_eaddress6', $i+1));
+				$c = $clash6{$in{'address6_'.$i}};
+				$c && &error(&text('aifc_eclash6', $i+1, $c->{'name'}));
+				push(@address6, $in{'address6_'.$i});
+				$in{'netmask6_'.$i} =~ /^\d+$/ &&
+				    $in{'netmask6_'.$i} > 0 &&
+				    $in{'netmask6_'.$i} <= 128 ||
+					&error(&text('aifc_enetmask6', $i+1));
+				push(@netmask6, $in{'netmask6_'.$i});
+				$clash6{$in{'address6_'.$i}} = $b;
+				}
+			@address6 || &error($text{'aifc_eaddresses6'});
+			delete($b->{'auto6'});
+			$b->{'address6'} = \@address6;
+			$b->{'netmask6'} = \@netmask6;
 			}
-		for($i=0; defined($in{'address6_'.$i}); $i++) {
-			next if ($in{'address6_'.$i} !~ /\S/);
-			&check_ip6address($in{'address6_'.$i}) ||
-				&error(&text('aifc_eaddress6', $i+1));
-			$c = $clash6{$in{'address6_'.$i}};
-			$c && &error(&text('aifc_eclash6', $i+1, $c->{'name'}));
-			push(@address6, $in{'address6_'.$i});
-			$in{'netmask6_'.$i} =~ /^\d+$/ &&
-			    $in{'netmask6_'.$i} > 0 &&
-			    $in{'netmask6_'.$i} <= 128 ||
-				&error(&text('aifc_enetmask6', $i+1));
-			push(@netmask6, $in{'netmask6_'.$i});
-			$clash6{$in{'address6_'.$i}} = $b;
-			}
-		@address6 || &error($text{'aifc_eaddresses6'});
-		delete($b->{'auto6'});
-		$b->{'address6'} = \@address6;
-		$b->{'netmask6'} = \@netmask6;
-		}
-	elsif (&supports_address6($b) && $in{'mode6'} eq 'none') {
-		# IPv6 disabled
-		delete($b->{'address6'});
-		delete($b->{'netmask6'});
-		delete($b->{'auto6'});
 		}
 
 	# Save bonding settings
 	if ($in{'bond'}) {
 		$b->{'bond'} = 1;
-		if ($in{'partner'}) {
-			$b->{'partner'} = $in{'partner'};
-			}
-		if ($in{'bondmode'} ne ''){
-			$mode = $in{'bondmode'};
-			$b->{'mode'} = $mode;
-			}
-		if ($in{'miimon'} ne ''){
-			$b->{'miimon'} = $in{'miimon'};
-			}
-		if ($in{'updelay'} ne ''){
-			$b->{'updelay'} = $in{'updelay'};
-			}
-		if ($in{'downdelay'} ne ''){
-			$b->{'downdelay'} = $in{'downdelay'};
-			}
+		$b->{'partner'} = $in{'partner'};
+		$b->{'mode'} = $in{'bondmode'};
+		$b->{'primary'} = $in{'primary'};
+		$b->{'miimon'} = $in{'miimon'};
+		$b->{'updelay'} = $in{'updelay'};
+		$b->{'downdelay'} = $in{'downdelay'};
+		}
+	else {
+		delete($b->{'bond'});
 		}
 	
 	# Save VLAN settings
-	if ($in{'vlan'} == 1) {
+	if ($in{'vlan'}) {
 		$b->{'vlan'} = 1;
 		if ($in{'physical'}) {
 			$b->{'physical'} = $in{'physical'};
@@ -292,22 +292,42 @@ else {
 			$b->{'vlanid'} = $in{'vlanid'};
 			}
 		}
+	else {
+		delete($b->{'vlan'});
+		}
 
 	# Save bridge settings
 	if ($b->{'bridge'}) {
-		$in{'bridgeto'} =~ /^eth\d+$/ ||
-			&error($text{'bifc_ebridgeto'});
-		($bt) = grep { $_->{'fullname'} eq $in{'bridgeto'} } @boot;
-		$bt || &error($text{'bifc_ebridgeto'});
+		if ($in{'bridgeto'}) {
+			&iface_type($in{'bridgeto'}) =~ /Ethernet|Bonded/ ||
+				&error($text{'bifc_ebridgeto'});
+			($bt) = grep { $_->{'fullname'} eq $in{'bridgeto'} }
+				     @boot;
+			$bt || &error($text{'bifc_ebridgeto'});
+			}
 		($bt->{'address'} || $bt->{'dhcp'} || $bt->{'bootp'}) &&
 			&error($text{'bifc_ebridgeto2'});
 		$b->{'bridgeto'} = $in{'bridgeto'};
+		$b->{'bridgestp'} = $in{'bridgestp'};
+		$b->{'bridgefd'} = $in{'bridgefd'};
+		$b->{'bridgewait'} = $in{'bridgewait'};
+		}
+	else {
+		delete($b->{'bridgeto'});
+		delete($b->{'bridgestp'});
+		delete($b->{'bridgefd'});
+		delete($b->{'bridgewait'});
 		}
 
 	# Save the interface with its final name
-	$b->{'fullname'} = $b->{'name'}.
-		( $b->{'virtual'} eq '' ? '' : ':'.$b->{'virtual'});
-	&save_interface($b);
+	if ($b->{'vlan'}) {
+		$b->{'fullname'} = $in{'physical'}.".".$in{'vlanid'};
+		}
+	else {
+		$b->{'fullname'} = $b->{'name'}.
+				( $b->{'virtual'} eq '' ? '' : ':'.$b->{'virtual'});
+		}
+	&save_interface($b, \@boot);
 
 	if ($in{'activate'}) {
 		# Make this interface active (if possible)

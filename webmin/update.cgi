@@ -30,6 +30,13 @@ foreach $url (@urls) {
 		my %tinfo = &get_theme_info($u->[0]);
 		my %info = %minfo ? %minfo : %tinfo;
 
+		# Skip if we already have the version, perhaps from an earlier
+		# update in this run
+		my $nver = $u->[1];
+		$nver =~ s/^(\d+\.\d+)\..*$/$1/;
+		next if (%info && $info{'version'} &&
+			 $info{'version'} >= $nver);
+
 		if ($in{'show'}) {
 			# Just tell the user what would be done
 			print &text('update_mshow', "<b>$u->[0]</b>", "<b>$u->[1]</b>"),
@@ -53,7 +60,7 @@ foreach $url (@urls) {
 			$mtemp = &transname($mfile);
 			$progress_callback_url = $u->[2];
 			$progress_callback_prefix = "&nbsp;" x 10;
-			&http_download($mhost, $mport, $mpage, $mtemp, undef,
+			&retry_http_download($mhost, $mport, $mpage, $mtemp, undef,
 				       \&progress_callback, $mssl,
 				       $in{'upuser'}, $in{'uppass'});
 			$irv = &check_update_signature($mhost, $mport, $mpage,

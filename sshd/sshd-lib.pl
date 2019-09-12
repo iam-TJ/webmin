@@ -128,10 +128,11 @@ for($i=0; $i<@o || $i<@n; $i++) {
 			}
 		}
 	elsif ($n[$i] && !$before) {
-		# Adding a line at the end, but before the last Match directive
+		# Adding a line at the end, but before the first Match directive
 		local $ll = $_[1]->[@{$_[1]}-1]->{'line'};
 		foreach my $m (&find("Match", $_[1])) {
 			$ll = $m->{'line'} - 1;
+			last;
 			}
 		splice(@$lref, $ll+1, 0, "$id$_[0] $n[$i]");
 		}
@@ -321,7 +322,7 @@ else {
 
 # get_mlvalues(file, id, [splitchar])
 # Return an array with values from a file, where the
-# values are one per line with an id preceeding them
+# values are one per line with an id preceding them
 sub get_mlvalues
 {
 local @rv;
@@ -356,7 +357,7 @@ if (&foreign_check("syslog")) {
 	@facils = map { uc($_) } split(/\s+/, $sconfig{'facilities'});
 	}
 if (!@facils) {
-	@facils = ( 'DAEMON', 'USER', 'AUTH', 'LOCAL0', 'LOCAL1', 'LOCAL2',
+	@facils = ( 'DAEMON', 'USER', 'AUTH', 'AUTHPRIV', 'LOCAL0', 'LOCAL1', 'LOCAL2',
 		    'LOCAL3', 'LOCAL4', 'LOCAL5', 'LOCAL6', 'LOCAL7' );
 	}
 return @facils;

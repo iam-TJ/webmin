@@ -8,6 +8,11 @@ $access{'ifcs'} || &error($text{'ifcs_ecannot'});
 $allow_add = &can_create_iface() && !$noos_support_add_ifcs;
 &ui_print_header(undef, $text{'ifcs_title'}, "");
 
+# Get interfaces
+@act = &active_interfaces(1);
+@boot = &boot_interfaces();
+@boot = sort iface_sort @boot;
+
 # Start tabs for active/boot time interfaces
 @tabs = ( [ "active", $text{'ifcs_now'}, "list_ifcs.cgi?mode=active" ] );
 $defmode = "active";
@@ -18,7 +23,6 @@ if (!$access{'bootonly'}) {
 print &ui_tabs_start(\@tabs, "mode", $in{'mode'} || $defmode, 1);
 
 # Show interfaces that are currently active
-@act = &active_interfaces(1);
 if (!$access{'bootonly'}) {
 	# Table heading and links
 	print &ui_tabs_start_tab("mode", "active");
@@ -37,7 +41,7 @@ if (!$access{'bootonly'}) {
 	push(@tds, "width=5% valign=top");
 	if ($allow_add) {
 		push(@links,
-		     "<a href='edit_aifc.cgi?new=1'>$text{'ifcs_add'}</a>");
+		     &ui_link("edit_aifc.cgi?new=1",$text{'ifcs_add'}));
 		}
 	print &ui_links_row(\@links);
 	print &ui_columns_start([ $access{'ifcs'} >= 2 ? ( "" ) : ( ),
@@ -115,22 +119,19 @@ print &ui_form_start("delete_bifcs.cgi", "post");
 @links = ( &select_all_link("b", 1),
 	   &select_invert_link("b", 1) );
 if ($allow_add) {
-	push(@links, "<a href='edit_bifc.cgi?new=1'>$text{'ifcs_add'}</a>");
+	push(@links, &ui_link("edit_bifc.cgi?new=1",$text{'ifcs_add'}));
 	if (defined(&supports_bonding) && &supports_bonding()) {
-		push(@links, "<a href='edit_bifc.cgi?new=1&bond=1'>".
-			     "$text{'bonding_add'}</a>");
+		push(@links, &ui_link("edit_bifc.cgi?new=1&bond=1",$text{'bonding_add'}));
 	}
 	if (defined(&supports_vlans) && &supports_vlans()) {
-		push(@links, "<a href='edit_bifc.cgi?new=1&vlan=1'>".
-			     "$text{'vlan_add'}</a>");
+		push(@links, &ui_link("edit_bifc.cgi?new=1&vlan=1",$text{'vlan_add'}));
 	}
 	}
 if ($allow_add && defined(&supports_bridges) && &supports_bridges()) {
-	push(@links, "<a href='edit_bifc.cgi?new=1&bridge=1'>".
-		     "$text{'ifcs_badd'}</a>");
+	push(@links, &ui_link("edit_bifc.cgi?new=1&bridge=1",$text{'ifcs_badd'}));
 	}
 if ($allow_add && defined(&supports_ranges) && &supports_ranges()) {
-	push(@links, "<a href='edit_range.cgi?new=1'>$text{'ifcs_radd'}</a>");
+	push(@links, &ui_link("edit_range.cgi?new=1",$text{'ifcs_radd'}));
 	}
 print &ui_links_row(\@links);
 @tds = ( "width=5 valign=top", "width=20% valign=top", "width=20% valign=top",
@@ -145,8 +146,6 @@ print &ui_columns_start([ "",
 			  &supports_address6() ? ( $text{'ifcs_ip6'} ) : ( ),
 			  $text{'ifcs_act'} ], 100, 0, \@tds);
 
-@boot = &boot_interfaces();
-@boot = sort iface_sort @boot;
 foreach $a (@boot) {
 	local $can = $a->{'edit'} && &can_iface($a);
 	next if ($access{'hide'} && !$can);	# skip hidden
@@ -232,10 +231,14 @@ foreach $a (@boot) {
 	}
 print &ui_columns_end();
 print &ui_links_row(\@links);
+if($access{"delete"}) {
 print &ui_form_end([ [ "delete", $text{'index_delete2'} ],
-		     [ "deleteapply", $text{'index_delete3'} ],
-		     undef,
-		     [ "apply", $text{'index_apply2'} ] ]);
+                     [ "deleteapply", $text{'index_delete3'} ],
+                     undef,
+                     [ "apply", $text{'index_apply2'} ] ]);
+} else {
+print &ui_form_end([ [ "apply", $text{'index_apply2'} ] ]);
+}
 print &ui_tabs_end_tab();
 
 print &ui_tabs_end(1);

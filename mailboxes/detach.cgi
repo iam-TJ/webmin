@@ -53,13 +53,13 @@ if ($in{'scale'}) {
 	($jpegin, $jpegout) = &pipeopen("pnmscale $scale 2>/dev/null | cjpeg");
 	print $jpegin $type;
 	print $jpegin $size;
-	while(read($pnmout, $buf, 1024)) {
+	while(read($pnmout, $buf, 32768)) {
 		print $jpegin $buf;
 		}
 	close($jpegin);
 	close($pnmout);
 	print "Content-type: image/jpeg\n\n";
-	while(read($jpegout, $buf, 1024)) {
+	while(read($jpegout, $buf, 32768)) {
 		print $buf;
 		}
 	close($jpegout);
@@ -77,7 +77,7 @@ else {
 		# Auto-detect type
                 if ($in{'save'}) {
                         # Force download
-                        print "Content-Disposition: Attachment\n";
+                        print "Content-Disposition: Attachment filename=\"$attach->{'filename'}\"\n";
                         }
                 if ($attach->{'type'} eq 'message/delivery-status') {
                         print "Content-type: text/plain\n\n";

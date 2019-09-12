@@ -62,6 +62,10 @@ if ($header{'x-webmin-autoreply'} ||
 	print STDERR "Cancelling autoreply to an autoreply\n";
 	exit 0;
 	}
+if ($header{'x-spam-flag'} =~ /^Yes/i || $header{'x-spam-status'} =~ /^Yes/i) {
+        print STDERR "Cancelling autoreply to message already marked as spam\n";
+        exit 0;
+        }
 if ($header{'x-mailing-list'} ||
     $header{'list-id'} ||
     $header{'precedence'} =~ /junk|bulk|list/i ||
@@ -69,38 +73,14 @@ if ($header{'x-mailing-list'} ||
     $header{'from'} =~ /majordomo/i ||
     $fromline =~ /majordomo/i) {
 	# Do nothing if post is from a mailing list
+	print STDERR "Cancelling autoreply to message from mailing list\n";
 	exit 0;
 	}
 if ($header{'from'} =~ /postmaster|mailer-daemon/i ||
     $fromline =~ /postmaster|mailer-daemon|<>/ ) {
 	# Do nothing if post is a bounce
+	print STDERR "Cancelling autoreply to bounce message\n";
 	exit 0;
-	}
-
-# if spamassassin is installed, feed the email to it
-$spam = &has_command("spamassassin");
-if ($spam) {
-	$temp = "/tmp/autoreply.spam.$$";
-	unlink($temp);
-	open(SPAM, "| $spam >$temp 2>/dev/null");
-	print SPAM $headers;
-	print SPAM $body;
-	close(SPAM);
-	$isspam = undef;
-	open(SPAMOUT, $temp);
-	while(<SPAMOUT>) {
-		if (/^X-Spam-Status:\s+Yes/i) {
-			$isspam = 1;
-			last;
-			}
-		last if (!/\S/);
-		}
-	close(SPAMOUT);
-	unlink($temp);
-	if ($isspam) {
-		print STDERR "Not autoreplying to spam\n";
-		exit 0;
-		}
 	}
 
 # work out the correct to address
@@ -138,6 +118,9 @@ if (open(AUTO, $ARGV[0]) ||
 			if ($1 eq "No-Autoreply-Regexp") {
 				push(@no_regexp, $2);
 				}
+			elsif ($1 eq "Must-Autoreply-Regexp") {
+				push(@must_regexp, $2);
+				}
 			elsif ($1 eq "Autoreply-File") {
 				push(@files, $2);
 				}
@@ -157,9 +140,29 @@ else {
 	$rbody = "Failed to open autoreply file $ARGV[0] : $!";
 	}
 
+if ($header{'x-original-to'} && $rheader{'No-Forward-Reply'}) {
+	# Don't autoreply to a forwarded email
+	($ot) = &split_addresses($header{'x-original-to'});
+	if ($ot->[0] =~ /^([^\@\s]+)/ && $1 ne $ARGV[1] &&
+	    $ot->[0] ne $ARGV[1]) {
+		print STDERR "Cancelling autoreply to forwarded message\n";
+		exit 0;
+		}
+	}
+
 # Open the replies tracking DBM, if one was set
-if ($rheader{'Reply-Tracking'}) {
-	$track_replies = dbmopen(%replies, $rheader{'Reply-Tracking'}, 0700);
+my $rtfile = $rheader{'Reply-Tracking'};
+if ($rtfile) {
+	$track_replies = dbmopen(%replies, $rtfile, 0700);
+	eval { $replies{"test\@example.com"} = 1; };
+	if ($@) {
+		# DBM is corrupt! Clear it
+		dbmclose(%replies);
+		unlink($rtfile.".dir");
+		unlink($rtfile.".pag");
+		unlink($rtfile.".db");
+		$track_replies = dbmopen(%replies, $rtfile, 0700);
+		}
 	}
 if ($track_replies) {
 	# See if we have replied to this address before
@@ -170,7 +173,9 @@ if ($track_replies) {
 		$now = time();
 		if ($now < $lasttime+$period) {
 			# Autoreplied already in this period .. just halt
-			exit(0);
+			print STDERR "Already autoreplied at $lasttime which ",
+				     "is less than $period ago\n";
+			exit 0;
 			}
 		$replies{$from->[0]} = $now;
 		}
@@ -182,6 +187,8 @@ delete($rheader{'Reply-Period'});
 if ($rheader{'Autoreply-Start'} && time() < $rheader{'Autoreply-Start'} ||
     $rheader{'Autoreply-End'} && time() > $rheader{'Autoreply-End'}) {
 	# Nope .. so do nothing
+	print STDERR "Outside of autoreply window of ",
+		     "$rheader{'Autoreply-Start'}-$rheader{'Autoreply-End'}\n";
 	exit 0;
 	}
 delete($rheader{'Autoreply-Start'});
@@ -205,11 +212,51 @@ if (@fromsplit) {
 	delete($rheader{'No-Autoreply'});
 	}
 
-# Check if message matches one of the deny regexps
+# Check if message matches one of the deny regexps, or doesn't match a
+# required regexp
 foreach $re (@no_regexp) {
-	if ($re =~ /\S/ && $rheaders =~ /$re/i) {
+	if ($re =~ /\S/ && $headers =~ /$re/i) {
 		print STDERR "Skipping due to match on $re\n";
-		exit(1);
+		exit(0);
+		}
+	}
+if (@must_regexp) {
+	my $found = 0;
+	foreach $re (@must_regexp) {
+		if ($headers =~ /$re/i) {
+			$found++;
+			}
+		}
+	if (!$found) {
+		print STDERR "Skipping due to no match on ",
+			     join(" ", @must_regexp),"\n";
+		exit(0);
+		}
+	}
+
+# if spamassassin is installed, feed the email to it
+$spam = &has_command("spamassassin");
+if ($spam) {
+	$temp = "/tmp/autoreply.spam.$$";
+	unlink($temp);
+	open(SPAM, "| $spam >$temp 2>/dev/null");
+	print SPAM $headers;
+	print SPAM $body;
+	close(SPAM);
+	$isspam = undef;
+	open(SPAMOUT, $temp);
+	while(<SPAMOUT>) {
+		if (/^X-Spam-Status:\s+Yes/i) {
+			$isspam = 1;
+			last;
+			}
+		last if (!/\S/);
+		}
+	close(SPAMOUT);
+	unlink($temp);
+	if ($isspam) {
+		print STDERR "Not autoreplying to spam\n";
+		exit 0;
 		}
 	}
 
@@ -240,7 +287,7 @@ if ($rbody =~ /[\177-\377]/) {
 	# High-ascii
 	$enc = "quoted-printable";
 	$encrbody = &quoted_encode($rbody);
-	$type .= "; charset=".($cs || "iso-8859-1");
+	$type .= "; charset=".($cs || "UTF-8");
 	}
 else {
 	$enc = undef;
@@ -251,10 +298,10 @@ else {
 # run sendmail and feed it the reply
 ($rfrom) = &split_addresses($rheader{'From'});
 if ($rfrom->[0]) {
-	open(MAIL, "|$config{'sendmail_path'} -t -f$rfrom->[0]");
+	open(MAIL, "|$config{'sendmail_path'} -t -f".quotemeta($rfrom->[0]));
 	}
 else {
-	open(MAIL, "|$config{'sendmail_path'} -t -f$to");
+	open(MAIL, "|$config{'sendmail_path'} -t -f".quotemeta($to));
 	}
 foreach $h (keys %rheader) {
 	print MAIL "$h: $rheader{$h}\n";
@@ -329,7 +376,7 @@ sub split_addresses
 {
 local (@rv, $str = $_[0]);
 while(1) {
-	if ($str =~ /^[\s,]*(([^<>\(\)\s]+)\s+\(([^\(\)]+)\))(.*)$/) {
+	if ($str =~ /^[\s,]*(([^<>\(\)"\s]+)\s+\(([^\(\)]+)\))(.*)$/) {
 		# An address like  foo@bar.com (Fooey Bar)
 		push(@rv, [ $2, $3, $1 ]);
 		$str = $4;

@@ -58,6 +58,9 @@ else {
 if (!$in{'name_def'}) {
 	@names = split(/\s+/, $in{'name'});
 	@names || &error(&text('cvirt_ename', $in{'name'}));
+	foreach my $n (@names) {
+		$n =~ /^[a-z0-9\.\_\-]+$/i || &error(&text('vserv_ename', $n));
+		}
 	}
 
 # Check if the virtual server already exists
@@ -74,15 +77,14 @@ if (!$in{'name_def'}) {
 !$in{'root'} || &allowed_auth_file($in{'root'}) ||
 	&error(&text('cvirt_eroot3', $in{'root'}));
 
-if ($in{'root'} && !-d $in{'root'}) {
+if ($in{'root'} && !-e $in{'root'}) {
 	# create the document root
 	mkdir($in{'root'}, 0755) ||
 		&error(&text('cvirt_eroot2', $in{'root'}, $!));
 	$user = &find_directive("User", $conf);
 	$group = &find_directive("Group", $conf);
-	$uid = $user ? getpwnam($user) : 0;
-	$gid = $group ? getgrnam($group) : 0;
-	chown($uid, $gid, $in{'root'});
+	$user || &error($text{'cvirt_eroot4'});
+	&set_ownership_permissions($user, $group, undef, $in{'root'});
 	}
 
 # find file to add to
@@ -215,15 +217,23 @@ push(@mems, @cmems);
 
 if ($in{'adddir'} && $in{'root'}) {
 	# Add a <Directory> section for the root
-	push(@mems, { 'name' => 'Directory',
-		      'value' => "\"$in{'root'}\"",
-		      'type' => 1,
-		      'members' => [
+	$dirsect = { 'name' => 'Directory',
+		     'value' => "\"$in{'root'}\"",
+		     'type' => 1,
+		     'members' => [
 			{ 'name' => 'allow',
 			  'value' => 'from all' },
 			{ 'name' => 'Options',
-			  'value' => '+Indexes' },
-			] });
+			  'value' => 'None' },
+			],
+		   };
+	if ($httpd_modules{'core'} >= 2.4) {
+		# Apache 2.4+ needs a 'Require all granted' line
+		push(@{$dirsect->{'members'}},
+		     { 'name' => 'Require',
+		       'value' => 'all granted' });
+		}
+	push(@mems, $dirsect);
 	}
 
 # Save to the file

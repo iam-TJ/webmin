@@ -20,6 +20,11 @@ index_epackagecmd=The $1 package system requires the $2 command
 index_eupdatecmd=The $1 update system requires the $2 command
 index_epackagecheck=The selected package management system is not valid : $1.<br>You may need to select a different system on the <a href='$2'>module configuration</a> page.
 index_eupdatecheck=The selected update system is not valid : $1.<br>You may need to select a different update method on the <a href='$2'>module configuration</a> page.
+index_echeckpackage=No package system was detected!
+index_echeckupdate=No update system was detected!
+index_filter=Filter Packages
+index_filterclear=Clear Filter
+index_filtered=Displaying <tt>$1</tt> packages out of <tt>$2</tt>
 
 search_title=Package Search
 search_nomatch=No packages matched $1
@@ -45,7 +50,9 @@ edit_vend=Vendor
 edit_arch=Architecture
 edit_inst=Installed
 edit_list=List Files
+edit_listdesc=Show all the files in this package, and their current verification state.
 edit_uninst=Uninstall
+edit_uninstdesc=Remove this package from your system.
 edit_return=package details
 edit_egone=Package is no longer installed
 
@@ -64,12 +71,14 @@ list_eview=Failed to open $1 : $2
 delete_err=Failed to delete package $1
 delete_epack=The package $1 does not exist
 delete_title=Delete Package
-delete_rusure=Are you sure you want to delete the package $1 ? Up to $2 files ($3 bytes) will be deleted forever.
+delete_rusure=Are you sure you want to delete the package $1 ? Up to $2 files ($3) will be deleted forever.
 delete_rusure2=Are you sure you want to delete the package $1 ?
 delete_ok=Delete
 delete_nodeps=Ignore dependencies?
 delete_noscripts=Skip uninstall scripts?
 delete_efile=Invalid temp file to delete
+delete_purge=Purge configuration files?
+delete_depstoo=Removed unused dependencies as well?
 
 file_title=File Information
 file_notfound=No information about $1 is available
@@ -162,6 +171,10 @@ debian_manager=Debian DPKG
 log_install_package=Installed package $1
 log_install_apt_l=Installed package(s) $1 from APT
 log_install_apt=Installed $2 package(s) from APT
+log_install_yum_l=Installed package(s) $1 from YUM
+log_install_yum=Installed $2 package(s) from YUM
+log_install_rhn_l=Installed package(s) $1 from Redhat Network
+log_install_rhn=Installed $2 package(s) from Redhat Network
 log_check_apt_l=Upgraded package(s) $1 from APT
 log_check_apt=Upgraded $2 package(s) from APT
 log_delete=Uninstalled package $1
@@ -227,6 +240,10 @@ apt_search=Find packages matching :
 apt_find=Search APT ..
 apt_title=Search APT
 apt_name=APT
+apt_repo_url=Repository base URL
+apt_repo_path=Distribution path components
+apt_repo_eurl=Missing or invalid-looking base URL
+apt_repo_epath=Missing distribution path
 
 yum_input=Package from YUM
 yum_install=Installing package(s) with command $1 ..
@@ -247,6 +264,17 @@ yum_title=Browse YUM
 yum_name=YUM
 yum_enable=Enable repository:
 yum_none=&lt;None&gt;
+yum_repo_id=Repository ID
+yum_repo_name=Repository description
+yum_repo_url=Package base URL
+yum_repo_gpg=GPG certificate file
+yum_repo_none=Not signed
+yum_repo_eid=Missing or invalid repository ID - only letters and numbers allowed
+yum_repo_eidclash=Repository ID is already in use
+yum_repo_ename=Missing repository name
+yum_repo_eurl=Missing or invalid repository URL
+yum_repo_egpg=GPG cert file missing or does not exist
+yum_repo_efile=Repository file already exists!
 
 urpmi_name=URPMI
 urpmi_input=Package from URPMI
@@ -389,4 +417,52 @@ hpux_enforce_scripts=Enforce scripts?
 hpux_enforce_dsa=Enforce disk space analysis?
 hpux_root=Root directory
 
+ports_install=Installing FreeBSD ports $1 ..
+ports_failed=.. some ports failed
+ports_ok=.. install complete
+ports_input=Package from ports
+ports_find=Search Ports
+ports_name=FreeBSD ports
+ports_form=Update Ports Database
+ports_apply=Download Latest Snapshot
+ports_upgrade=Downloading Ports Snapshot
+ports_running=Running command $1 ..
+
+pkg_install=Installing FreeBSD packages $1 ..
+pkg_failed=.. some packages failed
+pkg_ok=.. install complete
+pkg_find=Search pkgng
+pkg_input=Package from pkgng
+
+pkgsrc_install=Installing pkgsrc packages $1 ..
+pkgsrc_failed=.. some packages failed
+pkgsrc_ok=.. install complete
+pkgsrc_find=Search pkgng
+pkgsrc_input=Package from pkgsrc
+
 __norefs=1
+
+log_IPKG_update=Updated IPKG database
+log_IPKG_upgrade=Upgraded installed IPKG packages
+
+IPKG_name=IPKG
+IPKG_input=Package from IPKG
+IPKG_find=Browse IPKG ..
+IPKG_form=Manage IPKG Packages
+IPKG_update=Update IPKG Package Database
+IPKG_upgrade=Upgrade Installed IPKG Packages
+IPKG_title_update=Updating IPKG Databse
+IPKG_title_upgrade=Upgrading Installed Packages
+IPKG_updatedesc=Running command $1 ..
+IPKG_upgradefailed=.. failed!
+IPKG_upgradeok=.. complete.
+IPKG_install=Installing package(s) with command $1 ..
+IPKG_ok=.. install complete.
+IPKG_failed=.. install failed!
+IPKG_index_tree=Manage IPKG Packages
+IPKG_install_package=Install
+IPKG_install_packagedesc=Install this package on your system
+IPKG_noupgrade=Nothing to upgrade
+IPKG-edit_title=Manage IPKG Package
+IPKG_update_avail=Update availible:
+IPKG_not_installed=Package is not installed

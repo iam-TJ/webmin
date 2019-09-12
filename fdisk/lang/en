@@ -25,8 +25,11 @@ index_hdparm=Edit IDE parameters
 index_hdparmdesc=Change settings for an IDE drive, such as the DMA mode, standby timeout and number of sectors read.
 index_smart=Show SMART status
 index_smartdesc=Displays the status reported by this drive, including temperature and error rates.
+index_blink=Identify drive
 index_relabel=Wipe Partitions
 index_relabeldesc=Delete all existing partitions and create a new partition table with a different format.
+index_relabel2=Create Partition Table
+index_relabeldesc2=Create a new empty partition table on this disk, so that partitions can be added.
 index_use=Use
 index_free=Free
 index_return=disk list
@@ -63,6 +66,8 @@ select_smart=Compaq Smart Array $1 drive $2
 select_smartpart=Compaq Smart Array $1 drive $2 partition $3
 select_promise=Promise RAID drive $1
 select_ppart=Promise RAID drive $1 partition $2
+select_nvme=NVME SSD $1 drive $2
+select_nvmepart=NVME SSD $1 drive $2 partition $3
 
 edit_title=Edit Partition
 create_title=Create Partition
@@ -84,6 +89,7 @@ edit_mountvm=Mounted as virtual memory
 edit_umountvm=For mounting as virtual memory
 edit_mountraid=Part of RAID device $1
 edit_mountlvm=Part of LVM volume group $1
+edit_mountiscsi=iSCSI shared device $1
 edit_notexist=Not created yet
 edit_notused=Not in use
 edit_size=Size
@@ -198,6 +204,10 @@ xfs_b=Block size
 jfs_s=Log size
 jfs_c=Check for bad blocks?
 
+btrfs_l=Leaf size
+btrfs_n=Node size
+btrfs_s=Sector size
+
 fatx_none=No options are available for FATX filesystems.
 
 acl_disks=Disks this user can partition and format
@@ -234,6 +244,10 @@ hdparm_buf1=Buffer cache:
 hdparm_buf2=Buffered:
 hdparm_speedres=Speed test results
 
+blink_title=Identify Drive
+blink_desc=The activity LED of the drive will now light sixty times
+blink_back=Go Back
+
 log_modify=Modified $1
 log_create=Created $1
 log_delete=Deleted $1
@@ -251,6 +265,7 @@ fs_ext3=Linux Native
 fs_ext4=New Linux Native
 fs_xfs=SGI
 fs_jfs=IBM Journalling
+fs_btrfs=BTR
 
 delete_title=Delete Partition
 delete_rusure=Are you sure you want to delete $1 ( $2 ) ? Data on this partition may be lost forever.
@@ -266,12 +281,15 @@ disk_end=End
 disk_use=Used by
 disk_free=Free space
 disk_vm=Virtual memory
+disk_iscsi=iSCSI shared device $1
 disk_none=This disk has no partitions yet.
 disk_size=Size
 disk_dsize=<b>Disk size:</b> $1
 disk_model=<b>Make and model:</b> $1
 disk_cylinders=<b>Cylinders:</b> $1
-disk_table=<b>Partition format:</b> $1
+disk_table=<b>Partition table format:</b> $1
+disk_notable=<b>Partition table format:</b> None created
+disk_needtable=No partitions can be created without a partition table.
 disk_return=list of partitions
 
 relabel_title=Wipe Partitions

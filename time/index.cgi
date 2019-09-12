@@ -1,13 +1,17 @@
 #!/usr/local/bin/perl
 
-require "./time-lib.pl";
+use strict;
+use warnings;
+require './time-lib.pl';
+our (%in, %text, %config, %access, $base_remote_user, $get_hardware_time_error);
 
-local ($rawdate, $rawhwdate, %system_date, $rawtime, %hw_date, $txt);
+my ($rawdate, $rawhwdate, %system_date, $rawtime, %hw_date, $txt);
 $txt = "";
 &ReadParse();
 
-&error( $text{ 'acl_error' } ) if( $access{ 'sysdate' } && $access{ 'hwdate' } );
+&error($text{'acl_error'}) if ($access{'sysdate'} && $access{'hwdate'});
 
+my $arr;
 if (!$access{'sysdate'} && !$access{'hwdate'} && &support_hwtime()) {
 	$arr = "0,1";
 	}
@@ -24,14 +28,9 @@ if (!$access{'sysdate'} && !&has_command("date")) {
 	&ui_print_footer("/", $text{'index'});
 	exit;
 	}
-if (!$access{'hwdate'} && $config{'hwtime'} == 1 && !&has_command("hwclock")) {
-	print &text( 'error_cnf', "<tt>hwclock</tt>"),"<p>\n";
-	&ui_print_footer("/", $text{'index'});
-	exit;
-	}
 
 # Show tabs for times, timezones and syncing
-@tabs = ( );
+my @tabs = ( );
 push(@tabs, [ "time", $text{'index_tabtime'}, "index.cgi?mode=time" ]);
 if ($access{'timezone'} && &has_timezone()) {
 	push(@tabs, [ "zone", $text{'index_tabzone'}, "index.cgi?mode=zone" ]);
@@ -42,7 +41,7 @@ if ($access{'ntp'}) {
 print &ui_tabs_start(\@tabs, "mode", $in{'mode'} || $tabs[0]->[0], 1);
 
 # Get the system time
-@tm = &get_system_time();
+my @tm = &get_system_time();
 $system_date{ 'second' } = $tm[0];
 $system_date{ 'minute' } = $tm[1];
 $system_date{ 'hour' } = $tm[2];
@@ -58,6 +57,7 @@ if( !$access{'sysdate'} )
 {
   # Show system time for editing
   print &ui_form_start("apply.cgi");
+  print &ui_hidden("mode", "sysdate");
   print &tabletime(&hlink($text{'sys_title'}, "system_time"), 0, %system_date);
   print &ui_submit($text{'action_apply'}, "action");
   if (&support_hwtime()) {
@@ -73,23 +73,30 @@ else
 
 # Get the hardware time
 if (&support_hwtime()) {
-	local @tm = &get_hardware_time();
-	@tm || &error($get_hardware_time_error || $text{'index_eformat'});
-	$hw_date{ 'second' } = $tm[0];
-	$hw_date{ 'minute' } = $tm[1];
-	$hw_date{ 'hour' } = $tm[2];
-	$hw_date{ 'date' } = $tm[3];
-	$hw_date{ 'month' } = &number_to_month($tm[4]);
-	$hw_date{ 'year'} = $tm[5]+1900;
-	$hw_date{ 'day' } = &number_to_weekday($tm[6]);
+	my @tm = &get_hardware_time();
+	if (@tm) {
+		$hw_date{'second'} = $tm[0];
+		$hw_date{'minute'} = $tm[1];
+		$hw_date{'hour'} = $tm[2];
+		$hw_date{'date'} = $tm[3];
+		$hw_date{'month'} = &number_to_month($tm[4]);
+		$hw_date{'year'} = $tm[5]+1900;
+		$hw_date{'day'} = &number_to_weekday($tm[6]);
+		}
 
-	if(!$access{'hwdate'}) {
+	if (!@tm) {
+		# Didn't actually work!
+		print $get_hardware_time_error || $text{'index_eformat'};
+		print "<p>\n";
+		}
+	elsif (!$access{'hwdate'}) {
 		# Allow editing of hardware time
 		if( !$access{ 'sysdate' } ) {
 		    $hw_date{ 'second' } = $system_date{ 'second' } if( $hw_date{ 'second' } - $system_date{ 'second' } <= $config{ 'lease' } );
 			}
 	    
 		print &ui_form_start("apply.cgi");
+		print &ui_hidden("mode", "hwdate");
 		print &tabletime(&hlink($text{'hw_title'}, "hardware_time"),
 				 0, %hw_date);
 		print &ui_submit($text{'action_save'}, "action");
@@ -113,16 +120,18 @@ if ($access{'timezone'} && &has_timezone()) {
 	print &ui_form_start("save_timezone.cgi");
 	print &ui_table_start($text{'index_tzheader'}, "width=100%", 2);
 
-	@zones = &list_timezones();
-	$cz = &get_current_timezone();
-	$found = 0;
-	@opts = ( );
-	foreach $z (@zones) {
+	my @zones = &list_timezones();
+	my $cz = &get_current_timezone();
+	my $found = 0;
+	my @opts = ( );
+	my $lastpfx = "";
+	foreach my $z (@zones) {
+		my $pfx;
 		if ($z->[0] =~ /^(.*)\/(.*)$/) {
 			$pfx = $1;
 			}
 		else {
-			$pfx = undef;
+			$pfx = "";
 			}
 		if ($pfx ne $lastpfx && $z ne $zones[0]) {
 			push(@opts, [ '', '----------' ]);
@@ -147,6 +156,7 @@ if ( ( !$access{ 'sysdate' } && &has_command( "date" ) || !$access{ 'hwdate' } &
 	print $text{'index_descsync'},"<p>\n";
 
 	print &ui_form_start("apply.cgi");
+	print &ui_hidden("mode", "ntp");
 	print &ui_table_start(&hlink($text{'index_timeserver'}, "timeserver"),
 			      "width=100%", 2, [ "width=30%" ]);
 
@@ -160,10 +170,14 @@ if ( ( !$access{ 'sysdate' } && &has_command( "date" ) || !$access{ 'hwdate' } &
 				     $config{'timeserver_hardware'}));
 		}
 
+	# Show boot-time checkbox
+	my $job = &find_webmin_cron_job();
+	print &ui_table_row($text{'index_boot'},
+		&ui_yesno_radio("boot", $job && $job->{'boot'}));
+
 	# Show schedule input
-	$job = &find_webmin_cron_job();
 	print &ui_table_row($text{'index_sched'},
-		&ui_radio("sched", $job ? 1 : 0,
+		&ui_radio("sched", $job && !$job->{'disabled'} ? 1 : 0,
 		  [ [ 0, $text{'no'} ], [ 1, $text{'index_schedyes'} ] ]));
 	&seed_random();
 	$job ||= { 'mins' => int(rand()*60),
@@ -187,11 +201,11 @@ print &ui_tabs_end(1);
 # Output a table for setting the date and time
 sub tabletime
 {
-  my ( $label, $ro, %src ) = @_,
-  %assoc_day = ( "Mon", $text{ 'day_1' }, "Tue", $text{ 'day_2' }, "Wed", $text{ 'day_3' }, "Thu", $text{ 'day_4' }, "Fri", $text{ 'day_5' }, "Sat", $text{ 'day_6' }, "Sun", $text{ 'day_0' } ),
-  %assoc_month = ( "Jan", $text{ 'month_1' }, "Feb", $text{ 'month_2' }, "Mar", $text{ 'month_3' }, "Apr", $text{ 'month_4' }, "May", $text{ 'month_5' }, "Jun", $text{ 'month_6' }, "Jul", $text{ 'month_7' }, "Aug", $text{ 'month_8' }, "Sep", $text{ 'month_9' }, "Oct", $text{ 'month_10' }, "Nov", $text{ 'month_11' }, "Dec", $text{ 'month_12' } );
+my ( $label, $ro, %src ) = @_,
+my %assoc_day = ( "Mon", $text{ 'day_1' }, "Tue", $text{ 'day_2' }, "Wed", $text{ 'day_3' }, "Thu", $text{ 'day_4' }, "Fri", $text{ 'day_5' }, "Sat", $text{ 'day_6' }, "Sun", $text{ 'day_0' } ),
+my %assoc_month = ( "Jan", $text{ 'month_1' }, "Feb", $text{ 'month_2' }, "Mar", $text{ 'month_3' }, "Apr", $text{ 'month_4' }, "May", $text{ 'month_5' }, "Jun", $text{ 'month_6' }, "Jul", $text{ 'month_7' }, "Aug", $text{ 'month_8' }, "Sep", $text{ 'month_9' }, "Oct", $text{ 'month_10' }, "Nov", $text{ 'month_11' }, "Dec", $text{ 'month_12' } );
 
-$rv = &ui_table_start($label, "width=100%", 6);
+my $rv = &ui_table_start($label, "width=100%", 6);
 if (!$ro) {
 	$rv .= &ui_table_row($text{'date'},
 	    &ui_select("date", $src{'date'}, [ 1 .. 31 ]));

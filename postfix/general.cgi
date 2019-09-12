@@ -31,7 +31,7 @@ $v = &if_default_value("notify_classes") ? "" :
 	&get_current_value("notify_classes");
 @v = split(/[, ]+/, $v);
 print &ui_table_row(&hlink($text{'opts_notify_classes'},
-		 	   'opts_notify_classes'),
+		 	   'opt_notify_classes'),
 		    &ui_radio("notify_classes_def",
 			      $v ? "__USE_FREE_FIELD__"
 				 : "__DEFAULT_VALUE_IE_NOT_IN_CONFIG_FILE__",
@@ -89,8 +89,7 @@ print &ui_table_start($text{'general_title_others'}, "width=100%", 4);
 &option_radios_freefield("mynetworks", 60, $text{'opts_mynetworks_default'});
 
 &option_select("mynetworks_style",
-	       [ [ "", $text{'default'} ],
-		 [ "subnet", $text{'opts_mynetworks_subnet'} ],
+	       [ [ "subnet", $text{'opts_mynetworks_subnet'} ],
 		 [ "class", $text{'opts_mynetworks_class'} ],
 		 [ "host", $text{'opts_mynetworks_host'} ] ]);
 
@@ -105,7 +104,7 @@ print &ui_table_start($text{'general_title_others'}, "width=100%", 4);
 &option_freefield("process_id_directory", 20);
 &option_freefield("recipient_delimiter", 20);
 
-if ($postfix_version < 2.1) {
+if (&compare_version_numbers($postfix_version, 2.1) < 0) {
 	&option_freefield("program_directory", 45);
 	}
 

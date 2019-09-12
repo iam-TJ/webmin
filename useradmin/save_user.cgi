@@ -4,7 +4,7 @@
 # home directory or changing file ownerships, do that as well
 
 require './user-lib.pl';
-require 'timelocal.pl';
+use Time::Local;
 &error_setup($text{'usave_err'});
 &ReadParse();
 
@@ -23,6 +23,10 @@ elsif ($in{'switch'}) {
 	}
 elsif ($in{'delete'}) {
 	&redirect("delete_user.cgi?user=".&urlize($in{'old'}));
+	return;
+	}
+elsif ($in{'clone'}) {
+	&redirect("edit_user.cgi?clone=".&urlize($in{'old'}));
 	return;
 	}
 
@@ -282,7 +286,8 @@ if ($access{'ugroups'} ne "*") {
 if ($in{'passmode'} == 0) {
 	# Password is blank
 	if (!$config{'empty_mode'}) {
-		local $err = &check_password_restrictions("", $user{'user'});
+		local $err = &check_password_restrictions("", $user{'user'},
+				$in{'old'} eq '' ? 'none' : \%ouser);
 		&error($err) if ($err);
 		}
 	$user{'pass'} = "";
@@ -297,7 +302,8 @@ elsif ($in{'passmode'} == 2) {
 	}
 elsif ($in{'passmode'} == 3) {
 	# Normal password entered - check restrictions
-	local $err = &check_password_restrictions($in{'pass'}, $user{'user'});
+	local $err = &check_password_restrictions($in{'pass'}, $user{'user'},
+				$in{'old'} eq '' ? 'none' : \%ouser);
 	&error($err) if ($err);
 	$user{'pass'} = &encrypt_password($in{'pass'});
 	}

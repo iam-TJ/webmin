@@ -104,7 +104,7 @@ print &ui_form_end([ [ undef, $text{'search_submit'} ] ]);
 if (%in) {
 	# search for processes
 	@procs = &list_processes();
-	@procs = grep { &can_view_process($_->{'user'}) } @procs;
+	@procs = grep { &can_view_process($_) } @procs;
 	if ($in{mode} == 0) {
 		# search by user
 		@dis = grep { $_->{'user'} eq $in{'user'} } @procs;
@@ -158,7 +158,7 @@ if (%in) {
 			push(@pidlist, $p);
 			local @cols;
 			if (&can_edit_process($d->{'user'})) {
-				push(@cols, "<a href=\"edit_proc.cgi?$p\">$p</a>");
+				push(@cols, &ui_link("edit_proc.cgi?".$p, $p) );
 				}
 			else {
 				push(@cols, $p);
@@ -199,7 +199,7 @@ if (%in) {
 			join(" ", @pidlist);
 		print "<select name=signal>\n";
 		foreach $s (&supported_signals()) {
-			printf "<option value=\"$s\" %s> $s\n",
+			printf "<option value=\"$s\" %s>$s</option>\n",
 				$s eq "HUP" ? "selected" : "";
 			}
 		print "</select>\n";

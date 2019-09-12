@@ -1,5 +1,5 @@
-use vars qw($theme_no_table $ui_radio_selector_donejs $module_name 
-	    $ui_multi_select_donejs);
+use vars qw($theme_no_table $ui_radio_selector_donejs $module_name
+	    $ui_multi_select_donejs, $ui_formcount);
 
 =head1 ui-lib.pl
 
@@ -22,6 +22,76 @@ Some example code :
  ui_print_footer('/', 'Webmin index');
 
 =cut
+
+####################### utility functions
+
+=head2 ui_link(href, text, [class], [tags])
+
+Returns HTML for an <a href>.
+
+=item href - Link
+
+=item text - Text to display for link
+
+=item class - Optional additional CSS classes to include
+
+=item tags - Additional HTML attributes for the <a> tag.
+
+=cut
+
+sub ui_link
+{
+return &theme_ui_link(@_) if (defined(&theme_ui_link));
+my ($href, $text, $class, $tags) = @_;
+return ("<a class='ui_link".($class ? " ".$class : "")."' href='$href'".($tags ? " ".$tags : "").">$text</a>");
+}
+
+=head2 ui_img(src, alt, title, [class], [tags])
+
+Returns HTML for an <img src>.
+
+=item src - Image path and filename
+
+=item alt - Alt text for screen readers, etc.
+
+=item title - Element title, and tooltip when user hovers over image
+
+=item class - Optional additional CSS classes to include
+
+=item tags - Additional HTML attributes for the <img> tag
+
+=cut
+
+sub ui_img
+{
+return &theme_ui_img(@_) if (defined(&theme_ui_img));
+my ($src, $alt, $title, $class, $tags) = @_;
+return ("<img src='".$src."' class='ui_img".($class ? " ".$class : "")."' alt='$alt' ".($title ? "title='$title'" : "").($tags ? " ".$tags : "").">");
+}
+
+=head2 ui_link_button(href, text, [target], [tags])
+
+Returns HTML for a button, which opens a URL when clicked. The parameters are :
+
+=item href - Link URL
+
+=item text - Text to display on the button
+
+=item target - Window name to open the link in
+
+=item tags - Additional HTML attributes for the <input> tag.
+
+=cut
+
+sub ui_link_button
+{
+return &theme_ui_link_button(@_) if (defined(&theme_ui_link_button));
+my ($href, $label, $target, $tags) = @_;
+$target ||= "_self";
+return &ui_button($label, undef, 0,
+	"onClick='window.open(\"".&quote_javascript($href)."\", \"$target\")' ".
+	$tags);
+}
 
 ####################### table generation functions
 
@@ -58,18 +128,18 @@ my $colspan = 1;
 my $rv;
 $rv .= "<table class='ui_table' border $tabletags>\n";
 if (defined($heading) || defined($rightheading)) {
-	$rv .= "<tr $tb class='ui_table_head'>";
+	$rv .= "<tr".($tb ? " ".$tb : "")." class='ui_table_head'>";
 	if (defined($heading)) {
 		$rv .= "<td><b>$heading</b></td>"
 		}
 	if (defined($rightheading)) {
-		$rv .= "<td align=right>$rightheading</td>";
+		$rv .= "<td align='right'>$rightheading</td>";
 		$colspan++;
 		}
 	$rv .= "</tr>\n";
 	}
-$rv .= "<tr $cb class='ui_table_body'> <td colspan=$colspan>".
-       "<table width=100%>\n";
+$rv .= "<tr".($cb ? " ".$cb : "")." class='ui_table_body'> <td colspan='$colspan'>".
+       "<table width='100%'>\n";
 $main::ui_table_cols = $cols || 4;
 $main::ui_table_pos = 0;
 $main::ui_table_default_tds = $tds;
@@ -128,14 +198,23 @@ if ($main::ui_table_pos+$cols+1 > $main::ui_table_cols &&
     $main::ui_table_pos != 0) {
 	# If the requested number of cols won't fit in the number
 	# remaining, start a new row
+	my $leftover = $main::ui_table_cols - $main::ui_table_pos;
+	$rv .= "<td colspan='$leftover'></td>\n";
 	$rv .= "</tr>\n";
 	$main::ui_table_pos = 0;
 	}
 $rv .= "<tr class='ui_table_row'>\n"
 	if ($main::ui_table_pos%$main::ui_table_cols == 0);
-$rv .= "<td valign=top $tds->[0] class='ui_label'><b>$label</b></td>\n"
+if (defined($label) &&
+    ($value =~ /id="([^"]+)"/ || $value =~ /id='([^']+)'/ ||
+     $value =~ /id=([^>\s]+)/)) {
+	# Value contains an input with an ID
+	my $id = $1;
+	$label = "<label for=\"".&quote_escape($id)."\">$label</label>";
+	}
+$rv .= "<td valign='top' $tds->[0] class='ui_label'><b>$label</b></td>\n"
 	if (defined($label));
-$rv .= "<td valign=top colspan=$cols $tds->[1] class='ui_value'>$value</td>\n";
+$rv .= "<td valign='top' colspan='$cols' $tds->[1] class='ui_value'>$value</td>\n";
 $main::ui_table_pos += $cols+(defined($label) ? 1 : 0);
 if ($main::ui_table_pos%$main::ui_table_cols == 0) {
 	$rv .= "</tr>\n";
@@ -159,7 +238,7 @@ if ($ui_table_pos) {
 	$ui_table_pos = 0;
 	}
 $rv .= "<tr class='ui_table_hr'> ".
-       "<td colspan=$main::ui_table_cols><hr></td> </tr>\n";
+       "<td colspan='$main::ui_table_cols'><hr></td> </tr>\n";
 return $rv;
 }
 
@@ -171,14 +250,14 @@ Outputs a table row that spans the whole table, and contains the given text.
 sub ui_table_span
 {
 my ($text) = @_;
-return &theme_ui_table_hr(@_) if (defined(&theme_ui_table_hr));
+return &theme_ui_table_span(@_) if (defined(&theme_ui_table_span));
 my $rv;
 if ($ui_table_pos) {
 	$rv .= "</tr>\n";
 	$ui_table_pos = 0;
 	}
 $rv .= "<tr class='ui_table_span'> ".
-       "<td colspan=$main::ui_table_cols>$text</td> </tr>\n";
+       "<td colspan='$main::ui_table_cols'>$text</td> </tr>\n";
 return $rv;
 }
 
@@ -204,12 +283,12 @@ return &theme_ui_columns_start(@_) if (defined(&theme_ui_columns_start));
 my ($heads, $width, $noborder, $tdtags, $title) = @_;
 my $rv;
 $rv .= "<table".($noborder ? "" : " border").
-		(defined($width) ? " width=$width%" : "")." class='ui_columns'>\n";
+		(defined($width) ? " width='$width%'" : "")." class='ui_columns'>\n";
 if ($title) {
-	$rv .= "<tr $tb class='ui_columns_heading'>".
-	       "<td colspan=".scalar(@$heads)."><b>$title</b></td></tr>\n";
+	$rv .= "<tr".($tb ? " ".$tb : "")." class='ui_columns_heading'>".
+	       "<td colspan='".scalar(@$heads)."'><b>$title</b></td></tr>\n";
 	}
-$rv .= "<tr $tb class='ui_columns_heads'>\n";
+$rv .= "<tr".($tb ? " ".$tb : "")." class='ui_columns_heads'>\n";
 my $i;
 for($i=0; $i<@$heads; $i++) {
 	$rv .= "<td ".$tdtags->[$i]."><b>".
@@ -233,7 +312,7 @@ sub ui_columns_row
 return &theme_ui_columns_row(@_) if (defined(&theme_ui_columns_row));
 my ($cols, $tdtags) = @_;
 my $rv;
-$rv .= "<tr $cb class='ui_columns_row'>\n";
+$rv .= "<tr".($cb ? " ".$cb : "")." class='ui_columns_row'>\n";
 my $i;
 for($i=0; $i<@$cols; $i++) {
 	$rv .= "<td ".$tdtags->[$i].">".
@@ -254,7 +333,7 @@ sub ui_columns_header
 return &theme_ui_columns_header(@_) if (defined(&theme_ui_columns_header));
 my ($cols, $tdtags) = @_;
 my $rv;
-$rv .= "<tr $tb class='ui_columns_header'>\n";
+$rv .= "<tr".($tb ? " ".$tb : "")." class='ui_columns_header'>\n";
 my $i;
 for($i=0; $i<@$cols; $i++) {
 	$rv .= "<td ".$tdtags->[$i]."><b>".
@@ -266,7 +345,7 @@ return $rv;
 
 =head2 ui_checked_columns_row(&columns, &tdtags, checkname, checkvalue, [checked?], [disabled], [tags])
 
-Returns HTML for a row in a multi-column table, in which the first column 
+Returns HTML for a row in a multi-column table, in which the first column
 contains a checkbox. The parameters are :
 
 =item columns - Reference to an array containing the HTML to show in the columns for this row.
@@ -289,7 +368,7 @@ sub ui_checked_columns_row
 return &theme_ui_checked_columns_row(@_) if (defined(&theme_ui_checked_columns_row));
 my ($cols, $tdtags, $checkname, $checkvalue, $checked, $disabled, $tags) = @_;
 my $rv;
-$rv .= "<tr $cb class='ui_checked_columns'>\n";
+$rv .= "<tr".($cb ? " ".$cb : "")." class='ui_checked_columns'>\n";
 $rv .= "<td class='ui_checked_checkbox' ".$tdtags->[0].">".
        &ui_checkbox($checkname, $checkvalue, undef, $checked, $tags, $disabled).
        "</td>\n";
@@ -335,7 +414,7 @@ sub ui_radio_columns_row
 return &theme_ui_radio_columns_row(@_) if (defined(&theme_ui_radio_columns_row));
 my ($cols, $tdtags, $checkname, $checkvalue, $checked, $dis, $tags) = @_;
 my $rv;
-$rv .= "<tr $cb class='ui_radio_columns'>\n";
+$rv .= "<tr".($cb ? " ".$cb : "")." class='ui_radio_columns'>\n";
 $rv .= "<td class='ui_radio_radio' ".$tdtags->[0].">".
     &ui_oneradio($checkname, $checkvalue, "", $checked, undef, $dis)."</td>\n";
 my $i;
@@ -407,14 +486,14 @@ if ($emptymsg && !@$data) {
 	}
 
 # Are there any checkboxes in each column? If so, make those columns narrow
-my @tds = map { "valign=top" } @$heads;
+my @tds = map { "valign='top'" } @$heads;
 my $maxwidth = 0;
 foreach my $r (@$data) {
 	my $cc = 0;
 	foreach my $c (@$r) {
 		if (ref($c) &&
 		    ($c->{'type'} eq 'checkbox' || $c->{'type'} eq 'radio')) {
-			$tds[$cc] .= " width=5" if ($tds[$cc] !~ /width=/);
+			$tds[$cc] .= " width='5'" if ($tds[$cc] !~ /width=/);
 			}
 		$cc++;
 		}
@@ -471,6 +550,7 @@ foreach my $r (@$data) {
 			if ($c->{'nowrap'}) {
 				$rtds[$cn] .= " nowrap";
 				}
+			$rtds[$cn] .= " ".$c->{'td'} if ($c->{'td'});
 			}
 		$cn++;
 		}
@@ -509,6 +589,8 @@ Similar to ui_columns_table, but wrapped in a form. Parameters are :
 =item otherslinks - An array ref of other links to put at the top of the table, each of which is a 3-element hash ref of url, text and alignment (left or right).
 
 =item hiddens - An array ref of hidden fields, each of which is a 2-element array ref containing the name and value.
+
+=item formno - Index of this form on the page. Defaults to 0, but should be set if there is more than one form on the page.
 
 All other parameters are the same as ui_columns_table.
 
@@ -551,7 +633,7 @@ if (@$data) {
 if (@rightlinks) {
 	$links = &ui_grid_table([ &ui_links_row(\@leftlinks),
 				  &ui_links_row(\@rightlinks) ], 2, 100,
-			        [ undef, "align=right" ]);
+			        [ undef, "align='right'" ]);
 	}
 elsif (@leftlinks) {
 	$links = &ui_links_row(\@leftlinks);
@@ -597,21 +679,21 @@ parameters are :
 =cut
 sub ui_form_start
 {
+$ui_formcount ||= 0;
 return &theme_ui_form_start(@_) if (defined(&theme_ui_form_start));
 my ($script, $method, $target, $tags) = @_;
 my $rv;
 $rv .= "<form class='ui_form' action='".&html_escape($script)."' ".
-	($method eq "post" ? "method=post" :
+	($method eq "post" ? "method='post'" :
 	 $method eq "form-data" ?
-		"method=post enctype=multipart/form-data" :
-		"method=get").
-	($target ? " target=$target" : "").
-        " ".$tags.
-       ">\n";
+		"method='post' enctype='multipart/form-data'" :
+		"method='get'").
+	($target ? " target='$target'" : "").
+        ($tags ? " ".$tags : "").">\n";
 return $rv;
 }
 
-=head2 ui_form_end([&buttons], [width])
+=head2 ui_form_end([&buttons], [width], [nojs])
 
 Returns HTML for the end of a form, optionally with a row of submit buttons.
 These are specified by the buttons parameter, which is an array reference
@@ -627,21 +709,24 @@ of array refs, with the following elements :
 
 =item Additional HTML attributes to appear inside the button's input tag.
 
+=item Don't include generated javascript for ui_opt_textbox
+
 =cut
 sub ui_form_end
 {
+$ui_formcount++;
 return &theme_ui_form_end(@_) if (defined(&theme_ui_form_end));
-my ($buttons, $width) = @_;
+my ($buttons, $width, $nojs) = @_;
 my $rv;
 if ($buttons && @$buttons) {
-	$rv .= "<table class='ui_form_end_buttons' ".($width ? " width=$width" : "")."><tr>\n";
+	$rv .= "<table class='ui_form_end_buttons' ".($width ? " width='$width'" : "")."><tr>\n";
 	my $b;
 	foreach $b (@$buttons) {
 		if (ref($b)) {
 			$rv .= "<td".(!$width ? "" :
-				      $b eq $buttons->[0] ? " align=left" :
+				      $b eq $buttons->[0] ? " align='left'" :
 				      $b eq $buttons->[@$buttons-1] ?
-					" align=right" : " align=center").">".
+					" align='right'" : " align='center'").">".
 			       &ui_submit($b->[1], $b->[0], $b->[3], $b->[4]).
 			       ($b->[2] ? " ".$b->[2] : "")."</td>\n";
 			}
@@ -655,6 +740,16 @@ if ($buttons && @$buttons) {
 	$rv .= "</tr></table>\n";
 	}
 $rv .= "</form>\n";
+if ( !$nojs ) {
+    # When going back to a form, re-enable any text fields generated by
+    # ui_opt_textbox that aren't in the default state.
+    $rv .= "<script type='text/javascript'>\n";
+    $rv .= "var opts = document.getElementsByClassName('ui_opt_textbox');\n";
+    $rv .= "for(var i=0; i<opts.length; i++) {\n";
+    $rv .= "  opts[i].disabled = document.getElementsByName(opts[i].name+'_def')[0].checked;\n";
+    $rv .= "}\n";
+    $rv .= "</script>\n";
+}
 return $rv;
 }
 
@@ -680,12 +775,13 @@ sub ui_textbox
 return &theme_ui_textbox(@_) if (defined(&theme_ui_textbox));
 my ($name, $value, $size, $dis, $max, $tags) = @_;
 $size = &ui_max_text_width($size);
-return "<input class='ui_textbox' name=\"".&quote_escape($name)."\" ".
-       "value=\"".&quote_escape($value)."\" ".
-       "size=$size ".($dis ? "disabled=true" : "").
-       ($max ? " maxlength=$max" : "").
-       " ".$tags.
-       ">";
+return "<input class='ui_textbox' type='text' ".
+       "name=\"".&html_escape($name)."\" ".
+       "id=\"".&html_escape($name)."\" ".
+       "value=\"".&html_escape($value)."\" ".
+       "size=$size".($dis ? " disabled='true'" : "").
+       ($max ? " maxlength='$max'" : "").
+       ($tags ? " ".$tags : "").">";
 }
 
 =head2 ui_filebox(name, value, size, [disabled?], [maxlength], [tags], [dir-only])
@@ -770,15 +866,20 @@ method. The parameters are :
 
 =item tags - Additional HTML attributes for the <input> tag.
 
+=item multiple - Set to 1 to allow uploading of multiple files
+
 =cut
 sub ui_upload
 {
 return &theme_ui_upload(@_) if (defined(&theme_ui_upload));
-my ($name, $size, $dis, $tags) = @_;
+my ($name, $size, $dis, $tags, $multiple) = @_;
 $size = &ui_max_text_width($size);
-return "<input class='ui_upload' type=file name=\"".&quote_escape($name)."\" ".
-       "size=$size ".
-       ($dis ? "disabled=true" : "").
+return "<input class='ui_upload' type='file' ".
+       "name=\"".&quote_escape($name)."\" ".
+       "id=\"".&quote_escape($name)."\" ".
+       "size='$size'".
+       ($dis ? " disabled='true'" : "").
+       ($multiple ? " multiple" : "").
        ($tags ? " ".$tags : "").">";
 }
 
@@ -793,13 +894,13 @@ sub ui_password
 return &theme_ui_password(@_) if (defined(&theme_ui_password));
 my ($name, $value, $size, $dis, $max, $tags) = @_;
 $size = &ui_max_text_width($size);
-return "<input class='ui_password' ".
-       "type=password name=\"".&quote_escape($name)."\" ".
-       "value=\"".&quote_escape($value)."\" ".
-       "size=$size ".($dis ? "disabled=true" : "").
-       ($max ? " maxlength=$max" : "").
-       " ".$tags.
-       ">";
+return "<input class='ui_password' type='password' ".
+       "name=\"".&quote_escape($name)."\" ".
+       "id=\"".&quote_escape($name)."\" ".
+       ($value ne "" ? "value=\"".&quote_escape($value)."\" " : "").
+       "size='$size'".($dis ? " disabled='true'" : "").
+       ($max ? " maxlength='$max'" : "").
+       ($tags ? " ".$tags : "").">";
 }
 
 =head2 ui_hidden(name, value)
@@ -811,12 +912,13 @@ sub ui_hidden
 {
 return &theme_ui_hidden(@_) if (defined(&theme_ui_hidden));
 my ($name, $value) = @_;
-return "<input class='ui_hidden' type=hidden ".
+return "<input class='ui_hidden' type='hidden' ".
        "name=\"".&quote_escape($name)."\" ".
+       "id=\"".&quote_escape($name)."\" ".
        "value=\"".&quote_escape($value)."\">\n";
 }
 
-=head2 ui_select(name, value|&values, &options, [size], [multiple], [add-if-missing], [disabled?], [javascript])
+=head2 ui_select(name, value|&values, &options, [size], [multiple], [add-if-missing], [disabled?], [tags])
 
 Returns HTML for a drop-down menu or multiple selection list. The parameters
 are :
@@ -835,31 +937,33 @@ are :
 
 =item disabled - Set to 1 to disable this input.
 
-=item javascript - Additional HTML attributes for the <select> input.
+=item tags - Additional HTML attributes for the <select> input.
 
 =cut
 sub ui_select
 {
 return &theme_ui_select(@_) if (defined(&theme_ui_select));
-my ($name, $value, $opts, $size, $multiple, $missing, $dis, $js) = @_;
+my ($name, $value, $opts, $size, $multiple, $missing, $dis, $tags) = @_;
 my $rv;
-$rv .= "<select class='ui_select' name=\"".&quote_escape($name)."\"".
-       ($size ? " size=$size" : "").
+$rv .= "<select class='ui_select' ".
+       "name=\"".&quote_escape($name)."\" ".
+       "id=\"".&quote_escape($name)."\" ".
+       ($size ? " size='$size'" : "").
        ($multiple ? " multiple" : "").
-       ($dis ? " disabled=true" : "")." ".$js.">\n";
+       ($dis ? " disabled=true" : "").($tags ? " ".$tags : "").">\n";
 my ($o, %opt, $s);
 my %sel = ref($value) ? ( map { $_, 1 } @$value ) : ( $value, 1 );
 foreach $o (@$opts) {
 	$o = [ $o ] if (!ref($o));
 	$rv .= "<option value=\"".&quote_escape($o->[0])."\"".
-	       ($sel{$o->[0]} ? " selected" : "")." ".$o->[2].">".
-	       ($o->[1] || $o->[0])."\n";
+	       ($sel{$o->[0]} ? " selected" : "").($o->[2] ne '' ? " ".$o->[2] : "").">".
+	       ($o->[1] || $o->[0])."</option>\n";
 	$opt{$o->[0]}++;
 	}
 foreach $s (keys %sel) {
 	if (!$opt{$s} && $missing) {
 		$rv .= "<option value=\"".&quote_escape($s)."\"".
-		       "selected>".($s eq "" ? "&nbsp;" : $s)."\n";
+		       " selected>".($s eq "" ? "&nbsp;" : $s)."</option>\n";
 		}
 	}
 $rv .= "</select>\n";
@@ -915,16 +1019,16 @@ if (!$main::ui_multi_select_donejs++) {
 	}
 $rv .= "<table cellpadding=0 cellspacing=0 class='ui_multi_select'>";
 if (defined($opts_title)) {
-	$rv .= "<tr class='ui_multi_select_heads'> ".
+	$rv .= "<tr class='ui_multi_select_heads'>".
 	       "<td><b>$opts_title</b></td> ".
-	       "<td></td> <td><b>$vals_title</b></td> </tr>";
+	       "<td></td><td><b>$vals_title</b></td></tr>";
 	}
 $rv .= "<tr class='ui_multi_select_row'>";
 $rv .= "<td>".&ui_select($name."_opts", [ ], $leftover,
 			 $size, 1, 0, $dis, $wstyle)."</td>\n";
-$rv .= "<td>".&ui_button("->", $name."_add", $dis,
+$rv .= "<td>".&ui_button("&#x25B6;", $name."_add", $dis,
 		 "onClick='multi_select_move(\"$name\", form, 1)'")."<br>".
-	      &ui_button("<-", $name."_remove", $dis,
+	      &ui_button("&#x25C0;", $name."_remove", $dis,
 		 "onClick='multi_select_move(\"$name\", form, 0)'")."</td>\n";
 $rv .= "<td>".&ui_select($name."_vals", [ ], $values,
 			 $size, 1, 0, $dis, $wstyle)."</td>\n";
@@ -943,7 +1047,7 @@ sub ui_multi_select_javascript
 return &theme_ui_multiselect_javascript()
 	if (defined(&theme_ui_multiselect_javascript));
 return <<EOF;
-<script>
+<script type='text/javascript'>
 // Move an element from the options list to the values list, or vice-versa
 function multi_select_move(name, f, dir)
 {
@@ -1013,17 +1117,17 @@ foreach $o (@$opts) {
 	my $id = &quote_escape($name."_".$o->[0]);
 	my $label = $o->[1] || $o->[0];
 	my $after;
-	if ($label =~ /^(.*?)((<a\s+href|<input|<select|<textarea)[\000-\377]*)$/i) {
+	if ($label =~ /^([\000-\377]*?)((<a\s+href|<input|<select|<textarea|<span|<br|<p)[\000-\377]*)$/i) {
 		$label = $1;
 		$after = $2;
 		}
-	$rv .= "<input class='ui_radio' type=radio ".
+	$rv .= "<input class='ui_radio' type='radio' ".
 	       "name=\"".&quote_escape($name)."\" ".
                "value=\"".&quote_escape($o->[0])."\"".
 	       ($o->[0] eq $value ? " checked" : "").
-	       ($dis ? " disabled=true" : "").
+	       ($dis ? " disabled='true'" : "").
 	       " id=\"$id\"".
-	       " $o->[2]> <label for=\"$id\">".
+	       ($o->[2] ? " ".$o->[2] : "")."> <label for=\"$id\">".
 	       $label."</label>".$after."\n";
 	}
 return $rv;
@@ -1051,7 +1155,9 @@ my ($name, $value, $yes, $no, $dis) = @_;
 return &theme_ui_yesno_radio(@_) if (defined(&theme_ui_yesno_radio));
 $yes = 1 if (!defined($yes));
 $no = 0 if (!defined($no));
-$value = int($value);
+if ( $value =~ /^[0-9,.E]+$/ || !$value) {
+        $value = int($value);
+}
 return &ui_radio($name, $value, [ [ $yes, $text{'yes'} ],
 				  [ $no, $text{'no'} ] ], $dis);
 }
@@ -1082,12 +1188,12 @@ if ($label =~ /^([^<]*)(<[\000-\377]*)$/) {
 	$label = $1;
 	$after = $2;
 	}
-return "<input class='ui_checkbox' type=checkbox ".
+return "<input class='ui_checkbox' type='checkbox' ".
        "name=\"".&quote_escape($name)."\" ".
        "value=\"".&quote_escape($value)."\" ".
-       ($sel ? " checked" : "").($dis ? " disabled=true" : "").
+       ($sel ? " checked" : "").($dis ? " disabled='true'" : "").
        " id=\"".&quote_escape("${name}_${value}")."\"".
-       " $tags> ".
+       ($tags ? " ".$tags : "")."> ".
        ($label eq "" ? $after :
 	 "<label for=\"".&quote_escape("${name}_${value}").
 	 "\">$label</label>$after")."\n";
@@ -1120,11 +1226,14 @@ if ($label =~ /^([^<]*)(<[\000-\377]*)$/) {
 	$label = $1;
 	$after = $2;
 	}
-return "<input class='ui_radio' type=radio name=\"".&quote_escape($name)."\" ".
+my $ret = "<input class='ui_radio' type='radio' name=\"".&quote_escape($name)."\" ".
        "value=\"".&quote_escape($value)."\" ".
-       ($sel ? " checked" : "").($dis ? " disabled=true" : "").
+       ($sel ? " checked" : "").($dis ? " disabled='true'" : "").
        " id=\"$id\"".
-       " $tags> <label for=\"$id\">$label</label>$after\n";
+       ($tags ? " ".$tags : "").">";
+    $ret .= " <label for=\"$id\">$label</label>" if ($label ne '');
+    $ret .= "$after\n";
+    return $ret;
 }
 
 =head2 ui_textarea(name, value, rows, cols, [wrap], [disabled?], [tags])
@@ -1151,9 +1260,11 @@ sub ui_textarea
 return &theme_ui_textarea(@_) if (defined(&theme_ui_textarea));
 my ($name, $value, $rows, $cols, $wrap, $dis, $tags) = @_;
 $cols = &ui_max_text_width($cols, 1);
-return "<textarea class='ui_textarea' name=\"".&quote_escape($name)."\" ".
-       "rows=$rows cols=$cols".($wrap ? " wrap=$wrap" : "").
-       ($dis ? " disabled=true" : "").
+return "<textarea class='ui_textarea' ".
+       "name=\"".&quote_escape($name)."\" ".
+       "id=\"".&quote_escape($name)."\" ".
+       "rows='$rows' cols='$cols'".($wrap ? " wrap='$wrap'" : "").
+       ($dis ? " disabled='true'" : "").
        ($tags ? " $tags" : "").">".
        &html_escape($value).
        "</textarea>";
@@ -1220,12 +1331,13 @@ $size = &ui_max_text_width($size);
 $rv .= &ui_radio($name."_def", $value eq '' ? 1 : 0,
 		 [ [ 1, $opt1, "onClick='$dis1'" ],
 		   [ 0, $opt2 || " ", "onClick='$dis2'" ] ], $dis)."\n";
-$rv .= "<input class='ui_opt_textbox' name=\"".&quote_escape($name)."\" ".
-       "size=$size value=\"".&quote_escape($value)."\" ".
-       ($value eq "" || $dis ? "disabled=true" : "").
-       ($max ? " maxlength=$max" : "").
-       " ".$tags.
-       ">\n";
+$rv .= "<input class='ui_opt_textbox' type='text' ".
+       "name=\"".&quote_escape($name)."\" ".
+       "id=\"".&quote_escape($name)."\" ".
+       "size=$size value=\"".&quote_escape($value)."\"".
+       ($dis ? " disabled='true'" : "").
+       ($max ? " maxlength='$max'" : "").
+       ($tags ? " ".$tags : "").">";
 return $rv;
 }
 
@@ -1246,15 +1358,15 @@ sub ui_submit
 {
 return &theme_ui_submit(@_) if (defined(&theme_ui_submit));
 my ($label, $name, $dis, $tags) = @_;
-return "<input class='ui_submit' type=submit".
+return "<input class='ui_submit' type='submit'".
        ($name ne '' ? " name=\"".&quote_escape($name)."\"" : "").
+       ($name ne '' ? " id=\"".&quote_escape($name)."\"" : "").
        " value=\"".&quote_escape($label)."\"".
-       ($dis ? " disabled=true" : "").
+       ($dis ? " disabled='true'" : "").
        ($tags ? " ".$tags : "").">\n";
-			
 }
 
-=head2 ui_reset(label, [disabled?])
+=head2 ui_reset(label, [disabled?], [tags])
 
 Returns HTML for a form reset button, which clears all fields when clicked.
 Parameters are :
@@ -1263,14 +1375,16 @@ Parameters are :
 
 =item disabled - Set to 1 if this button should be disabled by default.
 
+=item tags - Additional HTML attributes for the <input> tag.
+
 =cut
 sub ui_reset
 {
 return &theme_ui_reset(@_) if (defined(&theme_ui_reset));
-my ($label, $dis) = @_;
-return "<input type=reset value=\"".&quote_escape($label)."\"".
-       ($dis ? " disabled=true" : "").">\n";
-			
+my ($label, $dis, $tags) = @_;
+return "<input class='ui_reset' type='reset' value=\"".&quote_escape($label)."\"".
+       ($dis ? " disabled='true'" : "").
+       ($tags ? " ".$tags : "").">\n";
 }
 
 =head2 ui_button(label, [name], [disabled?], [tags])
@@ -1291,10 +1405,11 @@ sub ui_button
 {
 return &theme_ui_button(@_) if (defined(&theme_ui_button));
 my ($label, $name, $dis, $tags) = @_;
-return "<input type=button".
+return "<input class='ui_button' type='button'".
        ($name ne '' ? " name=\"".&quote_escape($name)."\"" : "").
+       ($name ne '' ? " id=\"".&quote_escape($name)."\"" : "").
        " value=\"".&quote_escape($label)."\"".
-       ($dis ? " disabled=true" : "").
+       ($dis ? " disabled='true'" : "").
        ($tags ? " ".$tags : "").">\n";
 }
 
@@ -1320,6 +1435,7 @@ The parameters are :
 =cut
 sub ui_date_input
 {
+return &theme_ui_date_input(@_) if (defined(&theme_ui_date_input));
 my ($day, $month, $year, $dayname, $monthname, $yearname, $dis) = @_;
 my $rv;
 $rv .= "<span class='ui_data'>";
@@ -1336,7 +1452,7 @@ return $rv;
 
 =head2 ui_buttons_start
 
-Returns HTML for the start of a block of action buttoms with descriptions, as
+Returns HTML for the start of a block of action buttons with descriptions, as
 generated by ui_buttons_row. Some example code :
 
   print ui_buttons_start();
@@ -1350,7 +1466,7 @@ generated by ui_buttons_row. Some example code :
 sub ui_buttons_start
 {
 return &theme_ui_buttons_start(@_) if (defined(&theme_ui_buttons_start));
-return "<table width=100% class='ui_buttons_table'>\n";
+return "<table width='100%' class='ui_buttons_table'>\n";
 }
 
 =head2 ui_buttons_end
@@ -1364,7 +1480,7 @@ return &theme_ui_buttons_end(@_) if (defined(&theme_ui_buttons_end));
 return "</table>\n";
 }
 
-=head2 ui_buttons_row(script, button-label, description, [hiddens], [after-submit], [before-submit]) 
+=head2 ui_buttons_row(script, button-label, description, [hiddens], [after-submit], [before-submit])
 
 Returns HTML for a button with a description next to it, and perhaps other
 inputs. The parameters are :
@@ -1386,14 +1502,17 @@ sub ui_buttons_row
 {
 return &theme_ui_buttons_row(@_) if (defined(&theme_ui_buttons_row));
 my ($script, $label, $desc, $hiddens, $after, $before) = @_;
-return "<form action=$script class='ui_buttons_form'>\n".
+if (ref($hiddens)) {
+	$hiddens = join("\n", map { &ui_hidden(@$_) } @$hiddens);
+	}
+return "<form action='$script' class='ui_buttons_form' method='post'>\n".
        $hiddens.
        "<tr class='ui_buttons_row'> ".
-       "<td nowrap width=20% valign=top class=ui_buttons_label>".
+       "<td nowrap width='20%' valign='top' class='ui_buttons_label'>".
        ($before ? $before." " : "").
        &ui_submit($label).($after ? " ".$after : "")."</td>\n".
-       "<td valign=top width=80% valign=top class=ui_buttons_value>".
-       $desc."</td> </tr>\n".
+       "<td width='80%' valign='top' class='ui_buttons_value'>".
+       $desc."</td></tr>\n".
        "</form>\n";
 }
 
@@ -1407,10 +1526,10 @@ sub ui_buttons_hr
 my ($title) = @_;
 return &theme_ui_buttons_hr(@_) if (defined(&theme_ui_buttons_hr));
 if ($title) {
-	return "<tr class='ui_buttons_hr'> <td colspan=2><table cellpadding=0 cellspacing=0 width=100%><tr> <td width=50%><hr></td> <td nowrap>$title</td> <td width=50%><hr></td> </tr></table></td> </tr>\n";
+	return "<tr class='ui_buttons_hr'><td colspan='2'><table cellpadding='0' cellspacing='0' width='100%'><tr><td width='50%'><hr></td><td nowrap>$title</td><td width='50%'><hr></td></tr></table></td></tr>\n";
 	}
 else {
-	return "<tr class='ui_buttons_hr'> <td colspan=2><hr></td> </tr>\n";
+	return "<tr class='ui_buttons_hr'><td colspan='2'><hr></td></tr>\n";
 	}
 }
 
@@ -1428,7 +1547,7 @@ sub ui_post_header
 return &theme_ui_post_header(@_) if (defined(&theme_ui_post_header));
 my ($text) = @_;
 my $rv;
-$rv .= "<center class='ui_post_header'><font size=+1>$text</font></center>\n" if (defined($text));
+$rv .= "<center class='ui_post_header'><font size='+1'>$text</font></center>\n" if (defined($text));
 if (!$tconfig{'nohr'} && !$tconfig{'notophr'}) {
 	$rv .= "<hr id='post_header_hr'>\n";
 	}
@@ -1501,11 +1620,15 @@ output while performing some long-running process.
 =cut
 sub ui_print_unbuffered_header
 {
+my @args = @_;
 &load_theme_library();
-return &theme_ui_print_unbuffered_header(@_) if (defined(&theme_ui_print_unbuffered_header));
+return &theme_ui_print_unbuffered_header(@args)
+	if (defined(&theme_ui_print_unbuffered_header));
 $| = 1;
 $theme_no_table = 1;
-&ui_print_header(@_);
+$args[9] .= " " if ($args[9]);
+$args[9] .= " data-pagescroll=true";
+&ui_print_header(@args);
 }
 
 =head2 ui_print_footer(args...)
@@ -1532,7 +1655,8 @@ sub ui_config_link
 {
 return &theme_ui_config_link(@_) if (defined(&theme_ui_config_link));
 my ($text, $subs) = @_;
-my @subs = map { $_ || "../config.cgi?$module_name" }
+my $m = &get_module_name();
+my @subs = map { $_ || "../config.cgi?$m" }
 		  ($subs ? @$subs : ( undef ));
 return "<p>".&text($text, @subs)."<p>\n";
 }
@@ -1599,11 +1723,11 @@ $jscb =~ s/'/\\'/g;
 $jstb =~ s/'/\\'/g;
 
 return <<EOF;
-<style>
+<style type='text/css'>
 .opener_shown {display:inline}
 .opener_hidden {display:none}
 </style>
-<script>
+<script type='text/javascript'>
 // Open or close a hidden section
 function hidden_opener(divid, openerid)
 {
@@ -1630,7 +1754,7 @@ for(var i=0; i<tabnames.length; i++) {
   var title = tabtitles[i];
   if (tabnames[i] == tabname) {
     // Selected table
-    tabobj.innerHTML = '<table cellpadding=0 cellspacing=0><tr>'+
+    tabobj.innerHTML = '<table cellpadding="0" cellspacing="0"><tr>'+
 		       '<td valign=top $jscb>'+
 		       '<img src=$imgdir/lc2.gif alt=""></td>'+
 		       '<td $jscb nowrap>'+
@@ -1642,14 +1766,14 @@ for(var i=0; i<tabnames.length; i++) {
     }
   else {
     // Non-selected tab
-    tabobj.innerHTML = '<table cellpadding=0 cellspacing=0><tr>'+
-		       '<td valign=top $jstb>'+
-		       '<img src=$imgdir/lc1.gif alt=""></td>'+
+    tabobj.innerHTML = '<table cellpadding="0" cellspacing="0"><tr>'+
+		       '<td valign="top" $jstb>'+
+		       '<img src="$imgdir/lc1.gif" alt=""></td>'+
 		       '<td $jstb nowrap>'+
                        '&nbsp;<a href=\\'\\' onClick=\\'return select_tab("'+
 		       name+'", "'+tabnames[i]+'")\\'>'+title+'</a>&nbsp;</td>'+
-		       '<td valign=top $jstb>'+
-    		       '<img src=$imgdir/rc1.gif alt=""></td>'+
+		       '<td valign="top" $jstb>'+
+    		       '<img src="$imgdir/rc1.gif" alt=""></td>'+
 		       '</tr></table>';
     divobj.className = 'opener_hidden';
     }
@@ -1728,12 +1852,14 @@ my $divid = "hiddendiv_$name";
 my $openerid = "hiddenopener_$name";
 my $defimg = $status ? "open.gif" : "closed.gif";
 my $defclass = $status ? 'opener_shown' : 'opener_hidden';
-$rrv .= "<a href=\"javascript:hidden_opener('$divid', '$openerid')\" id='$openerid'><img border=0 src='$gconfig{'webprefix'}/images/$defimg'></a>\n";
-$rrv .= "<a href=\"javascript:hidden_opener('$divid', '$openerid')\">$title</a><br>\n";
-$rv .= &ui_table_row(undef, $rrv, $main::ui_table_cols);
+if ($title) {
+	$rrv .= "<a href=\"javascript:hidden_opener('$divid', '$openerid')\" id='$openerid'><img border=0 src='$gconfig{'webprefix'}/images/$defimg'></a>\n";
+	$rrv .= "<a href=\"javascript:hidden_opener('$divid', '$openerid')\">$title</a><br>\n";
+	$rv .= &ui_table_row(undef, $rrv, $main::ui_table_cols);
+	}
 $rv .= "</table>\n";
 $rv .= "<div class='$defclass' id='$divid'>\n";
-$rv .= "<table width=100%>\n";
+$rv .= "<table width='100%'>\n";
 return $rv;
 }
 
@@ -1747,7 +1873,7 @@ sub ui_hidden_table_row_end
 return &theme_ui_hidden_table_row_end(@_)
 	if (defined(&theme_ui_hidden_table_row_end));
 my ($name) = @_;
-return "</table></div><table width=100%>\n";
+return "</table></div><table width='100%'>\n";
 }
 
 =head2 ui_hidden_table_start(heading, [tabletags], [cols], name, status, [&default-tds], [rightheading])
@@ -1786,22 +1912,22 @@ my $divid = "hiddendiv_$name";
 my $openerid = "hiddenopener_$name";
 my $defimg = $status ? "open.gif" : "closed.gif";
 my $defclass = $status ? 'opener_shown' : 'opener_hidden';
-my $text = defined($tconfig{'cs_text'}) ? $tconfig{'cs_text'} : 
+my $text = defined($tconfig{'cs_text'}) ? $tconfig{'cs_text'} :
 	      defined($gconfig{'cs_text'}) ? $gconfig{'cs_text'} : "000000";
 $rv .= "<table class='ui_table' border $tabletags>\n";
 my $colspan = 1;
 if (defined($heading) || defined($rightheading)) {
-	$rv .= "<tr $tb> <td>";
+	$rv .= "<tr".($tb ? " ".$tb : "")."><td>";
 	if (defined($heading)) {
-		$rv .= "<a href=\"javascript:hidden_opener('$divid', '$openerid')\" id='$openerid'><img border=0 src='$gconfig{'webprefix'}/images/$defimg'></a> <a href=\"javascript:hidden_opener('$divid', '$openerid')\"><b><font color=#$text>$heading</font></b></a></td>";
+		$rv .= "<a href=\"javascript:hidden_opener('$divid', '$openerid')\" id='$openerid'><img border=0 src='$gconfig{'webprefix'}/images/$defimg'></a> <a href=\"javascript:hidden_opener('$divid', '$openerid')\"><b><font color='#$text'>$heading</font></b></a></td>";
 		}
 	if (defined($rightheading)) {
-                $rv .= "<td align=right>$rightheading</td>";
+                $rv .= "<td align='right'>$rightheading</td>";
                 $colspan++;
                 }
 	$rv .= "</td> </tr>\n";
 	}
-$rv .= "<tr $cb> <td colspan=$colspan><div class='$defclass' id='$divid'><table width=100%>\n";
+$rv .= "<tr".($cb ? " ".$cb : "")."><td colspan='$colspan'><div class='$defclass' id='$divid'><table width='100%'>\n";
 $main::ui_table_cols = $cols || 4;
 $main::ui_table_pos = 0;
 $main::ui_table_default_tds = $tds;
@@ -1863,7 +1989,7 @@ if (!$main::ui_hidden_start_donejs++) {
 # Build list of tab titles and names
 my $tabnames = "[".join(",", map { "\"".&quote_escape($_->[0])."\"" } @$tabs)."]";
 my $tabtitles = "[".join(",", map { "\"".&quote_escape($_->[1])."\"" } @$tabs)."]";
-$rv .= "<script>\n";
+$rv .= "<script type='text/javascript'>\n";
 $rv .= "document.${name}_tabnames = $tabnames;\n";
 $rv .= "document.${name}_tabtitles = $tabtitles;\n";
 $rv .= "</script>\n";
@@ -1871,60 +1997,60 @@ $rv .= "</script>\n";
 # Output the tabs
 my $imgdir = "$gconfig{'webprefix'}/images";
 $rv .= &ui_hidden($name, $sel)."\n";
-$rv .= "<table border=0 cellpadding=0 cellspacing=0 class='ui_tabs'>\n";
-$rv .= "<tr><td bgcolor=#ffffff colspan=".(scalar(@$tabs)*2+1).">";
+$rv .= "<table border='0' cellpadding='0' cellspacing='0' class='ui_tabs'>\n";
+$rv .= "<tr><td bgcolor='#ffffff' colspan='".(scalar(@$tabs)*2+1)."'>";
 if ($ENV{'HTTP_USER_AGENT'} !~ /msie/i) {
 	# For some reason, the 1-pixel space above the tabs appears huge on IE!
-	$rv .= "<img src=$imgdir/1x1.gif>";
+	$rv .= "<img src='$imgdir/1x1.gif'>";
 	}
 $rv .= "</td></tr>\n";
 $rv .= "<tr>\n";
-$rv .= "<td bgcolor=#ffffff width=1><img src=$imgdir/1x1.gif></td>\n";
+$rv .= "<td bgcolor='#ffffff' width='1'><img src='$imgdir/1x1.gif'></td>\n";
 foreach my $t (@$tabs) {
 	if ($t ne $$tabs[0]) {
 		# Spacer
-		$rv .= "<td width=2 bgcolor=#ffffff class='ui_tab_spacer'>".
-		       "<img src=$imgdir/1x1.gif></td>\n";
+		$rv .= "<td width='2' bgcolor='#ffffff' class='ui_tab_spacer'>".
+		       "<img src='$imgdir/1x1.gif'></td>\n";
 		}
 	my $tabid = "tab_".$t->[0];
-	$rv .= "<td id=${tabid} class='ui_tab'>";
-	$rv .= "<table cellpadding=0 cellspacing=0 border=0><tr>";
+	$rv .= "<td id='${tabid}' class='ui_tab'>";
+	$rv .= "<table cellpadding='0' cellspacing='0' border='0'><tr>";
 	if ($t->[0] eq $sel) {
 		# Selected tab
-		$rv .= "<td valign=top $cb class='selectedTabLeft'>".
-		       "<img src=$imgdir/lc2.gif alt=\"\"></td>";
-		$rv .= "<td $cb nowrap class='selectedTabMiddle'>".
+		$rv .= "<td valign='top'".($cb ? " ".$cb : "")." class='selectedTabLeft'>".
+		       "<img src='$imgdir/lc2.gif' alt=\"\"></td>";
+		$rv .= "<td".($cb ? " ".$cb : "")." nowrap class='selectedTabMiddle'>".
 		       "&nbsp;<b>$t->[1]</b>&nbsp;</td>";
-		$rv .= "<td valign=top $cb class='selectedTabRight'>".
+		$rv .= "<td valign=top".($cb ? " ".$cb : "")." class='selectedTabRight'>".
 		       "<img src=$imgdir/rc2.gif alt=\"\"></td>";
 		}
 	else {
 		# Other tab (which has a link)
-		$rv .= "<td valign=top $tb>".
-		       "<img src=$imgdir/lc1.gif alt=\"\"></td>";
-		$rv .= "<td $tb nowrap>".
+		$rv .= "<td valign='top'".($tb ? " ".$tb : "").">".
+		       "<img src='$imgdir/lc1.gif' alt=\"\"></td>";
+		$rv .= "<td".($tb ? " ".$tb : "")." nowrap>".
 		       "&nbsp;<a href='$t->[2]' ".
 		       "onClick='return select_tab(\"$name\", \"$t->[0]\")'>".
 		       "$t->[1]</a>&nbsp;</td>";
-		$rv .= "<td valign=top $tb>".
-		       "<img src=$imgdir/rc1.gif ".
+		$rv .= "<td valign='top'".($tb ? " ".$tb : "")." >".
+		       "<img src='$imgdir/rc1.gif' ".
 		       "alt=\"\"></td>";
 		$rv .= "</td>\n";
 		}
 	$rv .= "</tr></table>";
 	$rv .= "</td>\n";
 	}
-$rv .= "<td bgcolor=#ffffff width=1><img src=$imgdir/1x1.gif></td>\n";
+$rv .= "<td bgcolor='#ffffff' width='1'><img src='$imgdir/1x1.gif'></td>\n";
 $rv .= "</table>\n";
 
 if ($border) {
 	# All tabs are within a grey box
-	$rv .= "<table width=100% cellpadding=0 cellspacing=0 border=0 ".
+	$rv .= "<table width='100%' cellpadding='0' cellspacing='0' border='0' ".
 	       "class='ui_tabs_box'>\n";
-	$rv .= "<tr> <td bgcolor=#ffffff rowspan=3 width=1><img src=$imgdir/1x1.gif></td>\n";
-	$rv .= "<td $cb colspan=3 height=2><img src=$imgdir/1x1.gif></td> </tr>\n";
-	$rv .= "<tr> <td $cb width=2><img src=$imgdir/1x1.gif></td>\n";
-	$rv .= "<td valign=top>";
+	$rv .= "<tr> <td bgcolor='#ffffff' rowspan='3' width='1'><img src='$imgdir/1x1.gif'></td>\n";
+	$rv .= "<td".($cb ? " ".$cb : "")." colspan='3' height='2'><img src='$imgdir/1x1.gif'></td> </tr>\n";
+	$rv .= "<tr> <td".($cb ? " ".$cb : "")." width='2'><img src='$imgdir/1x1.gif'></td>\n";
+	$rv .= "<td valign='top'>";
 	}
 $main::ui_tabs_selected = $sel;
 return $rv;
@@ -1944,9 +2070,9 @@ my $rv;
 my $imgdir = "$gconfig{'webprefix'}/images";
 if ($border) {
 	$rv .= "</td>\n";
-	$rv .= "<td $cb width=2><img src=$imgdir/1x1.gif></td>\n";
+	$rv .= "<td".($cb ? " ".$cb : "")." width='2'><img src='$imgdir/1x1.gif'></td>\n";
 	$rv .= "</tr>\n";
-	$rv .= "<tr> <td $cb colspan=3 height=2><img src=$imgdir/1x1.gif></td> </tr>\n";
+	$rv .= "<tr> <td".($cb ? " ".$cb : "")." colspan='3' height='2'><img src='$imgdir/1x1.gif'></td> </tr>\n";
 	$rv .= "</table>\n";
 	}
 return $rv;
@@ -1955,7 +2081,7 @@ return $rv;
 =head2 ui_tabs_start_tab(name, tab)
 
 Must be called before outputting the HTML for the named tab, and returns HTML
-for the required <div> block. 
+for the required <div> block.
 
 =cut
 sub ui_tabs_start_tab
@@ -1970,7 +2096,7 @@ return $rv;
 
 =head2 ui_tabs_start_tabletab(name, tab)
 
-Behaves like ui_tabs_start_tab, but for use within a ui_table_start block. 
+Behaves like ui_tabs_start_tab, but for use within a ui_table_start block.
 I recommend against using this where possible, as it is difficult for themes
 to implement.
 
@@ -1980,7 +2106,7 @@ sub ui_tabs_start_tabletab
 return &theme_ui_tabs_start_tabletab(@_)
 	if (defined(&theme_ui_tabs_start_tabletab));
 my $div = &ui_tabs_start_tab(@_);
-return "</table>\n".$div."<table width=100%>\n";
+return "</table>\n".$div."<table width='100%'>\n";
 }
 
 =head2 ui_tabs_end_tab
@@ -2003,7 +2129,7 @@ sub ui_tabs_end_tabletab
 {
 return &theme_ui_tabs_end_tabletab(@_)
 	if (defined(&theme_ui_tabs_end_tabletab));
-return "</table></div><table width=100%>\n";
+return "</table></div><table width='100%'>\n";
 }
 
 =head2 ui_max_text_width(width, [text-area?])
@@ -2021,7 +2147,7 @@ return $max && $w > $max ? $max : $w;
 
 ####################### radio hidden functions
 
-=head2 ui_radio_selector(&opts, name, selected)
+=head2 ui_radio_selector(&opts, name, selected, [dropdown-mode])
 
 Returns HTML for a set of radio buttons, each of which shows a different
 block of HTML when selected. The parameters are :
@@ -2032,25 +2158,35 @@ block of HTML when selected. The parameters are :
 
 =item selected - Value for the initially selected button.
 
+=item dropdown - Use a <select> dropdown menu instead of radio buttons
+
 =cut
 sub ui_radio_selector
 {
 return &theme_ui_radio_selector(@_) if (defined(&theme_ui_radio_selector));
-my ($opts, $name, $sel) = @_;
+my ($opts, $name, $sel, $dropdown) = @_;
 my $rv;
 if (!$main::ui_radio_selector_donejs++) {
 	$rv .= &ui_radio_selector_javascript();
 	}
 my $optnames =
 	"[".join(",", map { "\"".&html_escape($_->[0])."\"" } @$opts)."]";
-foreach my $o (@$opts) {
-	$rv .= &ui_oneradio($name, $o->[0], $o->[1], $sel eq $o->[0],
-	    "onClick='selector_show(\"$name\", \"$o->[0]\", $optnames)'");
+if ($dropdown) {
+	$rv .= &ui_select($name, $sel,
+		[ map { [ $_->[0], $_->[1] ] } @$opts ],
+		1, 0, 0, 0,
+		"onChange='selector_show(\"$name\", $name.value, $optnames)'");
+	}
+else {
+	foreach my $o (@$opts) {
+		$rv .= &ui_oneradio($name, $o->[0], $o->[1], $sel eq $o->[0],
+		    "onClick='selector_show(\"$name\", \"$o->[0]\", $optnames)'");
+		}
 	}
 $rv .= "<br>\n";
 foreach my $o (@$opts) {
 	my $cls = $o->[0] eq $sel ? "selector_shown" : "selector_hidden";
-	$rv .= "<div id=sel_${name}_$o->[0] class=$cls>".$o->[2]."</div>\n";
+	$rv .= "<div id='sel_${name}_$o->[0]' class='$cls'>".$o->[2]."</div>\n";
 	}
 return $rv;
 }
@@ -2058,11 +2194,11 @@ return $rv;
 sub ui_radio_selector_javascript
 {
 return <<EOF;
-<style>
+<style type='text/css'>
 .selector_shown {display:inline}
 .selector_hidden {display:none}
 </style>
-<script>
+<script type='text/javascript'>
 function selector_show(name, value, values)
 {
 for(var i=0; i<values.length; i++) {
@@ -2102,13 +2238,13 @@ return &theme_ui_grid_table(@_) if (defined(&theme_ui_grid_table));
 my ($elements, $cols, $width, $tds, $tabletags, $title) = @_;
 return "" if (!@$elements);
 my $rv = "<table class='ui_grid_table'".
-	    ($width ? " width=$width%" : "").
+	    ($width ? " width='$width%'" : "").
 	    ($tabletags ? " ".$tabletags : "").
 	    ">\n";
 my $i;
 for($i=0; $i<@$elements; $i++) {
 	$rv .= "<tr class='ui_grid_row'>" if ($i%$cols == 0);
-	$rv .= "<td ".$tds->[$i%$cols]." valign=top class='ui_grid_cell'>".
+	$rv .= "<td ".$tds->[$i%$cols]." valign='top' class='ui_grid_cell'>".
 	       $elements->[$i]."</td>\n";
 	$rv .= "</tr>" if ($i%$cols == $cols-1);
 	}
@@ -2122,10 +2258,10 @@ if ($i%$cols) {
 	}
 $rv .= "</table>\n";
 if (defined($title)) {
-	$rv = "<table class=ui_table border ".
+	$rv = "<table class='ui_table border' ".
 	      ($width ? " width=$width%" : "").">\n".
-	      ($title ? "<tr $tb> <td><b>$title</b></td> </tr>\n" : "").
-              "<tr $cb> <td>$rv</td> </tr>\n".
+	      ($title ? "<tr".($tb ? " ".$tb : "")."><td><b>$title</b></td></tr>\n" : "").
+              "<tr".($cb ? " ".$cb : "")."><td>$rv</td></tr>\n".
 	      "</table>";
 	}
 return $rv;
@@ -2153,13 +2289,13 @@ return "" if (!@$rows);
 my $rv = "<table class='ui_radio_table'>\n";
 foreach my $r (@$rows) {
 	$rv .= "<tr>\n";
-	$rv .= "<td valign=top".(defined($r->[2]) ? "" : " colspan=2").">".
+	$rv .= "<td valign='top'".(defined($r->[2]) ? "" : " colspan='2'").">".
 	       ($nobold ? "" : "<b>").
 	       &ui_oneradio($name, $r->[0], $r->[1], $r->[0] eq $sel, $r->[3]).
 	       ($nobold ? "" : "</b>").
 	       "</td>\n";
 	if (defined($r->[2])) {
-		$rv .= "<td valign=top>".$r->[2]."</td>\n";
+		$rv .= "<td valign='top'>".$r->[2]."</td>\n";
 		}
 	$rv .= "</tr>\n";
 	}
@@ -2179,26 +2315,32 @@ Returns HTML for moving some objects in a table up or down. The parameters are :
 
 =item down-show - Set to 1 if the down-arrow should be shown, 0 if not.
 
+=item up-icon - Optional path to icon for up link
+
+=item down-icon - Optional path to icon for down link
+
 =cut
 sub ui_up_down_arrows
 {
 return &theme_ui_up_down_arrows(@_) if (defined(&theme_ui_up_down_arrows));
-my ($uplink, $downlink, $upshow, $downshow) = @_;
+my ($uplink, $downlink, $upshow, $downshow, $upicon, $downicon) = @_;
 my $mover;
 my $imgdir = "$gconfig{'webprefix'}/images";
+$upicon ||= "$imgdir/moveup.gif";
+$downicon ||= "$imgdir/movedown.gif";
 if ($downshow) {
-	$mover .= "<a href=\"$downlink\">".
-		  "<img src=$imgdir/movedown.gif border=0></a>";
+	$mover .= "<a class='ui_up_down_arrows_down' href='$downlink'>".
+	  "<img class='ui_up_down_arrows_down' src='$downicon' border='0'></a>";
 	}
 else {
-	$mover .= "<img src=$imgdir/movegap.gif>";
+	$mover .= "<img class='ui_up_down_arrows_gap' src='$imgdir/movegap.gif'>";
 	}
 if ($upshow) {
-	$mover .= "<a href=\"$uplink\">".
-		  "<img src=$imgdir/moveup.gif border=0></a>";
+	$mover .= "<a class='ui_up_down_arrows_up' href='$uplink'>".
+	  "<img class='ui_up_down_arrows_up' src='$upicon' border='0'></a>";
 	}
 else {
-	$mover .= "<img src=$imgdir/movegap.gif>";
+	$mover .= "<img class='ui_up_down_arrows_gap' src='$imgdir/movegap.gif'>";
 	}
 return $mover;
 }
@@ -2207,11 +2349,14 @@ return $mover;
 
 Returns a horizontal row tag, typically just an <hr>
 
+=item tags - Additional HTML attributes for the <hr> tag.
+
 =cut
 sub ui_hr
 {
-return &theme_ui_hr() if (defined(&theme_ui_hr));
-return "<hr>\n";
+return &theme_ui_hr(@_) if (defined(&theme_ui_hr));
+my ($tags) = @_;
+return "<hr class='ui_hr'".($tags ? " ".$tags : "").">\n";
 }
 
 =head2 ui_nav_link(direction, url, disabled)
@@ -2225,11 +2370,11 @@ return &theme_ui_nav_link(@_) if (defined(&theme_ui_nav_link));
 my ($direction, $url, $disabled) = @_;
 my $alt = $direction eq "left" ? '<-' : '->';
 if ($disabled) {
-	return "<img alt=\"$alt\" align=\"middle\""
+	return "<img class='ui_nav_link' alt=\"$alt\" align=\"middle\""
 	     . "src=\"$gconfig{'webprefix'}/images/$direction-grey.gif\">\n";
 	}
 else {
-	return "<a href=\"$url\"><img alt=\"$alt\" align=\"middle\""
+	return "<a class='ui_nav_link' href=\"$url\"><img class='ui_nav_link' alt=\"$alt\" align=\"middle\""
 	     . "src=\"$gconfig{'webprefix'}/images/$direction.gif\"></a>\n";
 	}
 }
@@ -2247,7 +2392,7 @@ action, such as deleting a user. The parameters are :
 
 =item buttons - Array ref of two-element array refs, containing form button names and labels.
 
-=item otherinputs - HTML for extra inputs to include in ther form.
+=item otheirinputs - HTML for extra inputs to include in their form.
 
 =item extra-warning - An additional separate warning message to show.
 
@@ -2256,20 +2401,89 @@ sub ui_confirmation_form
 {
 my ($cgi, $message, $hiddens, $buttons, $others, $warning) = @_;
 my $rv;
-$rv .= "<center class=ui_confirmation>\n";
+$rv .= "<center class='ui_confirmation'>\n";
 $rv .= &ui_form_start($cgi, "post");
 foreach my $h (@$hiddens) {
 	$rv .= &ui_hidden(@$h);
 	}
 $rv .= "<b>$message</b><p>\n";
 if ($warning) {
-	$rv .= "<b><font color=#ff0000>$warning</font></b><p>\n";
+	$rv .= "<b><font color='#ff0000'>$warning</font></b><p>\n";
 	}
 if ($others) {
 	$rv .= $others."<p>\n";
 	}
 $rv .= &ui_form_end($buttons);
 $rv .= "</center>\n";
+return $rv;
+}
+
+=head2 ui_text_type(text, type)
+
+Returns HTML for a text string, with its color determined by $type.
+
+=item text - contains any text string
+
+=item type - returned text color
+
+=cut
+
+sub ui_text_type
+{
+my ($text, $type) = @_;
+my ($rv, $color);
+
+if (defined (&theme_ui_text_type)) {
+    return &theme_ui_text_type(@_);
+    }
+
+if ($type eq "success") { $color = "3c763d"; }
+elsif ($type eq "info") { $color = "31708f"; }
+elsif ($type eq "warn") { $color = "8a6d3b"; }
+elsif ($type eq "danger") { $color = "a94442"; }
+
+$rv .= "<span class='ui_text_type text_type_$type' style='color: #$color'>$text</span>\n";
+
+return $rv;
+}
+
+=head2 ui_alert_box(msg, type)
+
+Returns HTML for an alert box, with background color determined by $type.
+
+$msg contains any text or HTML to be contained within the alert box, and
+can include forms.
+
+Type of alert:
+
+=item success - green
+
+=item info - blue
+
+=item warn - yellow
+
+=item danger - red
+
+=cut
+
+sub ui_alert_box
+{
+my ($msg, $type) = @_;
+my ($rv, $color);
+
+if (defined (&theme_ui_alert_box)) {
+    return &theme_ui_alert_box(@_);
+    }
+
+if ($type eq "success") { $color = "DFF0D8"; }
+elsif ($type eq "info") { $color = "D9EDF7"; }
+elsif ($type eq "warn") { $color = "FCF8E3"; }
+elsif ($type eq "danger") { $color = "F2DEDE"; }
+
+$rv .= "<table class='ui_alert_box' width='100%'><tr bgcolor='#$color'><td align='center'><p>\n";
+$rv .= "$msg\n";
+$rv .= "<p></td></tr></table><p>\n";
+
 return $rv;
 }
 
@@ -2331,19 +2545,19 @@ sub ui_page_flipper
 {
 return &theme_ui_page_flipper(@_) if (defined(&theme_ui_page_flipper));
 my ($msg, $inputs, $cgi, $left, $right, $farleft, $farright, $below) = @_;
-my $rv = "<center>";
+my $rv = "<center class='ui_page_flipper'>";
 $rv .= &ui_form_start($cgi) if ($cgi);
 
 # Far left link, if needed
 if (@_ > 5) {
 	if ($farleft) {
 		$rv .= "<a href='$farleft'>".
-		       "<img src=$gconfig{'webprefix'}/images/first.gif ".
-		       "border=0 align=middle></a>\n";
+		       "<img src='$gconfig{'webprefix'}/images/first.gif' ".
+		       "border='0' align='middle'></a>\n";
 		}
 	else {
-		$rv .= "<img src=$gconfig{'webprefix'}/images/first-grey.gif ".
-		       "border=0 align=middle></a>\n";
+		$rv .= "<img src='$gconfig{'webprefix'}/images/first-grey.gif' ".
+		       "border='0' align='middle'></a>\n";
 		}
 	}
 
@@ -2351,11 +2565,11 @@ if (@_ > 5) {
 if ($left) {
 	$rv .= "<a href='$left'>".
 	       "<img src=$gconfig{'webprefix'}/images/left.gif ".
-	       "border=0 align=middle></a>\n";
+	       "border='0' align='middle'></a>\n";
 	}
 else {
 	$rv .= "<img src=$gconfig{'webprefix'}/images/left-grey.gif ".
-	       "border=0 align=middle></a>\n";
+	       "border='0' align='middle'></a>\n";
 	}
 
 # Message and inputs
@@ -2365,24 +2579,24 @@ $rv .= " ".$inputs if ($inputs);
 # Right link
 if ($right) {
 	$rv .= "<a href='$right'>".
-	       "<img src=$gconfig{'webprefix'}/images/right.gif ".
-	       "border=0 align=middle></a>\n";
+	       "<img src='$gconfig{'webprefix'}/images/right.gif' ".
+	       "border='0' align='middle'></a>\n";
 	}
 else {
-	$rv .= "<img src=$gconfig{'webprefix'}/images/right-grey.gif ".
-	       "border=0 align=middle></a>\n";
+	$rv .= "<img src='$gconfig{'webprefix'}/images/right-grey.gif' ".
+	       "border='0' align='middle'></a>\n";
 	}
 
 # Far right link, if needed
 if (@_ > 5) {
 	if ($farright) {
 		$rv .= "<a href='$farright'>".
-		       "<img src=$gconfig{'webprefix'}/images/last.gif ".
-		       "border=0 align=middle></a>\n";
+		       "<img src='$gconfig{'webprefix'}/images/last.gif' ".
+		       "border='0' align='middle'></a>\n";
 		}
 	else {
-		$rv .= "<img src=$gconfig{'webprefix'}/images/last-grey.gif ".
-		       "border=0 align=middle></a>\n";
+		$rv .= "<img src='$gconfig{'webprefix'}/images/last-grey.gif' ".
+		       "border='0' align='middle'></a>\n";
 		}
 	}
 
@@ -2426,7 +2640,37 @@ if ($url =~ /^\//) {
 	# If the URL is like /foo , add webprefix
 	$url = $gconfig{'webprefix'}.$url;
 	}
-return "<script>${window}.location = '".&quote_escape($url)."';</script>\n";
+return "<script type='text/javascript'>${window}.location = '".&quote_escape($url)."';</script>\n";
+}
+
+=head2 ui_webmin_link(module, page)
+
+Returns the URL for a link to this Webmin instance that can be used in an email
+
+=cut
+sub ui_webmin_link
+{
+my ($mod, $page) = @_;
+if (defined(&theme_ui_webmin_link)) {
+	return &theme_ui_webmin_link(@_);
+	}
+my %miniserv;
+&get_miniserv_config(\%miniserv);
+my $proto = $miniserv{'ssl'} ? 'https' : 'http';
+my $port = $miniserv{'port'};
+my $host = $ENV{'HTTP_HOST'} || &get_display_hostname();
+if ($host =~ /^([a-zA-Z0-9\-\_\.]+):(\d+)$/) {
+	$host = $1;
+	$port = $2;
+	}
+my $rv = $proto."://$host:$port";
+if ($mod) {
+	$rv .= "/$mod";
+	}
+if ($page) {
+	$rv .= "/$page";
+	}
+return $rv;
 }
 
 1;

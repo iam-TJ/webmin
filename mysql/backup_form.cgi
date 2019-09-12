@@ -18,8 +18,9 @@ $access{'buser'} || &error($text{'dbase_ecannot'});
 				   : $text{'backup_title'}, "",
 	"backup_form");
 
-if (!-x $config{'mysqldump'}) {
-	print &text('backup_edump', "<tt>$config{'mysqldump'}</tt>",
+($cmd) = split(/\s+/, $config{'mysqldump'});
+if (!-x $cmd) {
+	print &text('backup_edump', "<tt>$cmd</tt>",
 			  "../config.cgi?$module_name"),"<p>\n";
 	&ui_print_footer("edit_dbase.cgi?db=$in{'db'}", $text{'dbase_return'});
 	exit;
@@ -39,17 +40,30 @@ if ($cron) {
 print "<p>\n";
 %c = $module_info{'usermin'} ? %userconfig : %config;
 
-print &ui_form_start("backup_db.cgi", "post");
+$download = $in{'all'} ? 'database' : $in{'db'};
+print &ui_form_start("backup_db.cgi/$download.sql", "post");
 print &ui_hidden("db", $in{'db'});
 print &ui_hidden("all", $in{'all'});
 print &ui_hidden_table_start($text{'backup_header1'}, "width=100%", 2, "main",
 			     1, [ "width=30%" ]);
 
 # Destination file or directory
-print &ui_table_row($in{'all'} ? $text{'backup_file2'}
-			       : $text{'backup_file'},
-	&ui_textbox("file", $c{'backup_'.$in{'db'}}, 60)." ".
-	&file_chooser_button("file"));
+if ($in{'all'}) {
+	print &ui_table_row($text{'backup_file2'},
+	    &ui_textbox("file", $c{'backup_'.$in{'db'}}, 60)." ".
+	    &file_chooser_button("file"));
+	print &ui_table_row($text{'backup_prefix'},
+	    &ui_opt_textbox("prefix", $c{'prefix_'}, 10,
+			    $text{'backup_noprefix'}));
+	}
+else {
+	print &ui_table_row($text{'backup_file'},
+	    &ui_radio_table("dest", 0,
+		[ [ 1, $text{'backup_download'} ],
+		  [ 0, $text{'backup_path'}, 
+		       &ui_textbox("file", $c{'backup_'.$in{'db'}}, 60)." ".
+		       &file_chooser_button("file") ] ]));
+	}
 
 # Create destination dir
 if ($in{'all'}) {
@@ -61,12 +75,17 @@ if (!$in{'all'}) {
 	# Show input to select tables
 	$t = $c{'backup_tables_'.$in{'db'}};
 	@tables = &list_tables($in{'db'});
-	print &ui_table_row($text{'backup_tables'},
-		&ui_radio("tables_def", $t ? 0 : 1,
-			  [ [ 1, $text{'backup_alltables'} ],
-			    [ 0, $text{'backup_seltables'} ] ])."<br>".
-		&ui_select("tables", [ split(/\s+/, $t) ],
-			   [ sort @tables ], 5, 1));
+	if (@tables) {
+		print &ui_table_row($text{'backup_tables'},
+			&ui_radio("tables_def", $t ? 0 : 1,
+				  [ [ 1, $text{'backup_alltables'} ],
+				    [ 0, $text{'backup_seltables'} ] ])."<br>".
+			&ui_select("tables", [ split(/\s+/, $t) ],
+				   [ sort @tables ], 5, 1));
+		}
+	else {
+		print &ui_hidden("tables_def", 1);
+		}
 	}
 
 print &ui_hidden_table_end("main");
@@ -91,8 +110,8 @@ print &ui_table_row($text{'backup_charset'},
 		 [ 0, &ui_select("charset", $s,
 			[ &list_character_sets($in{'db'}) ]) ] ]));
 
-if ($mysql_version >= 5.0) {
-	# Show compatability format option
+if (&compare_version_numbers($mysql_version, "5.0") >= 0) {
+	# Show compatibility format option
 	$cf = $c{'backup_compatible_'.$in{'db'}};
 	print &ui_table_row($text{'backup_compatible'},
 		&ui_radio("compatible_def", $cf ? 0 : 1,
@@ -126,6 +145,11 @@ $s = $c{'backup_single_'.$in{'db'}};
 print &ui_table_row($text{'backup_single'},
 	&ui_yesno_radio("single", $s ? 1 : 0));
 
+# Show quick dump mode
+$q = $c{'backup_quick_'.$in{'db'}};
+print &ui_table_row($text{'backup_quick'},
+	&ui_yesno_radio("quick", $q ? 1 : 0));
+
 if ($cron) {
 	# Show before/after commands
 	$b = $c{'backup_before_'.$in{'db'}};
@@ -149,6 +173,19 @@ if ($cron) {
 	print &ui_hidden_table_start($text{'backup_header3'}, "width=100%", 2,
 				     "sched", 1, [ "width=30%" ]);
 
+	# Who to notify?
+	$email = $c{'backup_email_'.$in{'db'}};
+	print &ui_table_row($text{'backup_email'},
+		&ui_textbox("email", $email, 60));
+
+	# Notification conditions
+	$notify = $c{'backup_notify_'.$in{'db'}};
+	print &ui_table_row($text{'backup_notify'},
+		&ui_radio("notify", int($notify),
+			  [ [ 0, $text{'backup_notify0'} ],
+			    [ 1, $text{'backup_notify1'} ],
+			    [ 2, $text{'backup_notify2'} ] ]));
+
 	# Show cron time
 	&foreign_require("cron", "cron-lib.pl");
 	@jobs = &cron::list_cron_jobs();
@@ -164,10 +201,7 @@ if ($cron) {
 		   'days' => '*',
 		   'months' => '*',
 		   'weekdays' => '*' };
-	print &ui_table_row(undef,
-		"<table border=2 width=100%>".
-		&capture_function_output(\&cron::show_times_input, $job).
-		"</table>", 2);
+	print &cron::get_times_input($job);
 
 	print &ui_hidden_table_end("sched");
 	}
@@ -188,6 +222,6 @@ if ($in{'all'}) {
 	}
 else {
 	&ui_print_footer("edit_dbase.cgi?db=$in{'db'}", $text{'dbase_return'},
-		"", $text{'index_return'});
+		 &get_databases_return_link($in{'db'}), $text{'index_return'});
 	}
 

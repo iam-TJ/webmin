@@ -7,6 +7,8 @@ require './file-lib.pl';
 &ReadParse();
 use POSIX;
 $p = $ENV{'PATH_INFO'};
+($p =~ /^\s*\|/ || $p =~ /\|\s*$/ || $p =~ /\0/) &&
+	&error_exit($text{'view_epathinfo'});
 if ($in{'type'}) {
 	# Use the supplied content type
 	$type = $in{'type'};
@@ -110,14 +112,14 @@ if ($in{'format'}) {
 	print "Content-type: $type\n\n";
 	open(FILE, $temp);
 	unlink($temp);
-	while(read(FILE, $buf, 1024)) {
+	while(read(FILE, $buf, 1000*1024)) {
 		print $buf;
 		}
 	close(FILE);
 	}
 else {
-	if (!open(FILE, $p)) {
-		# Unix permissions prevent access
+	if (!open(FILE, "<", $p)) {
+		# Unix permissions prevent access, or file doesn't exist
 		&error_exit(&text('view_eopen', $p, $!));
 		}
 
@@ -130,16 +132,18 @@ else {
 	@st = stat($p);
 	print "X-no-links: 1\n";
 	print "Content-length: $st[7]\n";
-	print "Content-Disposition: Attachment\n" if ($download);
-	print "Content-type: $type\n\n";
+	($fn = $p) =~ s/^.*\///;
+	print "Content-Disposition: Attachment filename=\"$fn\"\n" if ($download);
+	print "X-Content-Type-Options: nosniff\n";
+	&print_content_type($type);
 	if ($type =~ /^text\/html/i && !$in{'edit'}) {
-		while(read(FILE, $buf, 1024)) {
+		while(read(FILE, $buf, 1000*1024)) {
 			$data .= $buf;
 			}
 		print &filter_javascript($data);
 		}
 	else {
-		while(read(FILE, $buf, 1024)) {
+		while(read(FILE, $buf, 1000*1024)) {
 			print $buf;
 			}
 		}

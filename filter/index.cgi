@@ -2,7 +2,6 @@
 # Show a table of simple actions
 
 require './filter-lib.pl';
-&foreign_require("mailbox", "mailbox-lib.pl");
 &ui_print_header(undef, $text{'index_title'}, "", undef, 0, 1);
 
 if (&get_product_name() eq 'webmin') {
@@ -48,14 +47,14 @@ if (&no_user_procmailrc()) {
 if (@filters) {
 	push(@links, &select_all_link("d"), &select_invert_link("d"));
 	}
-push(@links, "<a href='edit.cgi?new=1'>$text{'index_add'}</a>");
+push(@links, &ui_link("edit.cgi?new=1",$text{'index_add'}));
 ($auto) = grep { $_->{'actionreply'} } @filters;
 if (&can_simple_autoreply() && !$auto) {
-	push(@links, "<a href='edit_auto.cgi'>$text{'index_addauto'}</a>");
+	push(@links, &ui_link("edit_auto.cgi",$text{'index_addauto'}));
 	}
 ($fwd) = grep { $_->{'actiontype'} eq '!' } @filters;
 if (&can_simple_forward() && !$fwd) {
-	push(@links, "<a href='edit_forward.cgi'>$text{'index_addfwd'}</a>");
+	push(@links, &ui_link("edit_forward.cgi",$text{'index_addfwd'}));
 	}
 
 @folders = &mailbox::list_folders();
@@ -111,7 +110,7 @@ if (@filters || &get_global_spamassassin()) {
 		# Work out nice condition and action descriptions
 		local $cond;
 		($cond, $lastalways) = &describe_condition($f);
-		$cond = "<a href='edit.cgi?idx=$f->{'index'}'>$cond</a>";
+		$cond = &ui_link("edit.cgi?idx=$f->{'index'}",$cond);
 		local $action = &describe_action($f, \@folders);
 
 		# Create mover links

@@ -35,6 +35,8 @@ our @server_types = (
 		  [ 'ubuntu', 'Ubuntu Linux', undef, 'Ubuntu' ],
 		  [ 'fedora', 'Fedora Linux', undef, 'Fedora' ],
 		  [ 'redflag', 'Red Flag Linux', undef, 'RedFlag' ],
+		  [ 'amazon', 'Amazon Linux', undef, 'Amazon' ],
+		  [ 'pi', 'Raspbian Linux', undef, 'Raspbian' ],
 
 		  # Linux variants with a type code
 		  [ 'cobalt', 'Cobalt Linux', 'cobalt-linux' ],
@@ -208,7 +210,7 @@ sub list_all_groups
 my (@rv, %gmap, $s, $f, $gn);
 
 # Add webmin servers groups
-foreach $s ($_[0] ? @{$_[0]} : &list_servers()) {
+foreach $s (grep { $_->{'group'} } ($_[0] ? @{$_[0]} : &list_servers())) {
 	foreach $gn (split(/\t+/, $s->{'group'})) {
 		my $grp = $gmap{$gn};
 		if (!$grp) {
@@ -220,29 +222,31 @@ foreach $s ($_[0] ? @{$_[0]} : &list_servers()) {
 	}
 
 # Add MSC cluster groups
-opendir(DIR, $config{'groups_dir'});
-foreach $f (readdir(DIR)) {
-	next if ($f eq '.' || $f eq '..');
-	my $grp = $gmap{$f};
-	if (!$grp) {
-		$gmap{$f} = $grp = { 'name' => $f, 'type' => 1 };
-		push(@rv, $grp);
-		}
-	open(GROUP, "$config{'groups_dir'}/$f");
-	while(<GROUP>) {
-		s/\r|\n//g;
-		s/#.*$//;
-		if (/(\S*)\[(\d)-(\d+)\](\S*)/) {
-			# Expands to multiple hosts
-			push(@{$grp->{'members'}}, map { $1.$_.$4 } ($2 .. $3));
+if ($config{'groups_dir'} && opendir(DIR, $config{'groups_dir'})) {
+	foreach $f (readdir(DIR)) {
+		next if ($f eq '.' || $f eq '..');
+		my $grp = $gmap{$f};
+		if (!$grp) {
+			$gmap{$f} = $grp = { 'name' => $f, 'type' => 1 };
+			push(@rv, $grp);
 			}
-		elsif (/(\S+)/) {
-			push(@{$grp->{'members'}}, $1);
+		open(GROUP, "$config{'groups_dir'}/$f");
+		while(<GROUP>) {
+			s/\r|\n//g;
+			s/#.*$//;
+			if (/(\S*)\[(\d)-(\d+)\](\S*)/) {
+				# Expands to multiple hosts
+				push(@{$grp->{'members'}},
+				     map { $1.$_.$4 } ($2 .. $3));
+				}
+			elsif (/(\S+)/) {
+				push(@{$grp->{'members'}}, $1);
+				}
 			}
+		close(GROUP);
 		}
-	close(GROUP);
+	closedir(DIR);
 	}
-closedir(DIR);
 
 # Fix up MSC groups that include other groups
 while(1) {
@@ -409,6 +413,7 @@ my (@found, @already, @foundme, %addmods);
 my %server;
 foreach my $s (&list_servers()) {
 	$server{&to_ipaddress($s->{'host'})} = $s;
+	$server{$s->{'host'}} = $s;
 	}
 
 # create the broadcast socket
@@ -522,6 +527,11 @@ while(time()-$tmstart < $limit) {
 				print &text('find_me',
 				    "<tt>$url</tt>"),"<br>\n" if (!$noprint);
 				push(@foundme, $fromaddr);
+				}
+			elsif ($server{$host}) {
+				# Already known server
+				print &text('find_already2',
+				    "<tt>$url</tt>"),"<br>\n" if (!$noprint);
 				}
 			else {
 				# Found a new one!

@@ -45,7 +45,13 @@ else {
 	$dump = &get_dump($in{'id'});
 	$access{'edit'} && &can_edit_dir($dump) ||
 		&error($text{'dump_ecannot2'});
-	&ui_print_header(undef, $text{'edit_title2'}, "", "create");
+	if ($in{'clone'}) {
+		&ui_print_header(undef, $text{'edit_title3'}, "", "create");
+		delete($in{'id'});
+		}
+	else {
+		&ui_print_header(undef, $text{'edit_title2'}, "", "create");
+		}
 	}
 
 @tds = ( "width=30%" );
@@ -101,15 +107,17 @@ if ($access{'extra'}) {
 # Before and after commands
 if ($access{'cmds'}) {
 	print &ui_table_row(&hlink($text{'dump_before'},"before"),
-			    &ui_textbox("before", $dump->{'before'}, 60)." ".
+			    &ui_textbox("before", $dump->{'before'}, 60)."<br>".
 			    &ui_checkbox("beforefok", 1, $text{'dump_fok'},
 					 !$dump->{'beforefok'}),
 			    3, \@tds);
 
 	print &ui_table_row(&hlink($text{'dump_after'},"after"),
-			    &ui_textbox("after", $dump->{'after'}, 60)." ".
+			    &ui_textbox("after", $dump->{'after'}, 60)."<br>".
 			    &ui_checkbox("afterfok", 1, $text{'dump_fok2'},
-					 !$dump->{'afterfok'}),
+					 !$dump->{'afterfok'})."<br>".
+			    &ui_checkbox("afteraok", 1, $text{'dump_aok'},
+                                         !$dump->{'afteraok'}),
 			    3, \@tds);
 	}
 print &ui_hidden_table_end();
@@ -143,11 +151,7 @@ print &ui_table_row(&hlink($text{'edit_subject'}, "subject"),
 
 if (!$config{'simple_sched'} || ($dump && !$dump->{'special'})) {
 	# Complex Cron time input
-	print &ui_table_row(undef,
-		"<table border width=100%>".
-		&capture_function_output(\&cron::show_times_input, $dump).
-		"</table>",
-		4);
+	print &cron::get_times_input($dump, 0, 4, $text{'edit_when'});
 	}
 else {
 	# Simple input
@@ -164,6 +168,7 @@ if ($in{'id'}) {
 	print &ui_form_end([ [ "save", $text{'save'} ],
 			     [ "savenow", $text{'edit_savenow'} ],
 			     [ "restore", $text{'edit_restore'} ],
+			     [ "clone", $text{'edit_clone'} ],
 			     [ "delete", $text{'delete'} ] ]);
 	}
 else {

@@ -70,11 +70,17 @@ if ($lvl == 10) {
 	print &ui_table_row($text{'create_parity'},
 		&ui_select("layout", $layout,
 			[ [ '', $text{'default'} ],
-			  'n2', 'o2', 'f2' ]));
+			  [ 'n2', $text{'create_n2_layout'} ],
+			  [ 'f2', $text{'create_f2_layout'} ],
+			  [ 'o2', $text{'create_o2_layout'} ],
+			  [ 'n3', $text{'create_n3_layout'} ],
+			  [ 'f3', $text{'create_f3_layout'} ],
+			  [ 'o3', $text{'create_o3_layout'} ] ]));
 	}
 
 # Chunk size
 $chunk = &find_value('chunk-size', $raid->{'members'});
+push(@chunks, [ '', $text{'default'} ]);
 for($i=4; $i<=4096; $i*=2) { push(@chunks, [ $i, $i." kB" ]); }
 print &ui_table_row($text{'create_chunk'},
 	&ui_select("chunk", $chunk, \@chunks));

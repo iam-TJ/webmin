@@ -43,14 +43,24 @@ Returns true if some file looks like a valid Unix password file
 =cut
 sub password_file
 {
-if (!$_[0]) { return 0; }
-elsif (&open_readfile(SHTEST, $_[0])) {
-	local($line);
-	$line = <SHTEST>;
-	close(SHTEST);
-	return $line =~ /^\S+:\S*:/;
+my ($file) = @_;
+if (!$file) {
+	return 0;
 	}
-else { return 0; }
+my $rv = $password_file_cache{$file};
+if (defined($rv)) {
+	return $rv;
+	}
+if (&open_readfile(SHTEST, $_[0])) {
+	my $line = <SHTEST>;
+	close(SHTEST);
+	$rv = $line =~ /^\S+:\S*:/ ? 1 : 0;
+	}
+else {
+	$rv = 0;
+	}
+$password_file_cache{$file} = $rv;
+return $rv;
 }
 
 =head2 list_users
@@ -1062,7 +1072,7 @@ sub copy_skel_files
 local ($f, $df);
 local @rv;
 foreach $f (split(/\s+/, $_[0])) {
-	if (-d $f) {
+	if (-d $f && !-l $f) {
 		# copy all files in a directory
 		opendir(DIR, $f);
 		foreach $df (readdir(DIR)) {
@@ -1115,17 +1125,7 @@ elsif (-l $_[0] && !$config{'copy_symlinks'}) {
 elsif (-d $_[0]) {
 	# A directory .. copy it recursively
 	&system_logged("cp -Rp ".quotemeta($_[0])." ".quotemeta("$_[1]/$base")." >/dev/null 2>/dev/null");
-	local $glob = "$_[1]/$base/*";
-	while(1) {
-		local @g = glob($glob);
-		if (@g && -r $g[0]) {
-			push(@rv, @g);
-			$glob .= "/*";
-			}
-		else {
-			last;
-			}
-		}
+	push(@rv, &recursive_find_files("$_[1]/$base", 1));
 	}
 else {
 	# Just a normal file .. copy it
@@ -1136,6 +1136,33 @@ else {
 	}
 &system_logged("chown $opts -R $_[2]:$_[3] ".quotemeta("$_[1]/$base").
 	       " >/dev/null 2>/dev/null") if (!$nochown);
+return @rv;
+}
+
+=head2 recursive_find_files
+
+Returns a list of all files under some directory, with recursion
+
+=cut
+sub recursive_find_files
+{
+my ($dir, $exclude_links) = @_;
+my @rv;
+if (-l $dir) {
+	push(@rv, $dir) if (!$exclude_links);
+	}
+elsif (!-d $dir) {
+	push(@rv, $dir);
+	}
+else {
+	opendir(DIR, $dir);
+	my @files = readdir(DIR);
+	closedir(DIR);
+	foreach my $f (@files) {
+		next if ($f eq "." || $f eq "..");
+		push(@rv, &recursive_find_files("$dir/$f"));
+		}
+	}
 return @rv;
 }
 
@@ -1502,7 +1529,7 @@ foreach my $k (keys %group_properties_map) {
 	}
 }
 
-=head2 check_password_restrictions(pass, username)
+=head2 check_password_restrictions(pass, username, [&user-hash|"none"])
 
 Returns an error message if the given password fails length and other
 checks, or undef if it is OK.
@@ -1510,45 +1537,26 @@ checks, or undef if it is OK.
 =cut
 sub check_password_restrictions
 {
+local ($pass, $username, $uinfo) = @_;
 return &text('usave_epasswd_min', $config{'passwd_min'})
-	if (length($_[0]) < $config{'passwd_min'});
+	if (length($pass) < $config{'passwd_min'});
 local $re = $config{'passwd_re'};
-return &text('usave_epasswd_re', $re)
-	if ($re && !eval { $_[0] =~ /^$re$/ });
-if ($config{'passwd_same'}) {
-	return &text('usave_epasswd_same') if ($_[0] =~ /\Q$_[1]\E/i);
+if ($re && !eval { $pass =~ /^$re$/ }) {
+	return $config{'passwd_redesc'} || &text('usave_epasswd_re', $re);
 	}
-if ($config{'passwd_dict'} && $_[0] =~ /^[A-Za-z\'\-]+$/ &&
-    (&has_command("ispell") || &has_command("spell"))) {
-	# Call spell or ispell to check for dictionary words
-	local $temp = &transname();
-	open(TEMP, ">$temp");
-	print TEMP $_[0],"\n";
-	close(TEMP);
-	if (&has_command("ispell")) {
-		open(SPELL, "ispell -a <$temp |");
-		while(<SPELL>) {
-			if (/^(#|\&|\?)/) {
-				$unknown++;
-				}
-			}
-		close(SPELL);
-		}
-	else {
-		open(SPELL, "spell <$temp |");
-		local $line = <SPELL>;
-		$unknown++ if ($line);
-		close(SPELL);
-		}
-	unlink($temp);
-	return &text('usave_epasswd_dict') if (!$unknown);
+if ($config{'passwd_same'}) {
+	return &text('usave_epasswd_same') if ($pass =~ /\Q$username\E/i);
+	}
+if ($config{'passwd_dict'} && $pass =~ /^[A-Za-z\'\-]+$/) {
+	# Check if dictionary word
+	return &text('usave_epasswd_dict') if (&is_dictionary_word($pass));
 	}
 if ($config{'passwd_prog'}) {
 	local $out;
 	if ($config{'passwd_progmode'} == 0) {
 		# Run external validation program with user and password as args
-		local $qu = quotemeta($_[1]);
-		local $qp = quotemeta($_[0]);
+		local $qu = quotemeta($username);
+		local $qp = quotemeta($pass);
 		$out = &backquote_command(
 			"$config{'passwd_prog'} $qu $qp 2>&1 </dev/null");
 		}
@@ -1556,13 +1564,40 @@ if ($config{'passwd_prog'}) {
 		# Run program with password as input on stdin
 		local $temp = &transname();
 		&open_tempfile(TEMP, ">$temp", 0, 1);
-		&print_tempfile(TEMP, $_[1],"\n");
-		&print_tempfile(TEMP, $_[0],"\n");
+		&print_tempfile(TEMP, $username,"\n");
+		&print_tempfile(TEMP, $pass,"\n");
 		&close_tempfile(TEMP);
 		$out = &backquote_command("$config{'passwd_prog'} <$temp 2>&1");
 		}
 	if ($?) {
-		return $out;
+		return $out || $text{'usave_epasswd_cmd'};
+		}
+	}
+if ($config{'passwd_mindays'} && $uinfo ne "none") {
+	# Check if password was changed too recently
+	if (!$uinfo) {
+		($uinfo) = grep { $_->{'user'} eq $username } &list_users();
+		}
+	if ($uinfo) {
+		local $pft = &passfiles_type();
+		local $when;
+		if ($pft == 1 || $pft == 6) {
+			# BSD (unix time)
+			$when = $uinfo->{'change'};
+			}
+		elsif ($pft == 2 || $pft == 5) {
+			# Linux (number of days)
+			$when = $uinfo->{'change'} * 24*60*60;
+			}
+		elsif ($pft == 4) {
+			# AIX (unix time)
+			$when = $uinfo->{'change'};
+			}
+		if ($when && time() - $when <
+				$config{'passwd_mindays'}*24*60*60) {
+			return &text('usave_epasswd_mindays',
+				     $config{'passwd_mindays'});
+			}
 		}
 	}
 return undef;
@@ -1576,12 +1611,13 @@ it is OK.
 =cut
 sub check_username_restrictions
 {
-if ($config{'max_length'} && length($_[0]) > $config{'max_length'}) {
+local ($username) = @_;
+if ($config{'max_length'} && length($username) > $config{'max_length'}) {
 	return &text('usave_elength', $config{'max_length'});
 	}
 local $re = $config{'username_re'};
 return &text('usave_ere', $re)
-	if ($re && !eval { $_[0] =~ /^$re$/ });
+	if ($re && !eval { $username =~ /^$re$/ });
 return undef;
 }
 
@@ -1681,6 +1717,12 @@ if ($olduser) {
 	$ENV{'USERADMIN_OLD_HOME'} = $olduser->{'home'};
 	$ENV{'USERADMIN_OLD_GID'} = $olduser->{'gid'};
 	$ENV{'USERADMIN_OLD_PASS'} = $oldpass if (defined($oldpass));
+	}
+foreach my $f ("quota", "uquota", "mquota", "umquota") {
+	$ENV{'USERADMIN_'.uc($f)} = $user->{$f};
+	if ($olduser) {
+		$ENV{'USERADMIN_OLD_'.uc($f)} = $olduser->{$f};
+		}
 	}
 }
 
@@ -2083,11 +2125,11 @@ sub mkuid
     foreach (split(//,$_[0])) {
       ++${num_let} if ( m/[a-z]/i );
     }
-    if ( length($_[0]) ne 7 ) {
+    if ( length($_[0]) != 7 ) {
         print "ERROR: Number of characters in username $_[0] is not equal to 7\n";
         return -1;
     }
-    if ( ${num_let} ne 3 && ${num_let} ne 4 ) {
+    if ( ${num_let} != 3 && ${num_let} != 4 ) {
         print "ERROR: Number of letters in username $_[0] is not equal to 3 or 4\n";
         return -1;
     }
@@ -2097,7 +2139,7 @@ sub mkuid
     my ${icnt} = -1;
     my ${lowuid};
     ${lowuid} = ( 26 ** ( ${num_let} - 1 ) * ${lowlimit}/100 ) + ${lowlimit};
-    ${lowuid} = ${lowlimit} if ( ${num_let} eq 3 );
+    ${lowuid} = ${lowlimit} if ( ${num_let} == 3 );
     my ${base} = 26;
 
 #################################################################
@@ -2488,12 +2530,10 @@ if ($_[0]->{'noedit'}) {
 	return $dis;
 	}
 elsif ($_[0]->{'dn'}) {
-	return "<a href='edit_user.cgi?dn=".&urlize($_[0]->{'dn'})."'>".
-	       "$dis</a>";
+	return &ui_link("edit_user.cgi?dn=".&urlize($_[0]->{'dn'}), $dis);
 	}
 else {
-	return "<a href='edit_user.cgi?user=".&urlize($_[0]->{'user'})."'>".
-	       "$dis</a>";
+	return &ui_link("edit_user.cgi?user=".&urlize($_[0]->{'user'}), $dis);
 	}
 }
 
@@ -2508,12 +2548,10 @@ if ($_[0]->{'noedit'}) {
 	return &html_escape($_[0]->{'group'});
 	}
 elsif ($_[0]->{'dn'}) {
-	return "<a href='edit_group.cgi?dn=".&urlize($_[0]->{'dn'})."'>".
-	       &html_escape($_[0]->{'group'})."</a>";
+	return &ui_link("edit_group.cgi?dn=".&urlize($_[0]->{'dn'}), &html_escape($_[0]->{'group'}) );
 	}
 else {
-	return "<a href='edit_group.cgi?group=".&urlize($_[0]->{'group'})."'>".
-	       &html_escape($_[0]->{'group'})."</a>";
+	return &ui_link("edit_group.cgi?group=".&urlize($_[0]->{'group'}), &html_escape($_[0]->{'group'}) );
 	}
 }
 
@@ -2585,8 +2623,16 @@ $home ||= $user->{'home'};
 			   oct($config{'homedir_perms'}), $home) ||
 	&error(&text('usave_echmod', $!));
 if ($config{'selinux_con'} && &is_selinux_enabled() && &has_command("chcon")) {
-	&system_logged("chcon ".quotemeta($config{'selinux_con'}).
-		       " ".quotemeta($home)." >/dev/null 2>&1");
+	if ($config{'selinux_con'} eq "*") {
+		# Restore default context
+		&system_logged("restorecon -r ".
+			       quotemeta($home)." >/dev/null 2>&1");
+		}
+	else {
+		# Use specific context
+		&system_logged("chcon ".quotemeta($config{'selinux_con'}).
+			       " ".quotemeta($home)." >/dev/null 2>&1");
+		}
 	}
 &unlock_file($home);
 }

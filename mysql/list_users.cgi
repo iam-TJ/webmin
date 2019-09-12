@@ -9,14 +9,15 @@ $access{'perms'} == 1 || &error($text{'perms_ecannot'});
 print &ui_form_start("delete_users.cgi");
 @rowlinks = ( &select_all_link("d", 0),
 	      &select_invert_link("d", 0),
-	      "<a href='edit_user.cgi?new=1'>$text{'users_add'}</a>" );
+	      &ui_link("edit_user.cgi?new=1",$text{'users_add'}) );
 print &ui_links_row(\@rowlinks);
 @tds = ( "width=5" );
+$remote_mysql_version = &get_remote_mysql_version();
 print &ui_columns_start([ "",
 			  $text{'users_user'},
 			  $text{'users_host'},
-			  $text{'users_pass'},
-			  $mysql_version >= 5 ? ( $text{'users_ssl'} ) : ( ),
+			  $remote_mysql_version >= 5 ? ( $text{'users_ssl'} )
+						     : ( ),
 			  $text{'users_perms'} ], 100, 0, \@tds);
 $d = &execute_sql_safe($master_db, "select * from user order by user");
 %fieldmap = map { $_->{'field'}, $_->{'index'} }
@@ -29,18 +30,23 @@ foreach $u (@{$d->{'data'}}) {
 		    "</a>");
 	push(@cols, $u->[0] eq '' || $u->[0] eq '%' ?
 		      $text{'user_any'} : &html_escape($u->[0]));
-	push(@cols, &html_escape($u->[2]));
-	if ($mysql_version >= 5) {
+	if ($remote_mysql_version >= 5) {
 		$ssl = $u->[$fieldmap{'ssl_type'}];
 		push(@cols, $text{'user_ssl_'.lc($ssl)} || $ssl);
 		}
-	local @priv;
-	for($j=3; $j<=&user_priv_cols()+3-1; $j++) {
-		push(@priv, $text{"users_priv$j"}) if ($u->[$j] eq 'Y');
+	my @priv;
+	my ($allprivs, $noprivs) = (1, 1);
+	foreach my $f (&priv_fields('user')) {
+		if ($u->[$fieldmap{$f->[0]}] eq 'Y') {
+			push(@priv, $f->[1]);
+			$noprivs = 0;
+			}
+		else {
+			$allprivs = 0;
+			}
 		}
-	push(@cols,
-		scalar(@priv) == &user_priv_cols() ? $text{'users_all'} :
-		!@priv ? $text{'users_none'} : join("&nbsp;| ", @priv));
+	push(@cols, $allprivs ? $text{'users_all'} :
+		    $noprivs ? $text{'users_none'} : join("&nbsp;| ", @priv));
 	print &ui_checked_columns_row(\@cols, \@tds, "d", $u->[0]." ".$u->[1]);
 	$i++;
 	}
@@ -67,8 +73,7 @@ print &ui_table_row($text{'users_syncwhen'},
 print &ui_table_row($text{'users_sync_privs'},
 	&ui_select("sync_privs",
 		   [ split(/\s+/, $config{'sync_privs'}) ],
-		   [ map { [ $_, $text{"user_priv$_"} ] }
-			 ( 3 .. &user_priv_cols()+3-1 ) ],
+		   [ &priv_fields('user') ],
 		   5, 1));
 
 # Hosts for new users

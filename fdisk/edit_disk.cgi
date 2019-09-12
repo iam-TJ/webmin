@@ -11,12 +11,13 @@ $extwidth = 300;
 ($d) = grep { $_->{'device'} eq $in{'device'} } @disks;
 $d || &error($text{'disk_egone'});
 @parts = @{$d->{'parts'}};
-&ui_print_header($d->{'desc'}, $text{'disk_title'}, "");
+&ui_print_header($d->{'desc'}, $text{'disk_title'}, "", undef,
+		 @disks == 1 ? 1 : 0, @disks == 1 ? 1 : 0);
 
 # Work out links to add partitions
 foreach $p (@parts) {
-	$usedpri++ if ($p->{'number'} <= 4);
 	$extended++ if ($p->{'extended'});
+	$regular++ if (!$p->{'extended'});
 	if ($p->{'end'} > $d->{'cylinders'}) {
 		$d->{'cylinders'} = $p->{'end'};
 		}
@@ -28,7 +29,7 @@ foreach $p (@parts) {
 		$anyfree++;
 		}
 	}
-if ($usedpri != 4) {
+if ($regular < 4 || $disk->{'table'} ne 'msdos') {
 	push(@edlinks, "<a href=\"edit_part.cgi?disk=$d->{'index'}&new=1\">".
 		       $text{'index_addpri'}."</a>");
 	}
@@ -36,9 +37,13 @@ if ($extended) {
 	push(@edlinks, "<a href=\"edit_part.cgi?disk=$d->{'index'}&new=2\">".
 		       $text{'index_addlog'}."</a>");
 	}
-elsif ($usedpri != 4 && &supports_extended()) {
+elsif ($regular < 4 && &supports_extended()) {
 	push(@edlinks, "<a href=\"edit_part.cgi?disk=$d->{'index'}&new=3\">".
 			$text{'index_addext'}."</a>");
+	}
+if ($d->{'table'} eq 'unknown') {
+	# Must create a partition table first
+	@edlinks = ( $text{'disk_needtable'} );
 	}
 
 # Show brief disk info
@@ -51,7 +56,12 @@ if ($d->{'model'}) {
 	}
 push(@info, &text('disk_cylinders', $d->{'cylinders'}));
 if ($d->{'table'}) {
-	push(@info, &text('disk_table', uc($d->{'table'})));
+	if ($d->{'table'} eq 'unknown') {
+		push(@info, $text{'disk_notable'});
+		}
+	else {
+		push(@info, &text('disk_table', uc($d->{'table'})));
+		}
 	}
 print &ui_links_row(\@info),"<p>\n";
 
@@ -87,41 +97,15 @@ if (@parts) {
 
 		# Work out usage
 		@stat = &device_status($p->{'device'});
-		$stat = "";
-		$statdesc = $stat[0] =~ /^swap/ ? "<i>$text{'disk_vm'}</i>"
-						: "<tt>$stat[0]</tt>";
-		if ($stat[1] eq 'raid') {
-			$stat = $statdesc;
-			}
-		elsif ($stat[1] eq 'lvm') {
-			if (&foreign_available("lvm")) {
-				$stat = "<a href='../lvm/'>".
-				        "LVM VG $statdesc</a>";
-				}
-			else {
-				$stat = "LVM VG $statdesc";
-				}
-			}
-		elsif ($stat[0] && !&foreign_available("mount")) {
-			$stat = $statdesc;
-			}
-		elsif ($stat[0] && $stat[3] == -1) {
-			$stat = "<a href='../mount/edit_mount.cgi?".
-				"index=$stat[4]&temp=1&return=/$module_name/'>".
-				"$statdesc</a>";
-			}
-		elsif ($stat[0]) {
-			$stat = "<a href='../mount/edit_mount.cgi?".
-				"index=$stat[3]&return=/$module_name/'>".
-				"$statdesc</a>";
-			}
+		$stat = &device_status_link(@stat);
 
 		print &ui_columns_row([
 			"<a href='$url'>$p->{'number'}</a>",
 			"<a href='$url'>".($p->{'extended'} ?
 			  $text{'extended'} : &tag_name($p->{'type'}))."</a>",
 			$ext,
-			$d->{'cylsize'} ? &nice_size(($p->{'end'} - $p->{'start'} + 1) * $d->{'cylsize'}) : &text('edit_blocks', $p->{'blocks'}),
+			$p->{'size'} ? &nice_size($p->{'size'})
+				     : &text('edit_blocks', $p->{'blocks'}),
 			$p->{'start'},
 			$p->{'end'},
 			$stat,
@@ -150,9 +134,18 @@ if (&supports_smart($d)) {
 			      &ui_hidden("drive", $d->{'device'}));
 	}
 if (&supports_relabel($d)) {
-	print &ui_buttons_row("edit_relabel.cgi", $text{'index_relabel'},
-			      $text{'index_relabeldesc'},
-			      &ui_hidden("device", $d->{'device'}));
+	if ($d->{'table'} eq 'unknown') {
+		print &ui_buttons_row(
+			"edit_relabel.cgi", $text{'index_relabel2'},
+			$text{'index_relabeldesc2'},
+			&ui_hidden("device", $d->{'device'}));
+		}
+	else {
+		print &ui_buttons_row(
+			"edit_relabel.cgi", $text{'index_relabel'},
+			$text{'index_relabeldesc'},
+			&ui_hidden("device", $d->{'device'}));
+		}
 	}
 print &ui_buttons_end();
 

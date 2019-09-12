@@ -11,6 +11,12 @@ require './net-lib.pl';
 if ($in{'new'} && $in{'bond'}) {
 	# New bonding interface
 	&ui_print_header(undef, $text{'bonding_create'}, "");
+	$bmax = -1;
+	foreach $b (@boot) {
+		if ($b->{'fullname'} =~ /^bond(\d+)$/) {
+			$bmax = $1;
+			}
+		}
 	}
 elsif ($in{'new'} && $in{'vlan'}) {
 	# New VLAN
@@ -76,11 +82,14 @@ if ($in{'new'} && $in{'virtual'}) {
 	}
 elsif ($in{'new'}) {
 	# New real interface
-	if ($in{'vlan'} == 1) {
+	if ($in{'vlan'}) {
 		$namefield = "auto".&ui_hidden("name", "auto");
 		}
 	elsif ($in{'bridge'}) {
 		$namefield = "br ".&ui_textbox("name", ($bmax+1), 3);
+		}
+	elsif ($in{'bond'}) {
+		$namefield = "bond ".&ui_textbox("name", ($bmax+1), 3);
 		}
 	else {
 		$namefield = &ui_textbox("name", undef, 6);
@@ -206,7 +215,7 @@ if ($mtufield) {
 	}
 
 # Virtual sub-interfaces
-if ($b && $b->{'virtual'} eq "") {
+if ($b && $b->{'virtual'} eq "" && !$in{'new'}) {
 	$vcount = 0;
 	foreach $vb (@boot) {
 		if ($vb->{'virtual'} ne "" && $vb->{'name'} eq $b->{'name'}) {
@@ -225,7 +234,7 @@ if ($b && $b->{'virtual'} eq "") {
 if ($in{'bond'} || &iface_type($b->{'name'}) eq 'Bonded') {
 	# Select bonding teampartner
 	print &ui_table_row($text{'bonding_teamparts'},
-		&ui_textbox("partner", $b->{'partner'}, 10));
+		&ui_textbox("partner", $b->{'partner'}, 10)." ".$text{'bonding_teampartsdesc'});
 	
 	# Select teaming mode
 	@mode = ("balance-rr", "activebackup", "balance-xor", "broadcast", "802.3ad", "balance-tlb", "balance-alb");
@@ -233,27 +242,31 @@ if ($in{'bond'} || &iface_type($b->{'name'}) eq 'Bonded') {
 		&ui_select("bondmode", int($b->{'mode'}),
 			   [ map { [ $_, $mode[$_] ] } (0 .. $#mode) ]));
 
+	# Select bonding primary interface
+	print &ui_table_row($text{'bonding_primary'},
+		&ui_textbox("primary", $b->{'primary'}, 5)." ".$text{'bonding_primarydesc'});
+	
 	# Select mii Monitoring Interval
 	print &ui_table_row($text{'bonding_miimon'},
-		&ui_textbox("miimon", $b->{'miimon'}, 5)." ms");
+		&ui_textbox("miimon", $b->{'miimon'} ? $b->{'miimon'} : "100", 5)." ms ".$text{'bonding_miimondesc'});
 
 	# Select updelay
 	print &ui_table_row($text{'bonding_updelay'},
-		&ui_textbox("updelay", $b->{'updelay'}, 5)." ms");
+		&ui_textbox("updelay", $b->{'updelay'} ? $b->{'updelay'} : "200", 5)." ms");
 
 	# Select downdelay
 	print &ui_table_row($text{'bonding_downdelay'},
-		&ui_textbox("downdelay", $b->{'downdelay'}, 5)." ms");
+		&ui_textbox("downdelay", $b->{'downdelay'} ? $b->{'downdelay'} : "200", 5)." ms");
 	}
 
 # Special Parameter for vlan tagging
-if(($in{'vlan'}) or (&iface_type($b->{'name'}) =~ /^(.*) (VLAN)$/)) {
+if ($in{'vlan'} || &iface_type($b->{'name'}) =~ /^(.*) (VLAN)$/) {
 	$b->{'name'} =~ /(\S+)\.(\d+)/;
 	$physical = $1;
 	$vlanid = $2;
 
 	# Phyical device
-	@phys = grep { $_->{'virtual'} eq '' } &active_interfaces();
+	@phys = grep { (($_->{'virtual'} eq '') && ($_->{'vlanid'} eq '')) } &active_interfaces(1);
 	print &ui_table_row($text{'vlan_physical'},
 		$in{'new'} ? &ui_select("physical", $physical,
 					[ map { $_->{'fullname'} } @phys ])
@@ -279,10 +292,20 @@ if (($in{'new'} && $in{'virtual'} eq "" && !$in{'bridge'}) ||
 if ($in{'bridge'} || $b && $b->{'bridge'}) {
 	@ethboot = sort { $a cmp $b }
 		     map { $_->{'fullname'} }
-		       grep { $_->{'fullname'} =~ /^eth(\d+)$/ } @boot;
+		       grep { ($_->{'fullname'} =~ /^(vlan|bond)/ ||
+			       &iface_type($_->{'fullname'}) eq 'Ethernet') &&
+			      $_->{'virtual'} eq '' } @boot;
 	print &ui_table_row($text{'bifc_bridgeto'},
-		&ui_select("bridgeto", $b->{'bridgeto'}, \@ethboot, 1, 0,
-			   $in{'new'} ? 0 : 1));
+		&ui_select("bridgeto", $b->{'bridgeto'},
+			   [ [ "", $text{'bifc_nobridge'} ],
+			     @ethboot ],
+			   1, 0, $in{'new'} ? 0 : 1));
+	print &ui_table_row($text{'bifc_bridgestp'},
+		&ui_radio("bridgestp", $b->{'bridgestp'} ? $b->{'bridgestp'} : "off", [["off", "Off"], ["on", "On"]]));
+	print &ui_table_row($text{'bifc_bridgefd'},
+		&ui_textbox("bridgefd", $b->{'bridgefd'} ? $b->{'bridgefd'} : "0", 3)." seconds");
+	print &ui_table_row($text{'bifc_bridgewait'},
+		&ui_textbox("bridgewait", $b->{'bridgewait'} ? $b->{'bridgewait'} : "0", 3)." seconds");
 	}
 
 print &ui_table_end();

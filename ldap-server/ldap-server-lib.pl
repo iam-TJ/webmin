@@ -100,8 +100,14 @@ return $ldap;
 # For LDIF format configs, returns the config DN for the default database
 sub get_default_db
 {
-local @poss = ( "olcDatabase={1}bdb,cn=config",
-		"olcDatabase={1}hdb,cn=config" );
+local @poss = (
+		"olcDatabase={1}hdb,cn=config",
+		"olcDatabase={1}bdb,cn=config",
+		"olcDatabase={1}mdb,cn=config",
+		"olcDatabase={2}hdb,cn=config",
+		"olcDatabase={2}bdb,cn=config",
+		"olcDatabase={2}mdb,cn=config",
+	      );
 foreach my $p (@poss) {
 	local @w = split(/,/, $p);
 	if (-r $config{'config_file'}."/".join("/", reverse(@w)).".ldif") {
@@ -141,7 +147,7 @@ sub get_ldap_server_version
 {
 return undef if (&local_ldap_server() != 1);
 local $out = &backquote_with_timeout(
-		"$config{'slapd'} -V -d 1 2>&1 </dev/null", 1, 1, 1);
+		"$config{'slapd'} -V -d 1 2>&1 </dev/null", 1, 1, 20);
 if ($out =~ /slapd\s+([0-9\.]+)/) {
 	return $1;
 	}
@@ -265,14 +271,18 @@ foreach my $file (&recursive_find_ldif($config{'config_file'})) {
 	while(<CONFIG>) {
 		s/\r|\n//g;
 		s/^#.*$//;
-		if (/^(\S+):\s*(.*)/) {
+		if (/^([^: \t]+)(:+)\s*(.*)/) {
 			# Start of a directive
 			local $dir = { 'file' => $file,
 				       'line' => $lnum,
 				       'eline' => $lnum,
 				       'class' => $cls,
 				       'name' => $1 };
-			local $value = $2;
+			local $value = $3;
+			if ($2 eq "::") {
+				# Base-64 decode value
+				$value = &decode_base64($value);
+				}
 			$dir->{'values'} = [ &split_quoted_string($value) ];
 			$dir->{'value'} = $value;
 			push(@rv, $dir);
@@ -583,8 +593,8 @@ sub valid_pem_file
 local ($file, $type) = @_;
 local $data = &read_file_contents($file);
 if ($type eq 'key') {
-	return $data =~ /\-{5}BEGIN RSA PRIVATE KEY\-{5}/ &&
-	       $data =~ /\-{5}END RSA PRIVATE KEY\-{5}/;
+	return $data =~ /\-{5}BEGIN (RSA )?PRIVATE KEY\-{5}/ &&
+	       $data =~ /\-{5}END (RSA )?PRIVATE KEY\-{5}/;
 	}
 else {
 	return $data =~ /\-{5}BEGIN CERTIFICATE\-{5}/ &&
@@ -861,11 +871,72 @@ foreach my $f (@ldap_lock_files) {
 	}
 }
 
+# regenerate_crc32(file)
+# Re-create the CRC32 line if needed
+sub regenerate_crc32
+{
+my ($f) = @_;
+my $lref = &read_file_lines($f);
+my $fixed = 0;
+foreach my $l (@$lref) {
+	if ($l =~ /^#\s+CRC32\s+(\S+)/) {
+		my $old32 = $1;
+		my $txt = "";
+		foreach my $l2 (@$lref) {
+			$txt .= $l2."\n" if ($l2 !~ /^#/);
+			}
+		my $new32 = sprintf("%x", &compute_crc32($txt));
+		if ($new32 ne $old32) {
+			$l = "# CRC32 ".$new32;
+			$fixed = 1;
+			}
+		}
+	}
+if ($fixed) {
+	&flush_file_lines($f);
+	}
+else {
+	&unflush_file_lines($f);
+	}
+}
+
+sub compute_crc32 {
+ my ($input, $init_value, $polynomial) = @_;
+
+ $init_value = 0 unless (defined $init_value);
+ $polynomial = 0xedb88320 unless (defined $polynomial);
+
+ my @lookup_table;
+
+ for (my $i=0; $i<256; $i++) {
+   my $x = $i;
+   for (my $j=0; $j<8; $j++) {
+     if ($x & 1) {
+       $x = ($x >> 1) ^ $polynomial;
+     } else {
+       $x = $x >> 1;
+     }
+   }
+   push @lookup_table, $x;
+ }
+
+ my $crc = $init_value ^ 0xffffffff;
+
+ foreach my $x (unpack ('C*', $input)) {
+   $crc = (($crc >> 8) & 0xffffff) ^ $lookup_table[ ($crc ^ $x) & 0xff ];
+ }
+
+ $crc = $crc ^ 0xffffffff;
+
+ return $crc;
+}
+
 # unlock_slapd_files()
 # Un-lock all LDAP config file(s)
 sub unlock_slapd_files
 {
 foreach my $f (@ldap_lock_files) {
+	&regenerate_crc32($f);
 	&unlock_file($f);
 	}
 @ldap_lock_files = ( );

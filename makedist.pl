@@ -1,6 +1,9 @@
 #!/usr/local/bin/perl
 # Builds a tar.gz package of a specified Webmin version
 
+if ($0 =~ /^(.*)\//) {
+	chdir($1);
+	}
 @ARGV == 1 || @ARGV == 2 || usage();
 if ($ARGV[0] eq "-minimal" || $ARGV[0] eq "--minimal") {
 	$min++;
@@ -14,16 +17,16 @@ $zipdir = "zips";
 
 @files = ("config.cgi", "config-*-linux",
 	  "config-solaris", "images", "index.cgi", "mime.types",
-	  "miniserv.pl", "os_list.txt", "perlpath.pl", "setup.sh", "setup.pl",
-	  "version", "web-lib.pl", "web-lib-funcs.pl", "README",
+	  "miniserv.pl", "os_list.txt", "perlpath.pl", "setup.sh", "setup.pl", "setup.bat",
+	  "version", "web-lib.pl", "web-lib-funcs.pl",
 	  "config_save.cgi", "chooser.cgi", "miniserv.pem",
-	  "config-aix",
+	  "config-aix", "update-from-repo.sh", "README.md",
 	  "newmods.pl", "copyconfig.pl", "config-hpux", "config-freebsd",
 	  "changepass.pl", "help.cgi", "user_chooser.cgi",
 	  "group_chooser.cgi", "config-irix", "config-osf1", "thirdparty.pl",
 	  "oschooser.pl", "config-unixware",
 	  "config-openserver", "switch_user.cgi", "lang", "lang_list.txt",
-	  "webmin-init", "webmin-caldera-init", "webmin-daemon",
+	  "webmin-init", "webmin-daemon",
 	  "config-openbsd",
 	  "config-macos", "LICENCE",
 	  "session_login.cgi", "acl_security.pl",
@@ -40,6 +43,7 @@ $zipdir = "zips";
 	  "uptracker.cgi", "create-module.pl", "webmin_search.cgi",
 	  "webmin-search-lib.pl", "WebminCore.pm",
 	  "record-login.pl", "record-logout.pl", "robots.txt",
+	  "unauthenticated",
 	 );
 if ($min) {
 	# Only those required by others
@@ -49,38 +53,36 @@ if ($min) {
 else {
 	# All the modules
 	@mlist =
-	  ("cron", "dfsadmin", "dnsadmin", "exports", "inetd", "init",
+	  ("cron", "dfsadmin", "exports", "inetd", "init",
 	  "mount", "samba", "useradmin", "fdisk", "format", "proc", "webmin",
 	  "quota", "software", "pap", "acl", "apache", "lpadmin", "bind8",
-	  "sendmail", "squid", "bsdexports", "hpuxexports", "file",
-	  "net", "dhcpd", "majordomo", "custom", "lilo", "telnet", "servers",
+	  "sendmail", "squid", "bsdexports", "hpuxexports",
+	  "net", "dhcpd", "custom", "telnet", "servers",
 	  "time", "wuftpd", "syslog", "mysql", "man",
 	  "inittab", "raid", "postfix", "webminlog", "postgresql", "xinetd",
-	  "status", "cpan", "caldera", "pam", "nis", "shell", "grub",
+	  "status", "cpan", "pam", "nis", "shell", "grub",
 	  "fetchmail", "passwd", "at", "proftpd", "sshd",
 	  "heartbeat", "cluster-software", "cluster-useradmin", "qmailadmin",
-	  "mon", "mscstyle3", "jabber", "stunnel", "burner", "usermin",
-	  "fsdump", "lvm", "sentry", "cfengine", "pserver", "procmail",
+	  "mon", "jabber", "stunnel", "usermin",
+	  "fsdump", "lvm", "procmail",
 	  "cluster-webmin", "firewall", "sgiexports", "vgetty", "openslp",
 	  "webalizer", "shorewall", "adsl-client", "updown", "ppp-client",
 	  "pptp-server", "pptp-client", "ipsec", "ldap-useradmin",
 	  "change-user", "cluster-shell", "cluster-cron", "spam",
 	  "htaccess-htpasswd", "logrotate", "cluster-passwd", "mailboxes",
-	  "ipfw", "frox", "sarg", "bandwidth", "cluster-copy", "backup-config",
+	  "ipfw", "sarg", "bandwidth", "cluster-copy", "backup-config",
 	  "smart-status", "idmapd", "krb5", "smf", "ipfilter", "rbac",
 	  "tunnel", "zones", "cluster-usermin", "dovecot", "syslog-ng",
 	  "mailcap", "blue-theme", "ldap-client", "phpini", "filter",
 	  "bacula-backup", "ldap-server", "exim", "tcpwrappers",
 	  "package-updates", "system-status", "webmincron", "ajaxterm",
+	  "shorewall6", "iscsi-server", "iscsi-client", "gray-theme",
+	  "iscsi-target", "iscsi-tgtd", "bsdfdisk", "fail2ban",
+	  "authentic-theme", "firewalld", "filemin", "firewall6",
 	  );
 	}
-@dirlist = ( "Webmin" );
+@dirlist = ( "WebminUI", "JSON" );
 
-if (-d "/usr/local/webadmin") {
-	chdir("/usr/local/webadmin");
-	system("./koi8-to-cp1251.pl");
-	system("./make-small-icons.pl /usr/local/webadmin");
-	}
 $dir = "webmin-$vers";
 system("rm -rf $tardir/$dir");
 mkdir("$tardir/$dir", 0755);
@@ -102,8 +104,11 @@ foreach $m (@mlist) {
 	$flist = "";
 	opendir(DIR, $m);
 	foreach $f (readdir(DIR)) {
-		if ($f =~ /^\./ || $f eq "test" || $f =~ /\.bak$/ ||
-		    $f =~ /\.tmp$/ || $f =~ /\.site$/) { next; }
+		next if ($f =~ /^\./ || $f =~ /\.git$/ ||
+		         $f =~ /\.(tar|wbm|wbt)\.gz$/ ||
+			 $f eq "README.md" || $f =~ /^makemodule.*\.pl$/ ||
+			 $f eq "linux.sh" || $f eq "freebsd.sh" || 
+			 $f eq "LICENCE" || $f eq "version");
 		$flist .= " $m/$f";
 		}
 	closedir(DIR);
@@ -113,6 +118,17 @@ foreach $m (@mlist) {
 # Remove files that shouldn't be publicly available
 system("rm -rf $tardir/$dir/status/mailserver*");
 system("rm -rf $tardir/$dir/file/plugin.jar");
+system("rm -rf $tardir/$dir/authentic-theme/update");
+
+# Clear out minified JS
+if (-d "$tardir/$dir/authentic-theme/extensions") {
+	system("cat /dev/null >$tardir/$dir/authentic-theme/extensions/csf.min.js");
+	}
+
+# Remove theme settings files
+if (-d "$tardir/$dir/authentic-theme") {
+	system("find $tardir/$dir/authentic-theme -name 'settings_*.js' | xargs rm");
+	}
 
 # Add other directories
 foreach $d (@dirlist) {
@@ -124,6 +140,7 @@ foreach $d (@dirlist) {
 opendir(DIR, "$tardir/$dir");
 while($d = readdir(DIR)) {
 	# set depends in module.info to this version
+	next if ($d eq "authentic-theme");	# Theme version matters
 	local $minfo = "$tardir/$dir/$d/module.info";
 	local $tinfo = "$tardir/$dir/$d/theme.info";
 	if (-r $minfo) {
@@ -145,9 +162,13 @@ while($d = readdir(DIR)) {
 	}
 closedir(DIR);
 
+# Create UTF-8 encodings
+print "Creating UTF-8 language encodings\n";
+system("./koi8-to-cp1251.pl $tardir/$dir");
+system("./chinese-to-utf8.pl $tardir/$dir");
+
 # Remove useless .bak, test and other files, and create the tar.gz file
 print "Creating webmin-$vfile.tar.gz\n";
-system("find $tardir/$dir -name '*.bak' -o -name test -o -name '*.tmp' -o -name '*.site' -o -name core -o -name .xvpics -o -name .svn | xargs rm -rf");
 system("cd $tardir ; tar cvhf - $dir 2>/dev/null | gzip -c >webmin-$vfile.tar.gz");
 
 if (!$min && -d $zipdir) {

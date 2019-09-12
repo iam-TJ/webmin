@@ -9,7 +9,7 @@ print &ui_table_start($text{'debug_header'}, undef, 2);
 
 # Debugging mode enabled
 print &ui_table_row($text{'debug_enabled'},
-	&ui_yesno_radio("debug_enabled", $gconfig{'debug_enabled'}));
+	&ui_yesno_radio("debug_enabled", $gconfig{'debug_enabled'}), undef, [ "valign=middle","valign=middle" ]);
 
 # What to log
 print &ui_table_row($text{'debug_what'},
@@ -22,7 +22,7 @@ print &ui_table_row($text{'debug_what'},
 print &ui_table_row($text{'debug_file'},
 	&ui_opt_textbox("debug_file", $gconfig{'debug_file'},
 			50, $text{'default'}.
-			    " (<tt>$main::default_debug_log_file</tt>)"));
+			    " (<tt>$main::default_debug_log_file</tt>)"), undef, [ "valign=middle","valign=middle" ]);
 
 # Maximum size
 print &ui_table_row($text{'debug_size'},
@@ -30,7 +30,7 @@ print &ui_table_row($text{'debug_size'},
 		  [ [ 1, $text{'default'}.
 			 " (".&nice_size($main::default_debug_log_size).")" ],
 		    [ 0, &ui_bytesbox("debug_size", $gconfig{'debug_size'}) ] ]
-		 ));
+		 ), undef, [ "valign=middle","valign=middle" ]);
 
 # Debug background processes?
 print &ui_table_row($text{'debug_procs'},
@@ -39,7 +39,7 @@ print &ui_table_row($text{'debug_procs'},
 	&ui_checkbox("debug_cmd", 1, $text{'debug_cmd'},
 		     !$gconfig{'debug_nocmd'})."\n".
 	&ui_checkbox("debug_cron", 1, $text{'debug_cron'},
-		     !$gconfig{'debug_nocron'}));
+		     !$gconfig{'debug_nocron'}), undef, [ "valign=middle","valign=middle" ]);
 
 # Modules to debug
 # Modules to log in

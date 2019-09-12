@@ -41,7 +41,7 @@ Created a page showing database connections, with checkboxes and a button for ki
 Create a page listing MySQL server variables, with the ability to edit system variables.
 Column headings in the Table Data page can be clicked to sort the data by that column.
 ---- Changes since 1.300 ----
-Added options on the backup form for selecting a compatability format for exporting to other database types.
+Added options on the backup form for selecting a compatibility format for exporting to other database types.
 Added an option to compress backups with gzip or bzip2.
 When executing an SQL file (such as a backup), it will be automatically un-compressed if needed.
 Re-factored backup code into a separate function, which can be called from other modules.
@@ -99,3 +99,13 @@ The SSL / X509 authentication type for a user can be set on the Edit User page.
 Added confirmation before deleting multiple user, host, database, table and column permissions.
 ---- Changes since 1.570 ----
 Added fields to the Edit User page for setting the maximum concurrent logins and operations per hour for users.
+Scheduled MySQL backups can now have their success or failure sent via email, via new options on the Backup Database page.
+When executing SQL or restoring a backup file, the character set can now be selected for the imported data.
+---- Changes since 1.700 ----
+When a database is deleted, any cron job for backing it up is also removed.
+---- Changes since 1.770 ----
+Added support for the new password columns in the user table as seen in MySQL 5.7, and massively cleaned up all the code for user, host and DB permissions management.
+---- Changes since 1.810 ----
+Single database backups can now be downloaded in the browser.
+---- Changes since 1.870 ----
+Added a page for manually editing the MySQL config files, and implemented support for config includes.

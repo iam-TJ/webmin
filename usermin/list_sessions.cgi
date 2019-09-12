@@ -10,12 +10,6 @@ $access{'sessions'} || &error($text{'sessions_ecannot'});
 &acl::open_session_db(\%miniserv);
 $time_now = time();
 
-if (&foreign_available("useradmin")) {
-	&foreign_require("useradmin", "user-lib.pl");
-	@users = &useradmin::list_users();
-	%umap = map { $_->{'user'}, $_ } @users;
-	}
-
 print "<b>$text{'sessions_desc'}</b><p>\n";
 @keys = keys %acl::sessiondb;
 if (@keys) {
@@ -28,13 +22,9 @@ if (@keys) {
 		local ($user, $ltime, $lip) = split(/\s+/, $acl::sessiondb{$k});
 		next if ($miniserv{'logouttime'} &&
 			 $time_now - $ltime > $miniserv{'logouttime'}*60);
-		@cols = ( "<a href='delete_session.cgi?id=$k'>$k</a>" );
-		if ($uinfo = $umap{$user}) {
-			push(@cols, "<a href='../useradmin/edit_user.cgi?num=$uinfo->{'num'}'>$user</a>");
-			}
-		else {
-			push(@cols, $user);
-			}
+		@cols = ( &ui_link("delete_session.cgi?id=$k",$k) );
+		push(@cols, &ui_link("../useradmin/edit_user.cgi?user=".
+				     &urlize($user), $user));
 		push(@cols, $lip);
 		push(@cols, &make_date($ltime));
 		print &ui_columns_row(\@cols);
@@ -47,7 +37,7 @@ else {
 
 # Show quick switch form
 print &ui_hr();
-print &ui_form_start("switch.cgi", "get", "_new");
+print &ui_form_start("switch.cgi", "get", "_blank");
 print $text{'sessions_switch'},"\n";
 print &ui_user_textbox("user");
 print &ui_submit($text{'sessions_ok'});

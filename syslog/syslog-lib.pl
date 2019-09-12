@@ -192,7 +192,7 @@ return ( 'debug', 'info', 'notice', 'warning',
 	 'err', 'crit', 'alert', 'emerg' );
 }
 
-# can_edit_log(&log)
+# can_edit_log(&log|file)
 # Returns 1 if some log can be viewed/edited, 0 if not
 sub can_edit_log
 {
@@ -233,13 +233,17 @@ sub get_syslog_pid
 {
 local $pid;
 if ($config{'pid_file'}) {
-	if (&open_readfile(PID, $config{'pid_file'}) &&
-	    <PID> =~ /^(\d+)$/ && kill(0, $1)) {
-		$pid = $1;
+	foreach my $pfile (map { glob($_) } split(/\s+/, $config{'pid_file'})) {
+		my $poss = &check_pid_file($pfile);
+		if ($poss) {
+			$pid = $poss;
+			last;
+			}
 		}
 	}
 else {
 	($pid) = &find_byname("syslogd");
+	($pid) = &find_byname("rsyslogd") if (!$pid);
 	}
 return $pid;
 }
@@ -350,6 +354,9 @@ elsif ($l =~ /\.Z$/i) {
 elsif ($l =~ /\.bz2$/i) {
 	return &has_command("bunzip2") ? "bunzip2 -c $q" : undef;
 	}
+elsif ($l =~ /\.xz$/i) {
+	return &has_command("xz") ? "xz -d -c $q" : undef;
+	}
 else {
 	return "cat $q";
 	}
@@ -362,7 +369,13 @@ sub extra_log_files
 {
 local @rv;
 foreach my $fd (split(/\t+/, $config{'extras'}), split(/\t+/, $access{'extras'})) {
-	if ($fd =~ /^(\S+)\s+(\S.*)$/) {
+	if ($fd =~ /^"(\S+)"\s+"(\S.*)"$/) {
+		push(@rv, { 'file' => $1, 'desc' => $2 });
+		}
+	elsif ($fd =~ /^"(\S+)"$/) {
+		push(@rv, { 'file' => $1 });
+		}
+	elsif ($fd =~ /^(\S+)\s+(\S.*)$/) {
 		push(@rv, { 'file' => $1, 'desc' => $2 });
 		}
 	else {

@@ -13,11 +13,20 @@ if ($_[0]->{'url'}) {
 
 	# Run the openssl command to connect
 	local $cmd = "openssl s_client -host ".quotemeta($host).
+		     " -servername ".quotemeta($host).
 		     " -port ".quotemeta($port)." </dev/null 2>&1";
 	local $out = &backquote_with_timeout($cmd, 10);
 	if ($?) {
+		# Try again without -servername, as some openssl versions
+		# don't support it
+		$cmd = "openssl s_client -host ".quotemeta($host).
+		       " -port ".quotemeta($port)." </dev/null 2>&1";
+		$out = &backquote_with_timeout($cmd, 10);
+		}
+	if ($?) {
 		# Connection failed
-		return { 'up' => -1 };
+		return { 'up' => -1,
+			 'desc' => $text{'sslcert_edown'} };
 		}
 
 	# Extract the cert part and save
@@ -87,8 +96,7 @@ elsif ($_[0]->{'mismatch'} && $_[0]->{'url'} &&
 		$ok++ if ($host =~ /^$match$/i);
 		}
 	if (!$ok) {
-		$desc = &text('sslcert_ematch', "<tt>$host</tt>",
-			      "<tt>$cn</tt>");
+		$desc = &text('sslcert_ematch', $host, $cn);
 		}
 	}
 

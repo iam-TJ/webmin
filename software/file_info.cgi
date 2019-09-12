@@ -11,7 +11,7 @@ $f =~ s/\/$//;
 if ($f !~ /^\//) {
 	# if the filename is not absolute, look for it
 	foreach $p (split(/:/, $ENV{'PATH'})) {
-		last if (&installed_file("$p/$f"));
+		last if (&installed_file("$p/$f") && %file);
 		}
 	}
 else {
@@ -20,7 +20,8 @@ else {
 	}
 
 if (!%file) {
-	print "<b>",&text('file_notfound', "<tt>$f</tt>"),"</b><p>\n";
+	print "<b>",&text('file_notfound',
+			  "<tt>".&html_escape($f)."</tt>"),"</b><p>\n";
 	}
 else {
 	# display file info
@@ -62,9 +63,8 @@ else {
 				 $packages{$i,'version'} ne $vers[$j] ||
 				 $packages{$i,'name'} ne $pkgs[$j]);
 			local @cols;
-			push(@cols, "<a href=\"edit_pack.cgi?package=".
-			      &urlize($pkgs[$j])."&version=".&urlize($vers[$j]).
-			      "\">$pkgs[$j]</a>");
+			push(@cols, &ui_link("edit_pack.cgi?package=".
+			      &urlize($pkgs[$j])."&version=".&urlize($vers[$j]), $pkgs[$j]) );
 			$c = $packages{$i,'class'};
 			push(@cols, $c || $text{'file_none'});
 			push(@cols, $packages{$i,'desc'});

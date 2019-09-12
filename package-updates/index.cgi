@@ -8,6 +8,14 @@ require './package-updates-lib.pl';
 if ($in{'clear'}) {
 	$in{'search'} = '';
 	}
+$has_repos = defined(&software::list_package_repos);
+
+# Start of mode tabs
+print &ui_tabs_start([ [ 'pkgs', $text{'index_tabpkgs'} ],
+		       [ 'sched', $text{'index_tabscheds'} ],
+		       $has_repos ? ( [ 'repos', $text{'index_tabsrepos'} ] )
+				  : ( ) ],
+		     'tab', $in{'tab'} || 'pkgs', 1);
 
 # See if any security updates exist
 $in{'mode'} ||= 'updates';
@@ -23,9 +31,9 @@ foreach $m ('current', 'updates', 'new',
 		push(@mlinks, "<b>$mmsg</b>");
 		}
 	else {
-		push(@mlinks, "<a href='index.cgi?mode=$m&all=".
+		push(@mlinks, &ui_link("index.cgi?mode=$m&all=".
 			      &urlize($in{'all'})."&search=".
-			      &urlize($in{'search'})."'>$mmsg</a>");
+			      &urlize($in{'search'}), $mmsg) );
 		}
 	}
 push(@grid, $text{'index_mode'}, &ui_links_row(\@mlinks));
@@ -35,6 +43,7 @@ push(@grid, $text{'index_search'}, &ui_textbox("search", $in{'search'}, 30)." ".
 				   &ui_submit($text{'index_searchok'})." ".
 				   &ui_submit($text{'index_clear'}, 'clear'));
 
+print &ui_tabs_start_tab("tab", "pkgs");
 print &ui_form_start("index.cgi");
 print &ui_hidden("mode", $in{'mode'});
 print &ui_grid_table(\@grid, 2),"<p>\n";
@@ -109,50 +118,68 @@ foreach $p (sort { $a->{'name'} cmp $b->{'name'} } (@current, @avail)) {
 		{ 'type' => 'checkbox', 'name' => 'u',
 		  'value' => $p->{'update'}."/".$p->{'system'},
 		  'checked' => $need },
-		"<a href='view.cgi?mode=$in{'mode'}&name=".
+		&ui_link("view.cgi?mode=$in{'mode'}&name=".
 		  &urlize($p->{'name'})."&system=".
 		  &urlize($p->{'system'})."&search=".
-		  &urlize($in{'search'})."'>$p->{'name'}</a>",
+		  &urlize($in{'search'}), $p->{'name'}),
 		$p->{'desc'},
 		$msg,
-		$source ? ( $source ) : $anysource ? ( "") : ( ),
+		$source ? ( $source ) : ( ),
 		]);
 	$anysource++ if ($source);
 	}
+if ($anysource) {
+	foreach my $r (@rows) {
+		$r->[4] ||= "";
+		}
+	}
 
-# Show the packages, if any
-if (@rows) {
-	print &text('index_count', scalar(@rows)),"<br>\n";
+if ($in{'mode'} eq 'new' && !$in{'search'}) {
+	# Prevent display of a huge list of new packages
+	print &text('index_manynew', scalar(@rows)),"<br>\n";
 	}
-print &ui_form_columns_table(
-	"update.cgi",
-	[ [ "ok", $in{'mode'} eq 'new' ? $text{'index_install'}
-				       : $text{'index_update'} ],
-	  undef,
-          [ "refresh", $text{'index_refresh'} ] ],
-	1,
-	undef,
-	[ [ "mode", $in{'mode'} ],
-	  [ "search", $in{'search'} ] ],
-	[ "", $text{'index_name'}, $text{'index_desc'}, $text{'index_status'},
-	  $anysource ? ( $text{'index_source'} ) : ( ), ],
-	100,
-	\@rows,
-	undef,
-	0,
-	undef,
-	$text{'index_none_'.$in{'mode'}},
-	1
-	);
-if (!@rows) {
-	print &ui_form_start("update.cgi");
-	print &ui_hidden("mode", $in{'mode'});
-	print &ui_hidden("search", $in{'search'});
-	print &ui_form_end([ [ "refresh", $text{'index_refresh'} ] ]);
+else {
+	# Show the packages, if any
+	if (@rows) {
+		print &text('index_count', scalar(@rows)),"<br>\n";
+		print &ui_form_start("update.cgi", "post");
+		print &ui_submit($in{'mode'} eq 'new' ? $text{'index_install'}
+		                           : $text{'index_update'}, "ok_top" );
+		print &ui_submit($text{'index_refresh'}, "refresh_top"), "<br>";
+		}
+	print &ui_form_columns_table(
+		"",
+		[ [ "ok", $in{'mode'} eq 'new' ? $text{'index_install'}
+					       : $text{'index_update'} ],
+		  undef,
+		  [ "refresh", $text{'index_refresh'} ] ],
+		1,
+		undef,
+		[ [ "mode", $in{'mode'} ],
+		  [ "search", $in{'search'} ] ],
+		[ "", $text{'index_name'}, $text{'index_desc'},
+		  $text{'index_status'},
+		  $anysource ? ( $text{'index_source'} ) : ( ), ],
+		100,
+		\@rows,
+		undef,
+		0,
+		undef,
+		$text{'index_none_'.$in{'mode'}},
+		1
+		);
+	if (!@rows) {
+		print &ui_form_start("update.cgi");
+		print &ui_hidden("mode", $in{'mode'});
+		print &ui_hidden("search", $in{'search'});
+		print &ui_form_end([ [ "refresh", $text{'index_refresh'} ] ]);
+		}
 	}
+print &ui_tabs_end_tab("tab", "pkgs");
 
 # Show scheduled report form
-print "<hr>\n";
+print &ui_tabs_start_tab("tab", "sched");
+print $text{'index_scheddesc'},"<p>\n";
 print &ui_form_start("save_sched.cgi");
 print &ui_hidden("mode", $in{'mode'});
 print &ui_hidden("search", $in{'search'});
@@ -192,6 +219,53 @@ print &ui_table_row($text{'index_action'},
 
 print &ui_table_end();
 print &ui_form_end([ [ "save", $text{'save'} ] ]);
+print &ui_tabs_end_tab("tab", "sched");
+
+if ($has_repos) {
+	print &ui_tabs_start_tab("tab", "repos");
+	print $text{'index_reposdesc'},"<p>\n";
+
+	@repos = &software::list_package_repos();
+	if (@repos) {
+		print &ui_form_start("save_repos.cgi", "post");
+		print &ui_columns_start([
+			"",
+			$text{'index_reposname'},
+			$text{'index_reposenabled'},
+			$text{'index_reposurl'},
+			]);
+		foreach my $r (@repos) {
+			print &ui_checked_columns_row([
+				&html_escape($r->{'name'}),
+				$r->{'enabled'} ?
+				    "<font color=green>$text{'yes'}</font>" :
+				    "<font color=red>$text{'no'}</font>",
+				$r->{'url'},
+				], "", "d", $r->{'id'});
+			}
+		print &ui_columns_end();
+		print &ui_form_end([
+			[ "disable", $text{'index_reposdisable'} ],
+			[ "enable", $text{'index_reposenable'} ],
+			[ "delete", $text{'index_reposdelete'} ],
+			]);
+		}
+	else {
+		print "<b>$text{'index_reposnome'}</b><p>\n";
+		}
+
+	# Form to add a repo
+	print &ui_form_start("create_repo.cgi", "post");
+	print &ui_table_start($text{'index_repoheader'}, undef, 2);
+	print &software::create_repo_form();
+	print &ui_table_end();
+	print &ui_form_end([ [ undef, $text{'create'} ] ]);
+
+	print &ui_tabs_end_tab("tab", "repos");
+	}
+
+print &ui_tabs_end();
+
 
 &ui_print_footer("/", $text{'index'});
 

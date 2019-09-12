@@ -32,12 +32,12 @@ if (defined(&get_cpu_info)) {
 print &ui_columns_start([ $text{'pid'}, $text{'owner'},
 			  $text{'cpu'}, $text{'command'} ], 100);
 @procs = sort { $b->{'cpu'} <=> $a->{'cpu'} } &list_processes();
-@procs = grep { &can_view_process($_->{'user'}) } @procs;
+@procs = grep { &can_view_process($_) } @procs;
 foreach $pr (@procs) {
 	$p = $pr->{'pid'};
 	local @cols;
 	if (&can_edit_process($pr->{'user'})) {
-		push(@cols, "<a href=\"edit_proc.cgi?$p\">$p</a>");
+		push(@cols, &ui_link("edit_proc.cgi?".$p, $p) );
 		}
 	else {
 		push(@cols, $p);

@@ -47,18 +47,23 @@ if ($config{'show_run'}) {
 # Work out creation links
 @crlinks = ( );
 if ($access{'create'}) {
-	push(@crlinks,
-	     "<a href=\"edit_cron.cgi?new=1\">$text{'index_create'}</a>");
-	push(@crlinks,
-	     "<a href=\"edit_env.cgi?new=1\">$text{'index_ecreate'}</a>")
-		if ($env_support);
+	push(@crlinks, &ui_link("edit_cron.cgi?new=1&search=".
+				  &urlize($in{'search'}),
+			        $text{'index_create'}) );
+	push(@crlinks, &ui_link("edit_env.cgi?new=1&search=".
+				  &urlize($in{'search'}),
+				$text{'index_ecreate'}) ) if ($env_support);
 	}
 if ($config{cron_allow_file} && $config{cron_deny_file} && $access{'allow'}) {
-	push(@crlinks, "<a href=edit_allow.cgi>$text{'index_allow'}</a>");
+	push(@crlinks, &ui_link("edit_allow.cgi", $text{'index_allow'}) );
+	}
+my @files = &list_cron_files();
+if ($access{'mode'} == 0 && @files) {
+	push(@crlinks, &ui_link("edit_manual.cgi", $text{'index_manual'}));
 	}
 
 # Build a list of cron job rows to show
-$single_user = !&supports_users() || @ulist == 1;
+$single_user = !&supports_users() || (@ulist == 1 && $access{'mode'});
 @links = ( &select_all_link("d", 1),
 	   &select_invert_link("d", 1),
 	   @crlinks );
@@ -101,17 +106,18 @@ foreach $u (@ulist) {
 		if ($job->{'name'}) {
 			# An environment variable - show the name only
 			$cmdidx = scalar(@cols);
-			push(@cols, "<a href=\"edit_env.cgi?idx=$idx\">".
+			push(@cols, &ui_link("edit_env.cgi?idx=".$idx,
 				   "<i>$text{'index_env'}</i> ".
-				   "<tt>$job->{'name'} = $job->{'value'}</tt>");
+				   "<tt>$job->{'name'} = $job->{'value'}</tt>") );
 			$donelink = 1;
 			}
 		elsif (@exp && $access{'command'}) {
 			# A multi-part command
 			$cmdidx = scalar(@cols);
 			@exp = map { &html_escape($_) } @exp;
-			push(@cols, "<a href=\"edit_cron.cgi?idx=$idx\">".
-				    join("<br>",@exp)."</a>");
+			push(@cols, &ui_link("edit_cron.cgi?idx=".$idx.
+				      "&search=".&urlize($in{'search'}),
+				    join("<br>",@exp)) );
 			$donelink = 1;
 			}
 		elsif ($access{'command'}) {
@@ -120,11 +126,14 @@ foreach $u (@ulist) {
 			local $max = $config{'max_len'} || 10000;
 			local ($cmd, $input) =
 				&extract_input($job->{'command'});
+			$cmd =~ s/\\%/%/g;
+			$input =~ s/\\%/%/g;
 			$cmd = length($cmd) > $max ?
 			  &html_escape(substr($cmd, 0, $max))." ..." :
 			  $cmd !~ /\S/ ? "BLANK" : &html_escape($cmd);
-			push(@cols,
-			     "<a href=\"edit_cron.cgi?idx=$idx\">$cmd</a>");
+			push(@cols, &ui_link("edit_cron.cgi?idx=".$idx.
+					      "&search=".&urlize($in{'search'}),
+					     $cmd) );
 			$donelink = 1;
 			}
 
@@ -138,14 +147,23 @@ foreach $u (@ulist) {
 				push(@cols, $when);
 				}
 			else {
-				push(@cols,
-				  "<a href='edit_cron.cgi?idx=$idx'>$when</a>");
+				push(@cols, &ui_link(
+					"edit_cron.cgi?idx=".$idx.
+					  "&search=".&urlize($in{'search'}),
+					$when) );
 				}
 			}
 
 		# Show comment
 		if ($config{'show_comment'} || $userconfig{'show_comment'}) {
 			push(@cols, $job->{'comment'});
+			}
+
+		# Show next run time
+		if ($config{'show_next'} || $userconfig{'show_next'}) {
+			my $n = &next_run($job);
+			push(@cols, $n ? &make_date($n)
+				       : "<i>$text{'index_nunknown'}</i>");
 			}
 
 		# Show running indicator
@@ -163,7 +181,7 @@ foreach $u (@ulist) {
 				if ($config{'show_run'} == 2 &&
 				    ($access{'kill'} || !$proc)) {
 					$lnk = $proc ? "kill_cron.cgi?idx=$idx" : "exec_cron.cgi?idx=$idx&bg=1";
-					push(@cols, "<a href='$lnk'>$txt</a>");
+					push(@cols, &ui_link($lnk, $txt) );
 					}
 				else {
 					push(@cols, $txt);
@@ -175,13 +193,25 @@ foreach $u (@ulist) {
 		local $prv = $i > 0 ? $plist[$i-1]->[0] : undef;
 		local $nxt = $i != $#plist ? $plist[$i+1]->[0] : undef;
 		if ($access{'move'}) {
+			local $canup = $prv &&
+				$prv->{'file'} eq $job->{'file'} &&
+				($job->{'type'} == 0 || $job->{'type'} == 3);
+			local $candown = $nxt &&
+				$nxt->{'file'} eq $job->{'file'} &&
+				($job->{'type'} == 0 || $job->{'type'} == 3);
+			local $mover = "move.cgi?search=".
+				       &urlize($in{'search'})."&idx=$idx";
 			push(@cols, &ui_up_down_arrows(
-				"move.cgi?idx=$idx&up=1",
-				"move.cgi?idx=$idx&down=1",
-				$prv && $prv->{'file'} eq $job->{'file'} &&
-				 ($job->{'type'} == 0 || $job->{'type'} == 3),
-				$nxt && $nxt->{'file'} eq $job->{'file'} &&
-				 ($job->{'type'} == 0 || $job->{'type'} == 3)
+				"$mover&up=1",
+				"$mover&down=1",
+				$canup, $candown,
+			        ));
+			push(@cols, &ui_up_down_arrows(
+				"$mover&top=1",
+				"$mover&bottom=1",
+				$canup, $candown,
+				"images/top.gif",
+				"images/bottom.gif",
 			        ));
 			}
 
@@ -215,7 +245,7 @@ elsif (@rows) {
 	if ($in{'search'}) {
 		print "<b>",&text('index_searchres',
 			"<i>".&html_escape($in{'search'})."</i>"),"</b><p>\n";
-		push(@links, "<a href='index.cgi'>$text{'index_reset'}</a>");
+		push(@links, &ui_link("index.cgi", $text{'index_reset'}) );
 		}
 	print &ui_form_start("delete_jobs.cgi", "post");
 	print &ui_links_row(\@links);
@@ -229,8 +259,9 @@ elsif (@rows) {
 		  $userconfig{'show_time'} ? ( $text{'index_when'} ) : ( ),
 		$config{'show_comment'} || $userconfig{'show_comment'} ?
 		  ( $text{'index_comment'} ) : ( ),
+		$config{'show_next'} ? ( $text{'index_next'} ) : ( ),
 		$config{'show_run'} ? ( $text{'index_run'} ) : ( ),
-		$access{'move'} ? ( $text{'index_move'} ) : ( ),
+		$access{'move'} ? ( $text{'index_move'}, "" ) : ( ),
 		], 100, 0, \@tds);
 	foreach my $r (@rows) {
 		print &ui_checked_columns_row([ @$r[1..(@$r-2)] ],
@@ -245,7 +276,7 @@ elsif (@rows) {
 else {
 	# Show message
 	if ($in{'search'}) {
-		push(@crlinks, "<a href='index.cgi'>$text{'index_reset'}</a>");
+		push(@crlinks, &ui_link("index.cgi", $text{'index_reset'}) );
 		}
 	print $in{'search'} ? "<b>".&text('index_esearch',
 			"<i>".&html_escape($in{'search'})."</i>")."</b> <p>" :

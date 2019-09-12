@@ -6,6 +6,7 @@ require './status-lib.pl';
 $access{'edit'} || &error($text{'mon_ecannot'});
 &ReadParse();
 if ($in{'type'}) {
+	$in{'type'} =~ /^[a-zA-Z0-9\_\-\.\:]+$/ || &error($text{'mon_etype'});
 	$serv->{'type'} = $in{'type'};
 	$serv->{'id'} = time();
 	}
@@ -52,7 +53,7 @@ else {
 			$ch || &error(&text('mon_estatus', $r));
 			&remote_foreign_require($r, 'status',
 						'status-lib.pl');
-			if ($in{'type'} =~ /^(\S+)::(\S+)$/) {
+			if ($serv->{'type'} =~ /^(\S+)::(\S+)$/) {
 				# Check if module is installed
 				$ok = &remote_foreign_call(
 				  $r, 'status', "foreign_check", $1);
@@ -91,7 +92,9 @@ else {
 		# From another module
 		($mod, $mtype) = ($1, $2);
 		&foreign_require($mod, "status_monitor.pl");
-		&foreign_call($mod, "status_monitor_parse", $mtype, $serv,\%in);
+		if (&foreign_defined($mod, "status_monitor_parse")) {
+			&foreign_call($mod, "status_monitor_parse", $mtype, $serv,\%in);
+			}
 		}
 	else {
 		# From this module

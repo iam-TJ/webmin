@@ -1,22 +1,22 @@
 #!/usr/local/bin/perl
 # edit_slave.cgi
 # Display records and other info for an existing slave or stub zone
+use strict;
+use warnings;
+our (%access, %text, %in, %config); 
 
 require './bind8-lib.pl';
 &ReadParse();
-if ($in{'zone'}) {
-	$zone = &get_zone_name($in{'zone'}, 'any');
-	$in{'index'} = $zone->{'index'};
-	$in{'view'} = $zone->{'viewindex'};
-	}
-else {
-	$zone = &get_zone_name($in{'index'}, $in{'view'});
-	}
-$dom = $zone->{'name'};
-&can_edit_zone($zone) ||
-	&error($text{'slave_ecannot'});
+our $ipv6revzone;
 
-$desc = &ip6int_to_net(&arpa_to_ip($dom));
+$in{'view'} = 'any' if ($in{'view'} eq '');
+my $zone = &get_zone_name_or_error($in{'zone'}, $in{'view'});
+my $dom = $zone->{'name'};
+&can_edit_zone($zone) || &error($text{'master_ecannot'});
+
+my $desc = &ip6int_to_net(&arpa_to_ip($dom));
+my @st;
+my $lasttrans;
 if ($zone->{'file'}) {
 	@st = stat(&make_chroot(&absolute_path($zone->{'file'})));
 	$lasttrans = &text('slave_last', @st && $st[7] ? &make_date($st[9])
@@ -27,24 +27,24 @@ if ($zone->{'file'}) {
 		 "", undef, 0, 0, 0, &restart_links($zone),
 		 undef, undef, $lasttrans);
 
-if ($zone->{'file'}) {
+my (@rcodes, @rtitles, @rlinks, @ricons, %rnum, $done_recs); 
+if ($zone->{'file'} && -r $zone->{'file'}) {
 	print "<p>\n";
-	@recs = &read_zone_file($zone->{'file'}, $dom);
+	my @recs = &read_zone_file($zone->{'file'}, $dom);
 	if ($dom =~ /in-addr\.arpa/i || $dom =~ /\.$ipv6revzone/i) {
 		@rcodes = &get_reverse_record_types();
 		}
 	else {
 		@rcodes = &get_forward_record_types();
 		}
-	foreach $c (@rcodes) { $rnum{$c} = 0; }
-	foreach $r (@recs) {
+	foreach my $c (@rcodes) { $rnum{$c} = 0; }
+	foreach my $r (@recs) {
 		$rnum{$r->{'type'}}++;
-		if ($r->{'type'} eq "SOA") { $soa = $r; }
 		}
 	if ($config{'show_list'}) {
 		# display as list
-		$mid = int((@rcodes+1)/2);
-		@grid = ( );
+		my $mid = int((@rcodes+1)/2);
+		my @grid = ( );
 		push(@grid, &types_table(@rcodes[0..$mid-1]));
 		push(@grid, &types_table(@rcodes[$mid..$#rcodes]));
 		print &ui_grid_table(\@grid, 2, 100,
@@ -52,8 +52,8 @@ if ($zone->{'file'}) {
 		}
 	else {
 		# display as icons
-		for($i=0; $i<@rcodes; $i++) {
-			push(@rlinks, "edit_recs.cgi?index=$in{'index'}".
+		for(my $i=0; $i<@rcodes; $i++) {
+			push(@rlinks, "edit_recs.cgi?zone=$in{'zone'}".
 				      "&view=$in{'view'}&type=$rcodes[$i]");
 			push(@rtitles, $text{"type_$rcodes[$i]"}.
 				       " ($rnum{$rcodes[$i]})");
@@ -64,24 +64,25 @@ if ($zone->{'file'}) {
 	$done_recs = 1;
 	}
 
+my (@links, @titles, @images);
 # Shut buttons for editing, options and whois
 if ($access{'file'} && $zone->{'file'}) {
-	push(@links, "view_text.cgi?index=$in{'index'}&view=$in{'view'}");
+	push(@links, "view_text.cgi?zone=$in{'zone'}&view=$in{'view'}");
 	push(@titles, $text{'slave_manual'});
 	push(@images, "images/text.gif");
 	}
 if ($access{'opts'}) {
-	push(@links, "edit_soptions.cgi?index=$in{'index'}&view=$in{'view'}");
+	push(@links, "edit_soptions.cgi?zone=$in{'zone'}&view=$in{'view'}");
 	push(@titles, $text{'master_options'});
 	push(@images, "images/options.gif");
 	}
 if ($access{'whois'} && &has_command($config{'whois_cmd'}) &&
     $dom !~ /in-addr\.arpa/i) {
-	push(@links, "whois.cgi?index=$in{'index'}&view=$in{'view'}");
+	push(@links, "whois.cgi?zone=$in{'zone'}&view=$in{'view'}");
 	push(@titles, $text{'master_whois'});
 	push(@images, "images/whois.gif");
 	}
-push(@links, "xfer.cgi?index=$in{'index'}&view=$in{'view'}");
+push(@links, "xfer.cgi?zone=$in{'zone'}&view=$in{'view'}");
 push(@titles, $text{'slave_xfer'});
 push(@images, "images/xfer.gif");
 if (@links) {
@@ -89,21 +90,21 @@ if (@links) {
 	&icons_table(\@links, \@titles, \@images);
 	}
 
-$apply = $access{'apply'} && &has_ndc();
+my $apply = $access{'apply'} && &has_ndc();
 if (!$access{'ro'} && ($access{'delete'} || $apply)) {
 	print &ui_hr();
 	print &ui_buttons_start();
 
 	# Move to other view
-	$conf = &get_config();
-	print &move_zone_button($conf, $in{'view'}, $in{'index'});
+	my $conf = &get_config();
+	print &move_zone_button($conf, $zone->{'viewindex'}, $in{'zone'});
 
 	# Convert to master zone
 	if ($access{'master'} && $st[7]) {
 		print &ui_buttons_row("convert_slave.cgi",
 			$text{'slave_convert'},
 			$text{'slave_convertdesc'},
-			&ui_hidden("index", $in{'index'}).
+			&ui_hidden("zone", $in{'zone'}).
 			&ui_hidden("view", $in{'view'}));
 		}
 
@@ -111,7 +112,7 @@ if (!$access{'ro'} && ($access{'delete'} || $apply)) {
 	if ($access{'delete'}) {
 		print &ui_buttons_row("delete_zone.cgi",
 			$text{'master_del'}, $text{'slave_delmsg'},
-			&ui_hidden("index", $in{'index'}).
+			&ui_hidden("zone", $in{'zone'}).
 			&ui_hidden("view", $in{'view'}));
 		}
 
@@ -129,9 +130,7 @@ if ($_[0]) {
 		$text{'master_records'},
 		], 100);
 	for(my $i=0; $_[$i]; $i++) {
-		local @cols = ( "<a href=\"edit_recs.cgi?".
-		      "index=$in{'index'}&view=$in{'view'}&type=$_[$i]\">".
-		      ($text{"recs_$_[$i]"} || $_[$i])."</a>",
+		my @cols = ( &ui_link("edit_recs.cgi?zone=$in{'zone'}&view=$in{'view'}&type=$_[$i]",($text{"recs_$_[$i]"} || $_[$i]) ),
 		      $rnum{$_[$i]} );
 		$rv .= &ui_columns_row(\@cols);
 		}

@@ -104,7 +104,7 @@ if (-r "$config_directory/config") {
 # We can now load the main Webmin library
 $ENV{'WEBMIN_CONFIG'} = $config_directory;
 $ENV{'WEBMIN_VAR'} = "/var/webmin";	# not really used
-require "$wadir/web-lib.pl";
+require "$srcdir/web-lib-funcs.pl";
 
 # Check if upgrading from an old version
 if ($upgrading) {
@@ -131,6 +131,7 @@ if ($upgrading) {
 	&get_miniserv_config(\%miniserv);
 	$oldwadir = $miniserv{'root'};
 	$path_separator = $gconfig{'os_type'} eq 'windows' ? ';' : ':';
+	$null_file = $gconfig{'os_type'} eq 'windows' ? "NUL" : "/dev/null";
 
 	if (!$miniserv{'inetd'}) {
 		# Stop old version
@@ -224,6 +225,7 @@ else {
 	$gconfig{'real_os_type'} = $real_os_type;
 	$gconfig{'real_os_version'} = $real_os_version;
 	$path_separator = $gconfig{'os_type'} eq 'windows' ? ';' : ':';
+	$null_file = $gconfig{'os_type'} eq 'windows' ? "NUL" : "/dev/null";
 	unlink($temp);
 	print "Operating system name:    $real_os_type\n";
 	print "Operating system version: $real_os_version\n";
@@ -371,6 +373,10 @@ else {
 			'logtime' => 168,
 			'ppath' => $ppath,
 			'ssl' => $ssl,
+			'no_ssl2' => 1,
+			'no_ssl3' => 1,
+			'no_tls1' => 1,
+			'no_tls1_1' => 1,
 			'env_WEBMIN_CONFIG' => $config_directory,
 			'env_WEBMIN_VAR' => $var_dir,
 			'atboot' => $atboot,
@@ -752,7 +758,7 @@ if ($wadir ne $srcdir) {
 		}
 	else {
 		# Looks like Windows .. use xcopy command
-		system("xcopy \"$srcdir\" \"$wadir\" /Y /E /I");
+		system("xcopy \"$srcdir\" \"$wadir\" /Y /E /I /Q");
 		}
 	print "..done\n";
 	print "\n";

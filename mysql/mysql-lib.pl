@@ -4,6 +4,7 @@
 BEGIN { push(@INC, ".."); };
 use WebminCore;
 &init_config();
+require 'view-lib.pl';
 if ($config{'mysql_libs'}) {
 	$ENV{$gconfig{'ld_env'}} .= ':' if ($ENV{$gconfig{'ld_env'}});
 	$ENV{$gconfig{'ld_env'}} .= $config{'mysql_libs'};
@@ -26,10 +27,8 @@ if ($module_info{'usermin'}) {
 		$mysql_login = $userconfig{'login'};
 		$mysql_pass = $userconfig{'pass'};
 		}
-	if (open(VERSION, "$user_module_config_directory/version")) {
-		chop($mysql_version = <VERSION>);
-		close(VERSION);
-		}
+	chop($mysql_version = &read_file_contents(
+		"$user_module_config_directory/version"));
 	$max_dbs = $userconfig{'max_dbs'};
 	$commands_file = "$user_module_config_directory/commands";
 	$sql_charset = $userconfig{'charset'};
@@ -47,13 +46,9 @@ else {
 		$mysql_login = $config{'login'};
 		$mysql_pass = $config{'pass'};
 		}
-	if (open(VERSION, "$module_config_directory/version")) {
-		chop($mysql_version = <VERSION>);
-		close(VERSION);
-		}
-	else {
-		$mysql_version = &get_mysql_version();
-		}
+	chop($mysql_version = &read_file_contents(
+		"$module_config_directory/version"));
+	$mysql_version ||= &get_mysql_version();
 	$cron_cmd = "$module_config_directory/backup.pl";
 	$max_dbs = $config{'max_dbs'};
 	$commands_file = "$module_config_directory/commands";
@@ -80,16 +75,30 @@ use DBI;
 EOF
 }
 
-$old_user_priv_cols = $mysql_version >= 4 ? 21 : 14;
-$old_db_priv_cols = $mysql_version >= 4 ? 12 : 10;
+if (&compare_version_numbers($mysql_version, "5.5") >= 0) {
+	@mysql_set_variables = ( "key_buffer_size", "sort_buffer_size",
+				 "net_buffer_length" );
+	}
+else {
+	@mysql_set_variables = ( "key_buffer", "sort_buffer",
+				 "net_buffer_length" );
+	}
+if (&compare_version_numbers($mysql_version, "5.6") >= 0) {
+	@mysql_number_variables = ( "table_open_cache", "max_connections" );
+	}
+else {
+	@mysql_number_variables = ( "table_cache", "max_connections" );
+	}
+@mysql_byte_variables = ( "query_cache_size", "max_allowed_packet" );
+if (&compare_version_numbers($mysql_version, "5") >= 0) {
+	push(@mysql_byte_variables, "myisam_sort_buffer_size");
+	}
+else {
+	push(@mysql_set_variables, "myisam_sort_buffer_size");
+	}
 
-@mysql_set_variables = ( "key_buffer", "max_allowed_packet",
-			 "sort_buffer", "net_buffer_length",
-			 "myisam_sort_buffer_size" );
-@mysql_number_variables = ( "table_cache", "max_connections",
-			    "query_cache_size" );
-
-# make_authstr([login], [pass], [host], [port], [sock])
+# make_authstr([login], [pass], [host], [port], [sock], [unix-user])
+# Returns a string to pass to MySQL commands to login to the database
 sub make_authstr
 {
 local $login = defined($_[0]) ? $_[0] : $mysql_login;
@@ -97,15 +106,17 @@ local $pass = defined($_[1]) ? $_[1] : $mysql_pass;
 local $host = defined($_[2]) ? $_[2] : $config{'host'};
 local $port = defined($_[3]) ? $_[3] : $config{'port'};
 local $sock = defined($_[4]) ? $_[4] : $config{'sock'};
-if (&supports_env_pass()) {
+local $unix = $_[5];
+if (&supports_env_pass($unix)) {
 	$ENV{'MYSQL_PWD'} = $pass;
 	}
 return ($sock ? " -S $sock" : "").
        ($host ? " -h $host" : "").
        ($port ? " -P $port" : "").
        ($login ? " -u ".quotemeta($login) : "").
-       (&supports_env_pass() ? "" :	# Password comes from environment
-        $pass && $mysql_version >= 4.1 ? " --password=".quotemeta($pass) :
+       (&supports_env_pass($unix) ? "" :    # Password comes from environment
+        $pass && &compare_version_numbers($mysql_version, "4.1") >= 0 ?
+	" --password=".quotemeta($pass) :
         $pass ? " -p".quotemeta($pass) : "");
 }
 
@@ -119,7 +130,7 @@ sub is_mysql_running
 if ($driver_handle && !$config{'nodbi'}) {
 	local $main::error_must_die = 1;
 	local ($data, $rv);
-	eval { $data = &execute_sql_safe(undef, "select version()") };
+	eval { $data = &execute_sql_safe(undef, "select version()"); };
 	local $err = $@;
 	$err =~ s/\s+at\s+\S+\s+line.*$//;
 	if ($@ =~ /denied|password/i) {
@@ -137,7 +148,8 @@ if ($driver_handle && !$config{'nodbi'}) {
 	}
 
 # Fall back to mysqladmin command
-local $out = `"$config{'mysqladmin'}" $authstr status 2>&1`;
+local $out = &backquote_command(
+	"\"$config{'mysqladmin'}\" $authstr status 2>&1");
 local $rv = $out =~ /uptime/i ? 1 :
             $out =~ /denied|password/i ? -1 : 0;
 $out =~ s/^.*\Q$config{'mysqladmin'}\E\s*:\s*//;
@@ -268,7 +280,7 @@ if ($gconfig{'debug_what_sql'}) {
 		}
 	&webmin_debug_log('SQL', "db=$_[0] sql=$sql".$params);
 	}
-$sql =~ s/\\/\\\\/g;
+$sql = &escape_backslashes_in_quotes($sql);
 if ($driver_handle && !$config{'nodbi'}) {
 	# Use the DBI interface
 	local $cstr = "database=$_[0]";
@@ -350,7 +362,7 @@ foreach my $p (@params) {
 	&error("Incorrect number of parameters") if ($pos < 0);
 	local $qp = $p;
 	$qp =~ s/'/''/g;
-	$qp = $qp eq '' ? 'NULL' : "'$qp'";
+	$qp = !defined($qp) ? 'NULL' : "'$qp'";
 	$sql = substr($sql, 0, $pos).$qp.substr($sql, $pos+1);
 	$pos += length($qp)-1;
 	}
@@ -573,14 +585,17 @@ if ($access{'perms'} == 2 && $access{'dbs'} ne '*') {
 else {
 	# Can select any databases
 	local $ind = &indexof($_[0],@dbs) >= 0;
+	local $js1 = "onChange='form.db_def[1].checked = true'";
+	local $js2 = "onClick='form.db_def[2].checked = true'";
 	$rv = &ui_radio("db_def", $_[0] eq '%' || $_[0] eq '' ? 1 :
 				  $ind ? 2 : 0,
 			[ [ 1, $text{'host_any'} ],
 			  [ 2, $text{'host_sel'}."&nbsp;".
-			       &ui_select("dbs", $_[0], \@dbs) ],
+			    &ui_select("dbs", $_[0], \@dbs, 1, 0, 0, 0, $js1) ],
 			  [ 0, $text{'host_otherdb'}."&nbsp;".
 			       &ui_textbox("db", $_[0] eq '%' || $_[0] eq '' ||
-						 $ind ? '' : $_[0], 30) ] ]);
+						 $ind ? '' : $_[0], 30, 0,
+					   undef, $js2) ] ]);
 	}
 return $rv;
 }
@@ -611,20 +626,35 @@ $rv =~ s/'/''/g;
 return $rv;
 }
 
+# escape_backslashes_in_quotes(string)
+# Escapes backslashes, but only inside quoted strings
+sub escape_backslashes_in_quotes
+{
+local ($str) = @_;
+local $rv;
+while($str =~ /^([^"]*)"([^"]*)"(.*)$/) {
+	local ($before, $quoted, $after) = ($1, $2, $3);
+	$quoted =~ s/\\/\\\\/g;
+	$rv .= $before.'"'.$quoted.'"';
+	$str = $after;
+	}
+$rv .= $str;
+return $rv;
+}
+
 # supports_quoting()
 # Returns 1 if running mysql version 3.23.6 or later
 sub supports_quoting
 {
-if ($mysql_version =~ /^(\d+)\.(\d+)\.(\d+)$/ &&
-    ($1 > 3 || ($1 == 3 && $2 > 23) || ($1 == 3 && $2 == 23 && $3 >= 6))) {
-	return 1;
-	}
-elsif ($mysql_version > 4) {
-	return 1;
-	}
-else {
-	return 0;
-	}
+return &compare_version_numbers($mysql_version, "3.23.6") >= 0;
+}
+
+# supports_mysqldump_events()
+# Returns 1 if running mysqldump 5.1.8 or later, which supports (and needs)
+# the events flag
+sub supports_mysqldump_events
+{
+return &compare_version_numbers($mysql_version, "5.1.8") >= 0;
 }
 
 # supports_routines()
@@ -639,54 +669,32 @@ return $out =~ /--routines/ ? 1 : 0;
 # Returns 1 if this MySQL install supports views
 sub supports_views
 {
-if (!defined($supports_views_cache)) {
-	if ($mysql_version < 5) {
-		$supports_views_cache = 0;
-		}
-	else {
-		local @dbs = &list_databases();
-		if (&indexof("information_schema", @dbs) >= 0) {
-			# Has information_schema DB .. but does it have views?
-			local @ist = &list_tables("information_schema", 1, 1);
-			if (&indexoflc("views", @ist) >= 0) {
-				$supports_views_cache = 1;
-				}
-			else {
-				$supports_views_cache = 0;
-				}
-			}
-		else {
-			$supports_views_cache = 0;
-			}
-		}
-	}
-return $supports_views_cache;
+return &compare_version_numbers($mysql_version, "5") >= 0;
 }
 
 # supports_variables()
 # Returns 1 if running mysql version 4.0.3 or later
 sub supports_variables
 {
-if ($mysql_version =~ /^(\d+)\.(\d+)\.(\d+)$/ &&
-    ($1 > 4 || ($1 == 4 && $2 > 0) || ($1 == 4 && $2 == 0 && $3 >= 3))) {
-	return 1;
-	}
-elsif ($mysql_version > 4) {
-	return 1;
-	}
-else {
-	return 0;
-	}
+return &compare_version_numbers($mysql_version, "4.0.3") >= 0;
 }
 
-# supports_env_pass()
+# supports_hosts()
+# Returns 1 if the hosts table exists
+sub supports_hosts
+{
+return &compare_version_numbers($mysql_version, "5.7.16") < 0;
+}
+
+# supports_env_pass([run-as-user])
 # Returns 1 if passing the password via an environment variable is supported
 sub supports_env_pass
 {
-if ($mysql_version >= 4.1 && !$config{'nopwd'}) {
+local ($user) = @_;
+if (&compare_version_numbers($mysql_version, "4.1") >= 0 && !$config{'nopwd'}) {
 	# Theortically possible .. but don't do this if ~/.my.cnf contains
 	# a [client] block with password= in it
-	my @uinfo = getpwuid($<);
+	my @uinfo = $user ? getpwnam($user) : getpwuid($<);
 	foreach my $cf ($config{'my_cnf'}, "$uinfo[7]/.my.cnf",
 			"$ENV{'HOME'}/.my.cnf") {
 		next if (!$cf || !-r $cf);
@@ -713,46 +721,41 @@ eval { $data = &execute_sql_safe(undef, "select version()") };
 return $@ || !$data ? 0 : 1;
 }
 
-# user_priv_cols()
-# Returns the number of columns used for privileges in the user table
-sub user_priv_cols
+# priv_fields(type)
+# Returns the names and descriptions of fields for user/db/host privileges
+sub priv_fields
 {
-if (!$user_priv_cols) {
-	local @str = &table_structure("mysql", "user");
-	local $s;
-	foreach $s (@str) {
-		$user_priv_cols++ if ($s->{'field'} =~ /_priv/i);
+my ($type) = @_;
+if (!$priv_fields{$type}) {
+	$priv_fields{$type} = [];
+	foreach my $s (&table_structure("mysql", $type)) {
+		if ($s->{'field'} =~ /^(.*)_priv/i) {
+			push(@{$priv_fields{$type}},
+			     [ $s->{'field'}, $text{'user_priv_'.lc($1)} ||
+					      $s->{'field'} ]);
+			}
 		}
 	}
-return $user_priv_cols;
+return @{$priv_fields{$type}};
 }
 
-# db_priv_cols()
-# Returns the number of columns used for privileges in the db table
-sub db_priv_cols
+# ssl_fields()
+# Returns the names of SSL fields that need to be set for new users
+sub ssl_fields
 {
-if (!$db_priv_cols) {
-	local @str = &table_structure("mysql", "db");
-	local $s;
-	foreach $s (@str) {
-		$db_priv_cols++ if ($s->{'field'} =~ /_priv/i);
-		}
-	}
-return $db_priv_cols;
+my @desc = &table_structure($master_db, 'user');
+my %fieldmap = map { $_->{'field'}, $_->{'index'} } @desc;
+return grep { $fieldmap{$_} } ('ssl_type', 'ssl_cipher',
+			       'x509_issuer', 'x509_subject');
 }
 
-# host_priv_cols()
-# Returns the number of columns used for privileges in the db table
-sub host_priv_cols
+# other_user_fields()
+# Returns the names of other non-default new user fields
+sub other_user_fields
 {
-if (!$host_priv_cols) {
-	local @str = &table_structure("mysql", "host");
-	local $s;
-	foreach $s (@str) {
-		$host_priv_cols++ if ($s->{'field'} =~ /_priv/i);
-		}
-	}
-return $host_priv_cols;
+my @desc = &table_structure($master_db, 'user');
+my %fieldmap = map { $_->{'field'}, $_->{'index'} } @desc;
+return grep { $fieldmap{$_} } ('authentication_string');
 }
 
 sub is_blob
@@ -762,7 +765,8 @@ return $_[0]->{'type'} =~ /(text|blob)$/i;
 
 # get_mysql_version(&out)
 # Returns a version number, undef if one cannot be found, or -1 for a .so
-# problem
+# problem. This is the version of the *local* mysql command, not necessarily
+# the remote server. Maybe include the suffix -MariaDB.
 sub get_mysql_version
 {
 local $out = &backquote_command("\"$config{'mysql'}\" -V 2>&1");
@@ -770,11 +774,53 @@ ${$_[0]} = $out if ($_[0]);
 if ($out =~ /lib\S+\.so/) {
 	return -1;
 	}
-elsif ($out =~ /distrib\s+((3|4|5|6)\.[0-9\.]*)/i) {
-	return $1;
+elsif ($out =~ /(distrib|Ver)\s+((3|4|5|6|7|8|9|10)\.[0-9\.]*(\-[a-z0-9]+)?)/i) {
+	return $2;
 	}
 else {
 	return undef;
+	}
+}
+
+# get_remote_mysql_version()
+# Returns the version of the MySQL server, or -1 if unknown
+sub get_remote_mysql_version
+{
+local $main::error_must_die = 1;
+local $data;
+eval { $data = &execute_sql_safe(undef, "select version()"); };
+return -1 if ($@);
+return -1 if (!@{$data->{'data'}});
+return $data->{'data'}->[0]->[0];
+}
+
+# get_remote_mysql_variant()
+# Like get_remote_mysql_version, but returns a version number and variant
+sub get_remote_mysql_variant
+{
+my $rv = &get_remote_mysql_version();
+return ($rv) if ($rv <= 0);
+my $variant = "mysql";
+if ($rv =~ /^([0-9\.]+)\-(.*)/) {
+	$rv = $1;
+	$variant = $2;
+	if ($variant =~ /mariadb/i) {
+		$variant = "mariadb";
+		}
+	}
+return ($rv, $variant);
+}
+
+# save_mysql_version([number])
+# Update the saved local MySQL version number
+sub save_mysql_version
+{
+local ($ver) = @_;
+$ver ||= &get_mysql_version();
+if ($ver) {
+	&open_tempfile(VERSION, ">$module_config_directory/version");
+	&print_tempfile(VERSION, $ver,"\n");
+	&close_tempfile(VERSION);
 	}
 }
 
@@ -782,23 +828,28 @@ else {
 # Does strftime-style date substitutions on a filename, if enabled
 sub date_subs
 {
+local ($path) = @_;
+local $rv;
 if ($config{'date_subs'}) {
         eval "use POSIX";
 	eval "use posix" if ($@);
         local @tm = localtime(time());
 	&clear_time_locale();
-        local $rv = strftime($_[0], @tm);
+        $rv = strftime($path, @tm);
 	&reset_time_locale();
-	return $rv;
         }
 else {
-        return $_[0];
+        $rv = $path;
         }
+if ($config{'webmin_subs'}) {
+	$rv = &substitute_template($rv, { });
+	}
+return $rv;
 }
 
 # execute_before(db, handle, escape, path, db-for-config)
 # Executes the before-backup command for some DB, and sends output to the
-# given file handle. Returns 1 if the command suceeds, or 0 on failure
+# given file handle. Returns 1 if the command succeeds, or 0 on failure
 sub execute_before
 {
 local $cmd = $config{'backup_before_'.$_[4]};
@@ -835,13 +886,13 @@ return 1;
 # show_table_form(count)
 sub show_table_form
 {
-print &ui_columns_start([ $text{'field_name'}, $text{'field_type'},
+my $rv;
+$rv = &ui_columns_start([ $text{'field_name'}, $text{'field_type'},
 			  $text{'field_size'}, $text{'table_nkey'},
 			  $text{'field_auto'}, $text{'field_null'},
 			  $text{'field_unsigned'}, $text{'field_default'} ]);
-local $i;
-for($i=0; $i<$_[0]; $i++) {
-	local @cols;
+for(my $i=0; $i<$_[0]; $i++) {
+	my @cols;
 	push(@cols, &ui_textbox("field_$i", undef, 20));
 	push(@cols, &ui_select("type_$i", "", [ "", @type_list ]));
 	push(@cols, &ui_textbox("size_$i", undef, 10));
@@ -850,9 +901,10 @@ for($i=0; $i<$_[0]; $i++) {
 	push(@cols, &ui_checkbox("null_$i", 1, $text{'yes'}, 1));
 	push(@cols, &ui_checkbox("unsigned_$i", 1, $text{'yes'}, 0));
 	push(@cols, &ui_textbox("default_$i", undef, 20));
-	print &ui_columns_row(\@cols);
+	$rv .= &ui_columns_row(\@cols);
 	}
-print &ui_columns_end();
+$rv .= &ui_columns_end();
+return $rv;
 }
 
 # parse_table_form(&extrafields, tablename)
@@ -902,7 +954,7 @@ for($i=0; defined($in{"field_$i"}); $i++) {
 @fields || &error($text{'table_enone'});
 local @sql;
 local $sql = "create table ".&quotestr($_[1])." (".join(",", @fields).")";
-$sql .= " type = $in{'type'}" if ($in{'type'});
+$sql .= " engine $in{'type'}" if ($in{'type'});
 push(@sql, $sql);
 if (@pri) {
 	# Setup primary fields too
@@ -927,7 +979,15 @@ if (&is_readonly_mode()) {
 	}
 local ($db, $file, $user, $pass) = @_;
 local $authstr = &make_authstr($user, $pass);
-local $cmd = "$config{'mysql'} $authstr -t ".quotemeta($db)." <".quotemeta($file);
+local $cs = $sql_charset ? "--default-character-set=".quotemeta($sql_charset)
+			 : "";
+local $temp = &transname();
+&open_tempfile(TEMP, ">$temp");
+&print_tempfile(TEMP, "source ".$file.";\n");
+&close_tempfile(TEMP);
+&set_ownership_permissions(undef, undef, 0644, $temp);
+local $cmd = "$config{'mysql'} $authstr -t ".quotemeta($db)." ".$cs.
+	     " <".quotemeta($temp);
 -r $file || return (1, "$file does not exist");
 if ($_[4] && $_[4] ne 'root' && $< == 0) {
 	# Restoring as a Unix user
@@ -948,7 +1008,7 @@ local $temp = &transname();
 local $rv = &system_logged("($config{'start_cmd'}) >$temp 2>&1");
 local $out = `cat $temp`; unlink($temp);
 if ($rv || $out =~ /failed/i) {
-	return "<pre>$out</pre>";
+	return "<pre>".&html_escape($out)."</pre>";
 	}
 return undef;
 }
@@ -966,7 +1026,7 @@ else {
 	$out = &backquote_logged("$config{'mysqladmin'} $authstr shutdown 2>&1");
 	}
 if ($? || $out =~ /failed/i) {
-	return "<pre>$out</pre>";
+	return "<pre>".&html_escape($out)."</pre>";
 	}
 return undef;
 }
@@ -1049,6 +1109,23 @@ foreach (@$lref) {
 		       'line' => $lnum });
 		$sect->{'eline'} = $lnum;
 		}
+	elsif (/^\s*\!include\s+(\S+)/) {
+		# Including sections from a file
+		foreach my $file (glob($1)) {
+			push(@rv, &parse_mysql_config($file));
+			}
+		}
+	elsif (/^\s*\!includedir\s+(\S+)/) {
+		# Including sections from files in a directory
+		my $dir = $1;
+		$dir =~ s/\/$//;
+		opendir(DIR, $dir);
+		my @files = map { $dir."/".$_ } readdir(DIR);
+		closedir(DIR);
+		foreach my $file (@files) {
+			push(@rv, &parse_mysql_config($file));
+			}
+		}
 	$lnum++;
 	}
 return @rv;
@@ -1076,7 +1153,9 @@ sub save_directive
 {
 local ($conf, $sect, $name, $values) = @_;
 local @old = &find($name, $sect->{'members'});
-local $lref = &read_file_lines($config{'my_cnf'});
+local $file = @old ? $old[0]->{'file'} :
+	      $sect ? $sect->{'file'} : $config{'my_cnf'};
+local $lref = &read_file_lines($file);
 
 for(my $i=0; $i<@old || $i<@$values; $i++) {
 	local $old = $old[$i];
@@ -1090,7 +1169,7 @@ for(my $i=0; $i<@old || $i<@$values; $i++) {
 	elsif (!$old && defined($values->[$i])) {
 		# Adding
 		splice(@$lref, $sect->{'eline'}+1, 0, $line);
-		&renumber($conf, $sect->{'eline'}+1, 1);
+		&renumber($conf, $sect->{'eline'}+1, 1, $file);
 		push(@{$sect->{'members'}},
 			{ 'name' => $name,
 			  'value' => $values->[$i],
@@ -1099,7 +1178,7 @@ for(my $i=0; $i<@old || $i<@$values; $i++) {
 	elsif ($old && !defined($values->[$i])) {
 		# Deleting
 		splice(@$lref, $old->{'line'}, 1);
-		&renumber($conf, $old->{'line'}, -1);
+		&renumber($conf, $old->{'line'}, -1, $file);
 		@{$sect->{'members'}} = grep { $_ ne $old }
 					     @{$sect->{'members'}};
 		}
@@ -1108,8 +1187,9 @@ for(my $i=0; $i<@old || $i<@$values; $i++) {
 
 sub renumber
 {
-local ($conf, $line, $offset) = @_;
+local ($conf, $line, $offset, $file) = @_;
 foreach my $sect (@$conf) {
+	next if ($sect->{'file'} ne $file);
 	$sect->{'line'} += $offset if ($sect->{'line'} >= $line);
 	$sect->{'eline'} += $offset if ($sect->{'eline'} >= $line);
 	foreach my $m (@{$sect->{'members'}}) {
@@ -1243,7 +1323,7 @@ sub list_character_sets
 {
 local @rv;
 local $db = $_[0] || $master_db;
-if ($mysql_version < 4.1) {
+if (&compare_version_numbers(&get_remote_mysql_version(), "4.1") < 0) {
 	local $d = &execute_sql($db, "show variables like 'character_sets'");
 	@rv = map { [ $_, $_ ] } split(/\s+/, $d->{'data'}->[0]->[1]);
 	}
@@ -1261,7 +1341,7 @@ sub list_collation_orders
 {
 local @rv;
 local $db = $_[0] || $master_db;
-if ($mysql_version >= 5) {
+if (&compare_version_numbers(&get_remote_mysql_version(), "5") >= 0) {
 	local $d = &execute_sql($db, "show collation");
 	@rv = map { [ $_->[0], $_->[1] ] } @{$d->{'data'}};
 	}
@@ -1311,7 +1391,7 @@ return @rv;
 }
 
 # list_compatible_formats()
-# Returns a list of two-element arrays, containing compatability format
+# Returns a list of two-element arrays, containing compatibility format
 # codes and descriptions
 sub list_compatible_formats
 {
@@ -1321,7 +1401,7 @@ return map { [ $_, $text{'compat_'.$_} ] }
 }
 
 # list_compatible_options()
-# Returns a list of two-element arrays, containing compatability options
+# Returns a list of two-element arrays, containing compatibility options
 sub list_compatible_options
 {
 return map { [ $_, $text{'compat_'.$_} ] }
@@ -1345,24 +1425,26 @@ return $two eq "\037\213" ? 1 :
 
 # backup_database(db, dest-file, compress-mode, drop-flag, where-clause,
 #                 charset, &compatible, &only-tables, run-as-user,
-#                 single-transaction-flag)
+#                 single-transaction-flag, quick-flag, force-flag)
 # Backs up a database to the given file, optionally with compression. Returns
 # undef on success, or an error message on failure.
 sub backup_database
 {
 local ($db, $file, $compress, $drop, $where, $charset, $compatible,
-       $tables, $user, $single) = @_;
+       $tables, $user, $single, $quick, $force) = @_;
 if ($compress == 0) {
-	$writer = ">".quotemeta($file);
+	$writer = "cat >".quotemeta($file);
 	}
 elsif ($compress == 1) {
-	$writer = "| gzip -c >".quotemeta($file);
+	$writer = "gzip -c >".quotemeta($file);
 	}
 elsif ($compress == 2) {
-	$writer = "| bzip2 -c >".quotemeta($file);
+	$writer = "bzip2 -c >".quotemeta($file);
 	}
 local $dropsql = $drop ? "--add-drop-table" : "";
 local $singlesql = $single ? "--single-transaction" : "";
+local $forcesql = $force ? "--force" : "";
+local $quicksql = $quick ? "--quick" : "";
 local $wheresql = $where ? "\"--where=$in{'where'}\"" : "";
 local $charsetsql = $charset ?
 	"--default-character-set=".quotemeta($charset) : "";
@@ -1371,15 +1453,54 @@ local $compatiblesql = @$compatible ?
 local $quotingsql = &supports_quoting() ? "--quote-names" : "";
 local $routinessql = &supports_routines() ? "--routines" : "";
 local $tablessql = join(" ", map { quotemeta($_) } @$tables);
-local $cmd = "$config{'mysqldump'} $authstr $dropsql $singlesql $wheresql $charsetsql $compatiblesql $quotingsql $routinessql ".quotemeta($db)." $tablessql 2>&1 $writer";
+local $eventssql = &supports_mysqldump_events() ? "--events" : "";
+local $gtidsql = "";
+eval {
+	$main::error_must_die = 1;
+	local $d = &execute_sql($master_db, "show variables like 'gtid_mode'");
+	if (@{$d->{'data'}} && uc($d->{'data'}->[0]->[1]) eq 'ON' &&
+	    &compare_version_numbers($mysql_version, "5.6") >= 0) {
+		# Add flag to support GTIDs
+		$gtidsql = "--set-gtid-purged=OFF";
+		}
+	};
 if ($user && $user ne "root") {
-	$cmd = &command_as_user($user, undef, $cmd);
+	# Actual writing of output is done as another user
+	$writer = &command_as_user($user, undef, $writer);
+	}
+local $cmd = "$config{'mysqldump'} $authstr $dropsql $singlesql $forcesql $quicksql $wheresql $charsetsql $compatiblesql $quotingsql $routinessql ".quotemeta($db)." $tablessql $eventssql $gtidsql | $writer";
+if (&shell_is_bash()) {
+	$cmd = "set -o pipefail ; $cmd";
 	}
 local $out = &backquote_logged("($cmd) 2>&1");
-if ($? || $out) {
+if ($? || !-s $file) {
 	return $out;
 	}
 return undef;
+}
+
+# delete_database_backup_job(db)
+# If there is a backup scheduled for some database, remove it
+sub delete_database_backup_job
+{
+my ($db) = @_;
+&foreign_require("cron");
+my @jobs = &cron::list_cron_jobs();
+my $cmd = "$cron_cmd $db";
+my ($job) = grep { $_->{'command'} eq $cmd } @jobs;
+if ($job) {
+	&lock_file(&cron::cron_file($job));
+	&cron::delete_cron_job($job);
+	&unlock_file(&cron::cron_file($job));
+	}
+}
+
+# get_all_mysqld_files()
+# Returns all config files used by MySQLd
+sub get_all_mysqld_files
+{
+my $conf = &get_mysql_config();
+return &unique(map { $_->{'file'} } @$conf);
 }
 
 1;

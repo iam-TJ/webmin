@@ -62,14 +62,16 @@ if (@disks) {
 		if (&supports_smart($d)) {
 			# Display link to smart module
 			push(@links, "<a href='../smart-status/index.cgi?".
-			     "drive=$d->{'device'}'>$text{'index_dsmart'}</a>");
+			    "drive=$d->{'device'}:'>$text{'index_dsmart'}</a>");
 			}
+		if ($ed) {
+			push(@links, "<a href='blink.cgi?".
+                       		"disk=$d->{'index'}'>$text{'index_blink'}</a>");
+                	}
 		print &ui_columns_row([
-			$ed ? "<a href='edit_disk.cgi?device=$d->{'device'}'>".
-			        $d->{'desc'}."</a>"
+			$ed ? &ui_link("edit_disk.cgi?device=$d->{'device'}",$d->{'desc'})
 			    : $d->{'desc'},
-			$d->{'cylsize'} ?
-			  &nice_size($d->{'cylinders'}*$d->{'cylsize'}) : "",
+			$d->{'size'} ? &nice_size($d->{'size'}) : "",
 			$d->{'model'},
 			scalar(@{$d->{'parts'}}),
 			$hasctrl ? ( join(" ", @ctrl) ) : ( ),

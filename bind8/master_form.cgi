@@ -1,6 +1,9 @@
 #!/usr/local/bin/perl
 # master_form.cgi
 # Form for creating a new master zone
+use strict;
+use warnings;
+our (%access, %text, %config);
 
 require './bind8-lib.pl';
 &ReadParse();
@@ -20,10 +23,21 @@ print &ui_table_row($text{'mcreate_type'},
 print &ui_table_row($text{'mcreate_dom'},
 	&ui_textbox("zone", undef, 40), 3);
 
-$conf = &get_config();
-@views = &find("view", $conf);
+# Sign zones automatically
+if (&have_dnssec_tools_support()) {
+	print &ui_table_row($text{'mcreate_dnssec_tools_enable'},
+		&ui_yesno_radio("enable_dt", $config{'tmpl_dnssec_dt'} ? 1 : 0));
+
+	# Key algorithm
+	print &ui_table_row($text{'dt_zone_dne'},
+		&ui_select("dne", "NSEC",
+					   [ &list_dnssec_dne() ]));
+}
+
+my $conf = &get_config();
+my @views = &find("view", $conf);
 if (@views) {
-	($defview) = grep { lc($_->{'values'}->[0]) eq
+	my ($defview) = grep { lc($_->{'values'}->[0]) eq
 			    lc($config{'default_view'}) } @views;
 	print &ui_table_row($text{'mcreate_view'},
 		&ui_select("view", $defview ? $defview->{'index'} : undef,
@@ -43,7 +57,7 @@ print &ui_table_row($text{'master_server'},
 	&ui_checkbox("master_ns", 1, $text{'master_ns'}, 1), 3);
 
 # Create on slave servers?
-@servers = &list_slave_servers();
+my @servers = &list_slave_servers();
 if (@servers && $access{'remote'}) {
 	print &ui_table_row($text{'master_onslave'},
 		&ui_radio("onslave", 1,
@@ -77,6 +91,7 @@ print &ui_table_row($text{'master_addrev'},
 	&ui_yesno_radio("addrev", 1), 3);
 
 # SOA options
+my %zd;
 &get_zone_defaults(\%zd);
 print &ui_table_row($text{'master_refresh'},
 	&ui_textbox("refresh", $zd{'refresh'}, 8)." ".

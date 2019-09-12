@@ -4,18 +4,33 @@ local $format;
 local $out;
 
 require "./time-lib.pl";
-require 'timelocal.pl';
+use Time::Local;
 
 &ReadParse();
 
 if (!$in{'action'}) {
 	# user probably hit return in the time server field
-	$in{'action'} = $text{ 'action_timeserver_sys' };
+	$in{'action'} = $text{'index_sync'};
 	}
 $mode = "time";
 
-if( $in{ 'action' } eq $text{ 'action_apply' } )
-{
+if ($in{'action'} eq $text{'action_sync'}) {
+  # Set system time to hardware time
+  &error( $text{ 'acl_nosys' } ) if( $access{ 'sysdate' } );
+  local $flags = &get_hwclock_flags();
+  $out = &backquote_logged("hwclock $flags --hctosys");
+  &error( &text( 'error_sync', $out ) ) if( $out ne "" );
+  &webmin_log("sync");
+
+} elsif ($in{'action'} eq $text{'action_sync_s'}) {
+  # Set hardware time to system time
+  &error( $text{ 'acl_nohw' } ) if( $access{ 'hwdate' } && $access{'sysdate'} );
+  local $flags = &get_hwclock_flags();
+  $out = &backquote_logged("hwclock $flags --systohc");
+  &error( &text( 'error_sync', $out ) ) if( $out ne "" );
+  &webmin_log("sync_s");
+
+} elsif($in{'action'} eq $text{'action_apply'} || $in{'mode'} eq 'sysdate' ) {
   # Setting the system time
   &error( $text{ 'acl_nosys' } ) if( $access{ 'sysdate' } );
   $err = &set_system_time($in{ 'second' }, $in{'minute'}, $in{'hour'},
@@ -23,7 +38,7 @@ if( $in{ 'action' } eq $text{ 'action_apply' } )
   &error($err) if ($err);
   &webmin_log("set", "date", time(), \%in);
 
-} elsif ( $in{ 'action' } eq $text{ 'action_save' } ) {
+} elsif ($in{'action'} eq $text{'action_save'} || $in{'mode'} eq 'hwdate' ) {
   # Setting the hardware time
   &error( $text{ 'acl_nohw' } ) if( $access{ 'hwdate' } );
   $err = &set_hardware_time($in{ 'second' }, $in{'minute'}, $in{'hour'},
@@ -34,21 +49,7 @@ if( $in{ 'action' } eq $text{ 'action_apply' } )
 			    $in{'year'} : $in{'year'}-1900);
   &webmin_log("set", "hwclock", $hwtime, \%in);
 
-} elsif( $in{ 'action' } eq $text{ 'action_sync' } ) {
-  # Set system time to hardware time
-  &error( $text{ 'acl_nosys' } ) if( $access{ 'sysdate' } );
-  $out = &backquote_logged("hwclock --hctosys");
-  &error( &text( 'error_sync', $out ) ) if( $out ne "" );
-  &webmin_log("sync");
-
-} elsif( $in{ 'action' } eq $text{ 'action_sync_s' } ) {
-  # Set hardware time to system time
-  &error( $text{ 'acl_nohw' } ) if( $access{ 'hwdate' } && $access{'sysdate'} );
-  $out = &backquote_logged("hwclock --systohc");
-  &error( &text( 'error_sync', $out ) ) if( $out ne "" );
-  &webmin_log("sync_s");
-
-} elsif( $in{ 'action' } eq $text{ 'index_sync' }) {
+} elsif ($in{'action'} eq $text{'index_sync'} || $in{'mode'} eq 'ntp') {
   # Sync with a time server
   $access{'ntp'} || &error($text{'acl_nontp'});
   $in{'timeserver'} =~ /\S/ || &error($text{'error_etimeserver'});
@@ -64,15 +65,18 @@ if( $in{ 'action' } eq $text{ 'action_apply' } )
 
   # Create, update or delete the syncing cron job
   $job = &find_webmin_cron_job();
-  if ($in{'sched'}) {
+  if ($in{'sched'} || $in{'boot'}) {
 	$job ||= { 'module' => $module_name,
-		     'func' => 'sync_time_cron' };
+		   'func' => 'sync_time_cron' };
+	$job->{'disabled'} = $in{'sched'} ? 0 : 1;
+	$job->{'boot'} = $in{'boot'};
 	&webmincron::parse_times_input($job, \%in);
 	&webmincron::create_webmin_cron($job);
 	}
   elsif ($job) {
 	&webmincron::delete_webmin_cron($job);
 	}
+
   &webmin_log("remote", $in{'action'} eq $text{'action_timeserver_sys'} ?  "date" : "hwclock", $rawtime, \%in);
   $mode = "sync";
 }

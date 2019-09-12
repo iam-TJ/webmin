@@ -36,12 +36,10 @@ print &ui_hidden("file", $in{'id'});
 
 # Start of headers section
 if ($in{'headers'}) {
-	$rlink = "<a href='view_mailq.cgi?id=$in{'id'}&headers=0$subs'>".
-		 "$text{'view_noheaders'}</a>";
+	$rlink = &ui_link("view_mailq.cgi?id=$in{'id'}&headers=0$subs",$text{'view_noheaders'});
 	}
 else {
-	$rlink = "<a href='view_mailq.cgi?id=$in{'id'}&headers=1$subs'>".
-		 "$text{'view_allheaders'}</a>";
+	$rlink = &ui_link("view_mailq.cgi?id=$in{'id'}&headers=1$subs",$text{'view_allheaders'});
 	}
 print &ui_table_start($text{'view_headers'}, "width=100%", 2, undef, $rlink);
 
@@ -99,14 +97,14 @@ if (@attach) {
 	foreach $a (@attach) {
 		if ($a->{'type'} eq 'message/rfc822') {
 			print &ui_columns_row([
-				"<a href='view_mailq.cgi?id=$in{'id'}$subs&sub=$a->{'idx'}'>$text{'view_sub'}</a>",
+				&ui_link("view_mailq.cgi?id=$in{'id'}$subs&sub=$a->{'idx'}",$text{'view_sub'}),
 				undef,
 				&nice_size(length($a->{'data'})),
 				]);
 			}
 		else {
 			print &ui_columns_row([
-				"<a href='detach_queue.cgi/$a->{'filename'}?id=$in{'id'}&attach=$a->{'idx'}$subs'>$a->{'filename'}</a>",
+				&ui_link("detach_queue.cgi/$a->{'filename'}?id=$in{'id'}&attach=$a->{'idx'}$subs",$a->{'filename'}),
 				$a->{'type'},
 				&nice_size(length($a->{'data'})),
 				]);

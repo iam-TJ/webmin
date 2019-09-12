@@ -1,4 +1,4 @@
-acl_apply=Peut appliquer la configuration?
+ecl_apply=Peut appliquer la configuration?
 acl_bootup=Peut activer le parefeu au d&#233;marrage?
 acl_cluster=Peut g&#233;rer le parefeu cluster?
 acl_delchain=Peut effacer ou vider des cha&#238;nes?
@@ -169,7 +169,7 @@ index_change=Voir IPtable:
 index_cluster=Serveurs de Clusters
 index_comm=Commentaire
 index_desc=Condition
-index_ecommand=La commande $& n'a pas &#233;t&#233; trouv&#233;e sur votre syst&#232;me. Webmin a besoin de cette commande pour configurer IPtables.
+index_ecommand=La commande $1 n'a pas &#233;t&#233; trouv&#233;e sur votre syst&#232;me. Webmin a besoin de cette commande pour configurer IPtables.
 index_ekernel=Une erreur est survenue lors du contr&#244;le de la configuration courante d'IPtables : $1 ceci indique que votre noyau ne supporte pas IPtables
 index_existing=Webmin a d&#233;tect&#233; $1 r&#232;gles du firewall Iptables actuellement en cours d'utilisation qui ne sont pas sauvegard&#233;es dans le fichier $2. Ces r&#232;gles ont probablement &#233;t&#233; d&#233;finies par un script que ce module ne sait pas lire ou &#233;diter.<p>Si vous voulez utiliser ce module pour g&#233;rer votre firewall IPtables, cliquez sur le bouton ci-dessous pour convertir les r&#232;gles existantes dans un fichier de sauvegarde, puis d&#233;sactivez votre script de gestion du firewall existant.
 index_header=Configuration du firewall de $1
@@ -197,11 +197,11 @@ index_reset=R&#233;initialiser le Parefeu
 index_return=liste des r&#232;gles
 index_saveex=Sauvegarder les r&#232;gles du Firewall
 index_setup=Aucun firewall IPtables n'a &#233;t&#233; configur&#233; sur votre syst&#232;me pour le moment. Webmin peut le configurer pour vous afin d'&#234;tre sauvegard&#233; dans le fichier $1, avec les param&#232;tres par d&#233;faut bas&#233;s sur l'un des choix ci-dessous..
-index_shorewall=Attention! Il semble que Shorewall soit utilis&#233; pour g&#233;rer votre firewall. Peut-&#234;tre devriez-vous utiliser le <a href='$1'>module Shorewall Firewall</a>.
+index_shorewall=Il semble que Shorewall soit utilis&#233; pour g&#233;rer votre firewall. Peut-&#234;tre devriez-vous utiliser le <a href='$1'>module Shoreline Firewall</a>.
 index_table_filter=Filtrage de paquets (filter)
 index_table_mangle=Alt&#233;ration de paquets (mangle)
 index_table_nat=Translation d'adresses r&#233;seau (nat)
-index_title=Firewall Linux
+index_title=Firewall IPTables Linux
 index_unapply=R&#233;tablir la Configuration
 index_unapplydesc=Cliquez sur ce bouton pour r&#233;tablir la configuration list&#233;e ci-dessus en fonction de celle actuellement active.
 log_apply=Configuration appliqu&#233;
@@ -271,3 +271,4 @@ setup_ecannot=Vous n'&#234;tes pas autoris&#233; &#224; installer le parefeu
 setup_eiface=Pas d'interface r&#233;seau externe entr&#233;e
 unapply_ecannot=Vous n'&#234;tes pas autoris&#233; &#224; r&#233;voquer la configuration
 unapply_err=Impossible de r&#233;tablir la configuration
+eip6tables=Ligne inconnue dans le fichier ip6tables : $1

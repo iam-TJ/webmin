@@ -13,13 +13,16 @@ $access{'bcc'} || &error($text{'bcc_ecannot'});
 &before_save();
 &save_options(\%in);
 &ensure_map("sender_bcc_maps");
+&ensure_map("recipient_bcc_maps");
 &after_save();
 &unlock_postfix_files();
 
 
 &regenerate_bcc_table();
+&regenerate_recipient_bcc_table();
 
-&reload_postfix();
+$err = &reload_postfix();
+&error($err) if ($err);
 
 &webmin_log("bcc");
 &redirect("");

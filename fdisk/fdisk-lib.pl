@@ -6,12 +6,20 @@ use WebminCore;
 &init_config();
 &foreign_require("mount", "mount-lib.pl");
 if (&foreign_check("raid")) {
-	&foreign_require("raid", "raid-lib.pl");
+	&foreign_require("raid");
 	$raid_module++;
 	}
 if (&foreign_check("lvm")) {
-	&foreign_require("lvm", "lvm-lib.pl");
+	&foreign_require("lvm");
 	$lvm_module++;
+	}
+if (&foreign_check("iscsi-server")) {
+	&foreign_require("iscsi-server");
+	$iscsi_server_module++;
+	}
+if (&foreign_check("iscsi-target")) {
+	&foreign_require("iscsi-target");
+	$iscsi_target_module++;
 	}
 &foreign_require("proc", "proc-lib.pl");
 %access = &get_module_acl();
@@ -186,6 +194,18 @@ if (open(PARTS, "/proc/partitions")) {
 			# Virtio disk from KVM
 			push(@devs, "/dev/$1");
 			}
+		elsif (/\d+\s+\d+\s+\d+\s+(xvd[a-z]+)\s/) {
+			# PV disk from Xen
+			push(@devs, "/dev/$1");
+			}
+		elsif (/\d+\s+\d+\s+\d+\s+(mmcblk\d+)\s/) {
+			# SD card / MMC, seen on Raspberry Pi
+			push(@devs, "/dev/$1");
+			}
+		elsif (/\d+\s+\d+\s+\d+\s+(nvme\d+n\d+)\s/) {
+			# NVME SSD
+			push(@devs, "/dev/$1");
+			}
 		}
 	close(PARTS);
 
@@ -193,6 +213,7 @@ if (open(PARTS, "/proc/partitions")) {
 	@devs = sort { ($b =~ /\/hd[a-z]+$/ ? 1 : 0) <=>
 		       ($a =~ /\/hd[a-z]+$/ ? 1 : 0) } @devs;
 	}
+return ( ) if (!@devs);		# No disks, ie on Xen
 
 # Skip cd-rom drive, identified from symlink. Don't do this if we can identify
 # cds by their media type though
@@ -225,10 +246,11 @@ if ($has_parted) {
 		      "fdisk -l $_ 2>/dev/null" } @devs)." |");
 	}
 else {
-	open(FDISK, "fdisk -l $devs 2>/dev/null |");
+	open(FDISK, "fdisk -l -u=cylinders $devs 2>/dev/null || fdisk -l $devs 2>/dev/null |");
 	}
 while(<FDISK>) {
-	if (/Disk\s+([^ :]+):\s+(\d+)\s+\S+\s+(\d+)\s+\S+\s+(\d+)/ ||
+	if (($m4 = ($_ =~ /Disk\s+([^ :]+):\s+(\d+)\s+(\S+),\s+(\d+)\s+bytes,\s+(\d+)\s+sectors/)) ||
+	    ($m1 = ($_ =~ /Disk\s+([^ :]+):\s+(\d+)\s+\S+\s+(\d+)\s+\S+\s+(\d+)/)) ||
 	    ($m2 = ($_ =~ /Disk\s+([^ :]+):\s+(.*)\s+bytes/)) ||
 	    ($m3 = ($_ =~ /Disk\s+([^ :]+):\s+([0-9\.]+)cyl/))) {
 		# New disk section
@@ -240,6 +262,7 @@ while(<FDISK>) {
 			}
 		elsif ($m2) {
 			# New style fdisk
+			# Disk /dev/sda: 85.8 GB, 85899345920 bytes
 			$disk = { 'device' => $1,
 				  'prefix' => $1,
 				  'table' => 'msdos', };
@@ -247,6 +270,14 @@ while(<FDISK>) {
 			$disk->{'heads'} = $1;
 			$disk->{'sectors'} = $2;
 			$disk->{'cylinders'} = $3;
+			}
+		elsif ($m4) {
+			# Even newer disk (sectors/etc come later)
+			# Disk /dev/sda: 10 GiB, 10737418240 bytes, 20971520 sectors
+			$disk = { 'device' => $1,
+				  'prefix' => $1,
+				  'size' => $4,
+				  'table' => 'msdos', };
 			}
 		else {
 			# Old style fdisk
@@ -279,6 +310,11 @@ while(<FDISK>) {
 		elsif ($disk->{'device'} =~ /\/xvd([a-z]+)$/) {
 			# Xen virtual disk
 			$disk->{'desc'} = &text('select_device', 'Xen', uc($1));
+			$disk->{'type'} = 'ide';
+			}
+		elsif ($disk->{'device'} =~ /\/mmcblk([0-9]+)$/) {
+			# SD-card / MMC
+			$disk->{'desc'} = &text('select_device', 'SD-Card', $1);
 			$disk->{'type'} = 'ide';
 			}
 		elsif ($disk->{'device'} =~ /\/vd([a-z]+)$/) {
@@ -381,6 +417,12 @@ while(<FDISK>) {
 			$disk->{'type'} = 'raid';
 			$disk->{'prefix'} =~ s/disc$/part/g;
 			}
+		elsif ($disk->{'device'} =~ /\/nvme(\d+)n(\d+)$/) {
+			# NVME SSD controller
+			$disk->{'desc'} = &text('select_nvme', "$1", "$2");
+			$disk->{'type'} = 'scsi';
+			$disk->{'prefix'} = $disk->{'device'}.'p';
+			}
 
 		# Work out short name, like sda
 		local $short;
@@ -400,11 +442,19 @@ while(<FDISK>) {
 
 		push(@disks, $disk);
 		}
-	elsif (/^Units\s+=\s+cylinders\s+of\s+(\d+)\s+\*\s+(\d+)/) {
+	elsif (/Geometry:\s+(\d+)\s+heads,\s+(\d+)\s+sectors\/track,\s+(\d+)\s+cylinders/) {
+		# Separate geometry line
+		# Geometry: 255 heads, 63 sectors/track, 1305 cylinders
+		$disk->{'heads'} = $1;
+		$disk->{'sectors'} = $2;
+		$disk->{'cylinders'} = $3;
+		}
+	elsif (/^Units\s*[=:]\s+cylinders\s+of\s+(\d+)\s+\*\s+(\d+)/) {
 		# Unit size for disk from fdisk
 		$disk->{'bytes'} = $2;
 		$disk->{'cylsize'} = $disk->{'heads'} * $disk->{'sectors'} *
 				     $disk->{'bytes'};
+		$disk->{'size'} = $disk->{'cylinders'} * $disk->{'cylsize'};
 		}
 	elsif (/BIOS\s+cylinder,head,sector\s+geometry:\s+(\d+),(\d+),(\d+)\.\s+Each\s+cylinder\s+is\s+(\d+)(b|kb|mb)/i) {
 		# Unit size for disk from parted
@@ -415,9 +465,27 @@ while(<FDISK>) {
 					   lc($5) eq "kb" ? 1024 : 1024*1024);
 		$disk->{'bytes'} = $disk->{'cylsize'} / $disk->{'heads'} /
 						        $disk->{'sectors'};
+		$disk->{'size'} = $disk->{'cylinders'} * $disk->{'cylsize'};
+		}
+	elsif (/(\/dev\/\S+?(\d+))[ \t*]+(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\S{1,2})\s+(.*)/) {
+		# Partition within the current disk from fdisk (msdos format)
+		# /dev/sda1 * 1 1306 1306 10G 83 Linux
+		local $part = { 'number' => $2,
+				'device' => $1,
+				'type' => $7,
+				'start' => $3,
+				'end' => $4,
+				'extended' => $7 eq '5' || $6 eq 'f' ? 1 : 0,
+				'index' => scalar(@{$disk->{'parts'}}),
+			 	'edittype' => 1, };
+		$part->{'desc'} = &partition_description($part->{'device'});
+		$part->{'size'} = ($part->{'end'} - $part->{'start'} + 1) *
+				  $disk->{'cylsize'};
+		push(@{$disk->{'parts'}}, $part);
 		}
 	elsif (/(\/dev\/\S+?(\d+))[ \t*]+\d+\s+(\d+)\s+(\d+)\s+(\S+)\s+(\S{1,2})\s+(.*)/ || /(\/dev\/\S+?(\d+))[ \t*]+(\d+)\s+(\d+)\s+(\S+)\s+(\S{1,2})\s+(.*)/) {
-		# Partition within the current disk from fdisk
+		# Partition within the current disk from fdisk (msdos format)
+		# /dev/sda1 * 1 9327 74919096 83 Linux
 		local $part = { 'number' => $2,
 				'device' => $1,
 				'type' => $6,
@@ -428,26 +496,96 @@ while(<FDISK>) {
 				'index' => scalar(@{$disk->{'parts'}}),
 			 	'edittype' => 1, };
 		$part->{'desc'} = &partition_description($part->{'device'});
+		$part->{'size'} = ($part->{'end'} - $part->{'start'} + 1) *
+				  $disk->{'cylsize'};
 		push(@{$disk->{'parts'}}, $part);
 		}
-	elsif (/^\s*(\d+)\s+(\d+)cyl\s+(\d+)cyl\s+(\d+)cyl(\s+(primary|logical|extended))?\s*(\S*)\s*(\S*)/) {
-		# Partition within the current disk from parted
+	elsif (/(\/dev\/\S+?(\d+))\s+(\d+)\s+(\d+)\s+(\d+)\s+([0-9\.]+[kMGTP])\s+(\S.*)/) {
+		# Partition within the current disk from fdisk (gpt format)
+		local $part = { 'number' => $2,
+                                'device' => $1,
+				'type' => $7,
+				'start' => $3,
+				'end' => $4,
+				'blocks' => $5,
+				'index' => scalar(@{$disk->{'parts'}}),
+			 	'edittype' => 1, };
+		$part->{'desc'} = &partition_description($part->{'device'});
+		$part->{'size'} = ($part->{'end'} - $part->{'start'} + 1) *
+				  $disk->{'cylsize'};
+		push(@{$disk->{'parts'}}, $part);
+		}
+	elsif (/^\s*(\d+)\s+(\d+)cyl\s+(\d+)cyl\s+(\d+)cyl\s+(primary|logical|extended)\s*(\S*)\s*(\S*)/) {
+		# Partition within the current disk from parted (msdos format)
 		local $part = { 'number' => $1,
 				'device' => $disk->{'device'}.$1,
-				'type' => $7,
+				'type' => $6 || 'ext2',
 				'start' => $2+1,
 				'end' => $3+1,
 				'blocks' => $4 * $disk->{'cylsize'},
-				'extended' => $6 eq 'extended' ? 1 : 0,
+				'extended' => $5 eq 'extended' ? 1 : 0,
+				'raid' => $7 eq 'raid' ? 1 : 0,
 				'index' => scalar(@{$disk->{'parts'}}),
-			        'name' => $8,
 				'edittype' => 0, };
 		$part->{'type'} = 'ext2' if ($part->{'type'} =~ /^ext/);
+		$part->{'type'} = 'raid' if ($part->{'type'} eq 'ext2' &&
+					     $part->{'raid'});
 		$part->{'desc'} = &partition_description($part->{'device'});
+		$part->{'size'} = ($part->{'end'} - $part->{'start'} + 1) *
+				  $disk->{'cylsize'};
+		push(@{$disk->{'parts'}}, $part);
+		}
+	elsif (/^\s*(\d+)\s+(\d+)cyl\s+(\d+)cyl\s+(\d+)cyl\s(.*)/) {
+		# Partition within the current disk from parted (gpt format)
+		local $part = { 'number' => $1,
+				'device' => $disk->{'device'}.$1,
+				'start' => $2+1,
+				'end' => $3+1,
+				'blocks' => $4 * $disk->{'cylsize'},
+				'extended' => 0,
+				'index' => scalar(@{$disk->{'parts'}}),
+				'edittype' => 0, };
+
+		# Work out partition type, name and flags
+		local $rest = $5;
+		$rest =~ s/^\s+//;
+		$rest =~ s/,//g;	# Remove commas in flags list
+		local @rest = split(/\s+/, $rest);
+
+		# If first word is a known partition type, assume it is the type
+		if (@rest && &conv_type($rest[0])) {
+			$part->{'type'} = shift(@rest);
+			}
+
+		# Remove flag words from the end
+		local %flags;
+		while(@rest && $rest[$#rest] =~ /boot|lba|root|swap|hidden|raid|LVM/i) {
+			$flags{lc(pop(@rest))} = 1;
+			}
+
+		# Anything left in the middle should be the name
+		if (@rest) {
+			$part->{'name'} = $rest[0];
+			}
+		if ($flags{'raid'}) {
+			# RAID flag is set
+			$part->{'raid'} = 1;
+			}
+		$part->{'type'} = 'ext2' if (!$part->{'type'} ||
+					     $part->{'type'} =~ /^ext/);
+		$part->{'type'} = 'raid' if ($part->{'type'} =~ /^ext/ &&
+					     $part->{'raid'});
+		$part->{'desc'} = &partition_description($part->{'device'});
+		$part->{'size'} = ($part->{'end'} - $part->{'start'} + 1) *
+				  $disk->{'cylsize'};
 		push(@{$disk->{'parts'}}, $part);
 		}
 	elsif (/Partition\s+Table:\s+(\S+)/) {
-		# Parted partition table type
+		# Parted partition table type (from parted)
+		$disk->{'table'} = $1;
+		}
+	elsif (/Disklabel\s+type:\s+(\S+)/) {
+		# Parted partition table type (from fdisk)
 		$disk->{'table'} = $1;
 		}
 	}
@@ -514,12 +652,16 @@ return @disks;
 }
 
 # partition_description(device)
-# Converts a device path like /dev/hda into a human-readable name
+# Converts a device path like /dev/hda1 into a human-readable name
 sub partition_description
 {
 my ($device) = @_;
-return $device =~ /(.)d([a-z]+)(\d+)$/ ?
-	 &text('select_part', $1 eq 's' ? 'SCSI' : 'IDE', uc($2), "$3") :
+return $device =~ /(s|h|xv|v)d([a-z]+)(\d+)$/ ?
+	 &text('select_part', $1 eq 's' ? 'SCSI' :
+			      $1 eq 'xv' ? 'Xen' :
+			      $1 eq 'v' ? 'VirtIO' : 'IDE', uc($2), "$3") :
+       $device =~ /mmcblk(\d+)p(\d+)$/ ?
+	 &text('select_part', 'SD-Card', "$1", "$2") :
        $device =~ /scsi\/host(\d+)\/bus(\d+)\/target(\d+)\/lun(\d+)\/part(\d+)/ ?
 	 &text('select_spart', "$1", "$2", "$3", "$4", "$5") :
        $device =~ /ide\/host(\d+)\/bus(\d+)\/target(\d+)\/lun(\d+)\/part(\d+)/ ?
@@ -532,6 +674,8 @@ return $device =~ /(.)d([a-z]+)(\d+)$/ ?
 	 &text('select_smartpart', "$1", "$2", "$3") :
        $device =~ /ataraid\/disc(\d+)\/part(\d+)$/ ?
 	 &text('select_ppart', "$1", "$2") :
+       $device =~ /nvme(\d+)n(\d+)p(\d+)$/ ?
+	 &text('select_nvmepart', "$1", "$2", "$3") :
 	 "???";
 }
 
@@ -564,12 +708,13 @@ else {
 # Changes the type of an existing partition
 sub change_type
 {
-&open_fdisk("$_[0]");
+my ($disk, $part, $type) = @_;
+&open_fdisk($disk);
 &wprint("t\n");
 local $rv = &wait_for($fh, 'Partition.*:', 'Selected partition');
-&wprint("$_[1]\n") if ($rv == 0);
+&wprint("$part\n") if ($rv == 0);
 &wait_for($fh, 'Hex.*:');
-&wprint("$_[2]\n");
+&wprint("$type\n");
 &wait_for($fh, 'Command.*:');
 &wprint("w\n"); sleep(1);
 &close_fdisk();
@@ -613,8 +758,13 @@ if ($has_parted) {
 	# Using parted
 	my $pe = $part > 4 ? "logical" : "primary";
 	my $cmd;
-	if ($type) {
-		$cmd = "parted -s ".$disk." unit cyl mkpartfs ".$pe." ".
+	if ($type eq "raid") {
+		$cmd = "parted -s ".$disk." unit cyl mkpart ".$pe." ".
+		       "ext2 ".($start-1)." ".$end;
+		$cmd .= " ; parted -s ".$disk." set $part raid on";
+		}
+	elsif ($type && $type ne 'ext2') {
+		$cmd = "parted -s ".$disk." unit cyl mkpart ".$pe." ".
 		       $type." ".($start-1)." ".$end;
 		}
 	else {
@@ -642,16 +792,22 @@ else {
 		}
 	&wait_for($fh, 'First.*:') if ($wf != 1);
 	&wprint("$start\n");
-	&wait_for($fh, 'Last.*:');
+	$wf = &wait_for($fh, 'Last.*:', 'First.*:');
+	$wf < 0 && &error("End of input waiting for first cylinder response");
+	$wf == 1 && &error("First cylinder is invalid : $wait_for_input");
 	&wprint("$end\n");
-	&wait_for($fh, 'Command.*:');
+	$wf = &wait_for($fh, 'Command.*:', 'Last.*:');
+	$wf < 0 && &error("End of input waiting for last cylinder response");
+	$wf == 1 && &error("Last cylinder is invalid : $wait_for_input");
 
 	&wprint("t\n");
 	local $rv = &wait_for($fh, 'Partition.*:', 'Selected partition');
 	&wprint("$part\n") if ($rv == 0);
 	&wait_for($fh, 'Hex.*:');
 	&wprint("$type\n");
-	&wait_for($fh, 'Command.*:');
+	$wf = &wait_for($fh, 'Command.*:', 'Hex.*:');
+	$wf < 0 && &error("End of input waiting for partition type response");
+	$wf == 1 && &error("Partition type is invalid : $wait_for_input");
 	&wprint("w\n");
 	&wait_for($fh, 'Syncing'); sleep(3);
 	&close_fdisk();
@@ -735,10 +891,10 @@ if ($has_parted) {
 	elsif ($tag eq "fat32") {
 		@rv = ( "vfat" );
 		}
-	elsif ($tag eq "ext2") {
-		@rv = ( "ext3", "ext4", "ext2", "xfs", "reiserfs" );
+	elsif ($tag =~ /^ext/ || $tag eq "raid") {
+		@rv = ( "ext3", "ext4", "ext2", "xfs", "reiserfs", "btrfs" );
 		}
-	elsif ($tag eq "hfs") {
+	elsif ($tag eq "hfs" || $tag eq "HFS") {
 		@rv = ( "hfs" );
 		}
 	elsif ($tag eq "linux-swap") {
@@ -766,7 +922,7 @@ else {
 		@rv = ( "vfat" );
 		}
 	elsif ($tag eq "83") {
-		@rv = ( "ext3", "ext4", "ext2", "xfs", "reiserfs" );
+		@rv = ( "ext3", "ext4", "ext2", "xfs", "reiserfs", "btrfs" );
 		}
 	elsif ($tag eq "82") {
 		@rv = ( "swap" );
@@ -792,16 +948,7 @@ return $text{"fs_".$_[0]};
 
 sub mkfs_options
 {
-if ($_[0] eq "ext2") {
-	&opt_input("ext2_b", $text{'bytes'}, 1);
-	&opt_input("ext2_f", $text{'bytes'}, 0);
-	&opt_input("ext2_i", "", 1);
-	&opt_input("ext2_m", "%", 0);
-	&opt_input("ext2_g", "", 1);
-	print &ui_table_row($text{'ext2_c'},
-		&ui_yesno_radio("ext2_c", 0));
-	}
-elsif ($_[0] eq "msdos" || $_[0] eq "vfat") {
+if ($_[0] eq "msdos" || $_[0] eq "vfat") {
 	&opt_input("msdos_ff", "", 1);
 	print &ui_table_row($text{'msdos_F'},
 	     &ui_select("msdos_F", undef,
@@ -855,6 +1002,11 @@ elsif ($_[0] eq "fatx") {
 	# Has no options!
 	print &ui_table_row(undef, $text{'fatx_none'}, 4);
 	}
+elsif ($_[0] eq "btrfs") {
+	&opt_input("btrfs_l", $text{'bytes'}, 0);
+	&opt_input("btrfs_n", $text{'bytes'}, 0);
+	&opt_input("btrfs_s", $text{'bytes'}, 0);
+	}
 }
 
 # mkfs_parse(type, device)
@@ -863,18 +1015,7 @@ elsif ($_[0] eq "fatx") {
 sub mkfs_parse
 {
 local($cmd);
-if ($_[0] eq "ext2") {
-	$cmd = "mkfs -t ext2";
-	$cmd .= &opt_check("ext2_b", '\d+', "-b");
-	$cmd .= &opt_check("ext2_f", '\d+', "-f");
-	$cmd .= &opt_check("ext2_i", '\d{4,}', "-i");
-	$cmd .= &opt_check("ext2_m", '\d+', "-m");
-	$cmd .= &opt_check("ext2_g", '\d+', "-g");
-	$cmd .= $in{'ext2_c'} ? " -c" : "";
-	$cmd .= " -q";
-	$cmd .= " $_[1]";
-	}
-elsif ($_[0] eq "msdos" || $_[0] eq "vfat") {
+if ($_[0] eq "msdos" || $_[0] eq "vfat") {
 	$cmd = "mkfs -t $_[0]";
 	$cmd .= &opt_check("msdos_ff", '[1-2]', "-f");
 	if ($in{'msdos_F'} eq '*') {
@@ -952,6 +1093,13 @@ elsif ($_[0] eq "jfs") {
 	}
 elsif ($_[0] eq "fatx") {
 	$cmd = "mkfs -t $_[0] $_[1]";
+	}
+elsif ($_[0] eq "btrfs") {
+	$cmd = "mkfs -t $_[0]";
+	$cmd .= " -l $in{'btrfs_l'}" if (!$in{'btrfs_l_def'});
+	$cmd .= " -n $in{'btrfs_n'}" if (!$in{'btrfs_n_def'});
+	$cmd .= " -s $in{'btrfs_s'}" if (!$in{'btrfs_s_def'});
+	$cmd .= " $_[1]";
 	}
 if (&has_command("partprobe")) {
 	$cmd = "partprobe ; $cmd";
@@ -1032,7 +1180,7 @@ return $un =~ /^2\.0\./ || $un =~ /^1\./ || $un =~ /^0\./;
 }
 
 # device_status(device)
-# Returns an array of  directory, type, mounted
+# Returns an array of  directory, type, mounted, module
 sub device_status
 {
 @mounted = &foreign_call("mount", "list_mounted") if (!@mounted);
@@ -1052,10 +1200,11 @@ if ($mounted) { return ($mounted->[0], $mounted->[2], 1,
 elsif ($mount) { return ($mount->[0], $mount->[2], 0,
 			 &indexof($mount, @mounts)); }
 if ($raid_module) {
-	$raidconf = &foreign_call("raid", "get_raidtab") if (!$raidconf);
+	my $raidconf = &foreign_call("raid", "get_raidtab") if (!$raidconf);
 	foreach $c (@$raidconf) {
 		foreach $d (&raid::find_value('device', $c->{'members'})) {
-			return ( $c->{'value'}, "raid", 1 ) if ($d eq $_[0]);
+			return ( $c->{'value'}, "raid", 1, "raid" )
+				if ($d eq $_[0]);
 			}
 		}
 	}
@@ -1068,12 +1217,78 @@ if ($lvm_module) {
 						     $vg->{'name'}));
 			}
 		}
-	foreach $pv (@physical_volumes) {
-		return ( $pv->{'vg'}, "lvm", 1)
+	foreach my $pv (@physical_volumes) {
+		return ( $pv->{'vg'}, "lvm", 1, "lvm")
 			if ($pv->{'device'} eq $_[0]);
 		}
 	}
+if ($iscsi_server_module) {
+	my $iscsiconf = &iscsi_server::get_iscsi_config();
+	foreach my $c (@$iscsiconf) {
+		if ($c->{'type'} eq 'extent' && $c->{'device'} eq $_[0]) {
+			return ( $c->{'type'}.$c->{'num'}, "iscsi", 1,
+				 "iscsi-server");
+			}
+		}
+	}
+if ($iscsi_target_module) {
+	my $iscsiconf = &iscsi_target::get_iscsi_config();
+	foreach my $t (&iscsi_target::find($iscsiconf, "Target")) {
+		foreach my $l (&iscsi_target::find($t->{'members'}, "Lun")) {
+			if ($l->{'value'} =~ /Path=([^, ]+)/ && $1 eq $_[0]) {
+				return ( $t->{'value'}, "iscsi", 1,
+					 "iscsi-target");
+				}
+			}
+		}
+	}
 return ();
+}
+
+# device_status_link(directory, type, mounted, module)
+# Converts the list returned by device_status to a link
+sub device_status_link
+{
+my @stat = @_;
+my $stat = "";
+my $statdesc = $stat[0] =~ /^swap/ ? "<i>$text{'disk_vm'}</i>"
+				   : "<tt>$stat[0]</tt>";
+my $ret = $main::initial_module_name;
+if ($ret !~ /fdisk$/) {
+	$ret = $module_name;
+	}
+if ($stat[1] eq 'raid') {
+	$stat = $statdesc;
+	}
+elsif ($stat[1] eq 'lvm') {
+	if (&foreign_available("lvm")) {
+		$stat = "<a href='../lvm/'>".
+			"LVM VG $statdesc</a>";
+		}
+	else {
+		$stat = "LVM VG $statdesc";
+		}
+	}
+elsif ($stat[1] eq 'iscsi') {
+	$stat = &text('disk_iscsi', $stat[0]);
+	if (&foreign_available("iscsi-server")) {
+		$stat = "<a href='../$stat[3]/'>$stat</a>";
+		}
+	}
+elsif ($stat[0] && !&foreign_available("mount")) {
+	$stat = $statdesc;
+	}
+elsif ($stat[0] && $stat[3] == -1) {
+	$stat = "<a href='../mount/edit_mount.cgi?".
+		"index=$stat[4]&temp=1&return=/$ret/'>".
+		"$statdesc</a>";
+	}
+elsif ($stat[0]) {
+	$stat = "<a href='../mount/edit_mount.cgi?".
+		"index=$stat[3]&return=/$ret/'>".
+		"$statdesc</a>";
+	}
+return $stat;
 }
 
 # can_fsck(type)
@@ -1112,77 +1327,67 @@ return $text{"fsck_err$_[0]"} ? $text{"fsck_err$_[0]"}
 #      3 = disk partitions
 sub partition_select
 {
+local ($name, $value, $mode, $found, $diskre) = @_;
 local $rv = "<select name=$_[0]>\n";
-local ($found, $d, $p);
-if (($_[2] == 0 || $_[2] == 2) &&
-    (-r "/dev/fd0" || $_[1] =~ /^\/dev\/fd[01]$/)) {
-	$rv .= sprintf "<option %s value=/dev/fd0>%s\n",
-		$_[1] eq "/dev/fd0" ? "selected" : "",
-		&text('select_fd', 0) if (!$_[4] || "/dev/fd0" =~ /$_[4]/);
-	$rv .= sprintf "<option %s value=/dev/fd1>%s\n",
-		$_[1] eq "/dev/fd1" ? "selected" : "",
-		&text('select_fd', 1) if (!$_[4] || "/dev/fd1" =~ /$_[4]/);
-	$found++ if ($_[1] =~ /^\/dev\/fd[01]$/);
+local @opts;
+if (($mode == 0 || $mode == 2) &&
+    (-r "/dev/fd0" || $value =~ /^\/dev\/fd[01]$/)) {
+	push(@opts, [ '/dev/fd0', &text('select_fd', 0) ])
+		if (!$diskre || '/dev/fd0' =~ /$diskre/);
+	push(@opts, [ '/dev/fd1', &text('select_fd', 1) ])
+		if (!$diskre || '/dev/fd1' =~ /$diskre/);
+	${$found}++ if ($found && $value =~ /^\/dev\/fd[01]$/);
 	}
 local @dlist = &list_disks_partitions();
-foreach $d (@dlist) {
+foreach my $d (@dlist) {
 	local $dev = $d->{'device'};
-	next if ($_[4] && $dev !~ /$_[4]/);
-	if ($_[2] == 1 || $_[2] == 2) {
+	next if ($diskre && $dev !~ /$_[4]/);
+	if ($mode == 1 || $mode == 2) {
 		local $name = $d->{'desc'};
 		$name .= " ($d->{'model'})" if ($d->{'model'});
-		$rv .= sprintf "<option value=%s %s>%s\n",
-			$dev, $_[1] eq $dev ? "selected" : "", $name;
-		$found++ if ($dev eq $_[1]);
+		push(@opts, [ $dev, $name ]);
+		${$found}++ if ($found && $dev eq $_[1]);
 		}
-	if ($_[2] == 0 || $_[2] == 2 || $_[2] == 3) {
+	if ($mode == 0 || $mode == 2 || $mode == 3) {
 		foreach $p (@{$d->{'parts'}}) {
 			next if ($p->{'extended'});
 			local $name = $p->{'desc'};
 			$name .= " (".&tag_name($p->{'type'}).")"
 				if (&tag_name($p->{'type'}));
-			$rv .= sprintf "<option %s value=%s>%s\n",
-				  $_[1] eq $p->{'device'} ? "selected" : "",
-				  $p->{'device'}, $name;
-			$found++ if ($_[1] eq $p->{'device'});
+			push(@opts, [ $p->{'device'}, $name ]);
+			${$found}++ if ($found && $value eq $p->{'device'});
 			}
 		}
 	}
-if (!$found && $_[1] && !$_[3]) {
-	$rv .= "<option selected>$_[1]\n";
-	}
-if ($_[3]) {
-	${$_[3]} = $found;
-	}
-$rv .= "</select>\n";
-return $rv;
+return &ui_select($name, $value, \@opts, 1, 0, $value && !$found);
 }
 
 # label_select(name, value, &found)
 # Returns HTML for selecting a filesystem label
 sub label_select
 {
-local $rv = "<select name=$_[0]>\n";
+local ($name, $value, $found) = @_;
+local @opts;
 local @dlist = &list_disks_partitions();
 local $any;
-foreach $d (@dlist) {
+foreach my $d (@dlist) {
 	local $dev = $d->{'device'};
 	foreach $p (@{$d->{'parts'}}) {
-		next if ($p->{'type'} ne '83');
+		next if ($p->{'type'} ne '83' &&
+			 $p->{'type'} !~ /^ext/);
 		local $label = &get_label($p->{'device'});
 		next if (!$label);
-		$rv .= sprintf "<option %s value=%s>%s (%s)\n",
-			  $_[1] eq $label ? "selected" : "",
-			  $label, $label, $p->{'desc'};
-		${$_[2]}++ if ($_[1] eq $label);
+		push(@opts, [ $label, $label." (".$p->{'desc'}.")" ]);
+		${$found}++ if ($value eq $label && $found);
 		$any++;
 		}
 	}
-if (!$found && $_[1] && !$_[2]) {
-	$rv .= "<option selected>$_[1]\n";
+if (@opts) {
+	return &ui_select($name, $value, \@opts, 1, 0, $value && !$found);
 	}
-$rv .= "</select>\n";
-return $any ? $rv : undef;
+else {
+	return undef;
+	}
 }
 
 # volid_select(name, value, &found)
@@ -1196,15 +1401,16 @@ foreach my $d (@dlist) {
 	local $dev = $d->{'device'};
 	foreach $p (@{$d->{'parts'}}) {
 		next if ($p->{'type'} ne '83' && $p->{'type'} ne '82' &&
-			 $p->{'type'} ne 'b' && $p->{'type'} ne 'c');
+			 $p->{'type'} ne 'b' && $p->{'type'} ne 'c' &&
+			 $p->{'type'} !~ /^(ext|xfs)/);
 		local $volid = &get_volid($p->{'device'});
 		next if (!$volid);
 		push(@opts, [ $volid, "$volid ($p->{'desc'})" ]);
-		$$found++ if ($value eq $volid);
+		${$found}++ if ($value eq $volid && $found);
 		}
 	}
 if (@opts) {
-	return &ui_select($name, $value, \@opts, 1, 0, $value ? 1 : 0);
+	return &ui_select($name, $value, \@opts, 1, 0, $value && !$found);
 	}
 else {
 	return undef;
@@ -1217,7 +1423,15 @@ else {
 sub open_fdisk
 {
 local $fpath = &check_fdisk();
-($fh, $fpid) = &foreign_call("proc", "pty_process_exec", join(" ",$fpath, @_));
+my $cylarg;
+if ($fpath =~ /\/fdisk/) {
+	my $out = &backquote_command("$fpath -h 2>&1 </dev/null");
+	if ($out =~ /-u\s+<size>/) {
+		$cylarg = "-u=cylinders";
+		}
+	}
+($fh, $fpid) = &foreign_call("proc", "pty_process_exec",
+			     join(" ", $fpath, $cylarg, @_));
 }
 
 sub open_sfdisk
@@ -1347,7 +1561,9 @@ else { return " $_[2] $in{$_[0]}"; }
 	'', 'None',
 	'fat16', 'Windows FAT16',
 	'fat32', 'Windows FAT32',
-	'ext2', 'Linux',
+	'ext2', 'Linux EXT',
+	'xfs', 'Linux XFS',
+	'raid', 'Linux RAID',
 	'HFS', 'MacOS HFS',
 	'linux-swap', 'Linux Swap',
 	'NTFS', 'Windows NTFS',
@@ -1400,6 +1616,7 @@ push(@fstypes, "reiserfs") if (&has_command("mkreiserfs"));
 push(@fstypes, "xfs") if (&has_command("mkfs.xfs"));
 push(@fstypes, "jfs") if (&has_command("mkfs.jfs"));
 push(@fstypes, "fatx") if (&has_command("mkfs.fatx"));
+push(@fstypes, "btrfs") if (&has_command("mkfs.btrfs"));
 push(@fstypes, "msdos");
 push(@fstypes, "vfat");
 push(@fstypes, "minix");
@@ -1569,6 +1786,21 @@ sub get_parted_version
 {
 my $out = &backquote_command("parted -v 2>&1 </dev/null");
 return $out =~ /parted.*\s([0-9\.]+)/i ? $1 : undef;
+}
+
+# identify_disk(&disk)
+# Blinks the activity LED of the drive sixty times
+sub identify_disk
+{
+local ($d) = @_;
+$count = 1;
+while ($count <= 60) {
+        &system_logged("dd if=".quotemeta($d->{'device'}).
+		       " of=/dev/null bs=10M count=1");
+	sleep(1);
+	print "$count ";
+	$count ++;
+	}
 }
 
 1;

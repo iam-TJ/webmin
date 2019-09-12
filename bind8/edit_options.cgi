@@ -1,27 +1,28 @@
 #!/usr/local/bin/perl
 # edit_options.cgi
 # Display options for an existing master zone
+use strict;
+use warnings;
+our (%access, %text, %in); 
 
 require './bind8-lib.pl';
 &ReadParse();
-$zone = &get_zone_name($in{'index'}, $in{'view'});
-$bconf = $conf = &get_config();
-if ($in{'view'} ne '') {
-	$view = $conf->[$in{'view'}];
-	$conf = $view->{'members'};
-	}
-$zconf = $conf->[$in{'index'}]->{'members'};
-$dom = $conf->[$in{'index'}]->{'value'};
-&can_edit_zone($conf->[$in{'index'}], $view) ||
+
+my $zone = &get_zone_name_or_error($in{'zone'}, $in{'view'});
+my $z = &zone_to_config($zone);
+my $zconf = $z->{'members'};
+my $dom = $zone->{'name'};
+&can_edit_zone($zone) ||
 	&error($text{'master_ecannot'});
+
 $access{'opts'} || &error($text{'master_eoptscannot'});
-$desc = &ip6int_to_net(&arpa_to_ip($dom));
+my $desc = &ip6int_to_net(&arpa_to_ip($dom));
 &ui_print_header($desc, $text{'master_opts'}, "",
 		 undef, undef, undef, undef, &restart_links($zone));
 
 # Start of form for editing zone options
 print &ui_form_start("save_master.cgi", "post");
-print &ui_hidden("index", $in{'index'});
+print &ui_hidden("zone", $in{'zone'});
 print &ui_hidden("view", $in{'view'});
 print &ui_table_start($text{'master_opts'}, "width=100%", 4);
 
@@ -41,6 +42,6 @@ print &address_input($text{'master_notify2'}, "also-notify", $zconf);
 print &ui_table_end();
 print &ui_form_end([ [ undef, $text{'save'} ] ]);
 
-&ui_print_footer("edit_master.cgi?index=$in{'index'}&view=$in{'view'}",
-	$text{'master_return'});
+&ui_print_footer("edit_master.cgi?zone=$in{'zone'}&view=$in{'view'}",
+		 $text{'master_return'});
 

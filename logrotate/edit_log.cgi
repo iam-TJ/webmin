@@ -51,6 +51,13 @@ print &ui_table_row($text{'edit_size'},
 					     $text{'period_never'})).
 		    " ".$text{'period_bytes'});
 
+$minsize = &find_value("minsize", $lconf);
+print &ui_table_row($text{'edit_minsize'},
+		    &ui_opt_textbox("minsize", $minsize, 10,
+				    &deftext(&find_default("minsize") ||
+					     $text{'edit_nominsize'})).
+		    " ".$text{'period_bytes'});
+
 print &ui_table_hr();
 
 $rotate = &find_value("rotate", $lconf);
@@ -105,6 +112,8 @@ $ext = &find_value("extension", $lconf);
 print &ui_table_row($text{'edit_ext'},
     &ui_opt_textbox("ext", $ext, 10,
 		    &deftext(&find_default("ext"))));
+
+&yesno_option("dateext", "nodateext", $lconf);
 
 print &ui_table_hr();
 

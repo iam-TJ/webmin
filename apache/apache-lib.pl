@@ -16,6 +16,7 @@ else {
 	}
 map { $access_types{$_}++ } @access_types;
 $site_file = ($config{'webmin_apache'} || $module_config_directory)."/site";
+$httpd_info_cache = $module_config_directory."/httpd-info";
 
 # Check if a list of supported modules needs to be built. This is done
 # if the Apache binary changes, when Webmin is upgraded, or once every five
@@ -97,6 +98,7 @@ $apache_docbase = $config{'apache_docbase'} ? $config{'apache_docbase'} :
 #  name -	The name of this directive
 #  value -	Value (possibly with spaces)
 #  members -	For type 1, a reference to the array of members
+#  indent -     Number of spaces before the name
 sub parse_config_file
 {
 local($fh, @rv, $line, %dummy);
@@ -224,32 +226,38 @@ while($line = <$fh>) {
 				    'name', "</IfVersion>" });
 			}
 		}
-	elsif ($line =~ /^\s*<(\S+)\s*(.*)>/) {
+	elsif ($line =~ /^(\s*)<(\S+)\s*(.*)>/) {
 		# start of a container directive. The first member is a dummy
 		# directive at the same line as the container
 		local(%dir, @members);
 		%dir = ('line', $_[1],
 			'file', $_[2],
 			'type', 1,
-			'name', $1,
-			'value', $2);
+			'name', $2,
+			'value', $3);
+		local $indent = $1;
 		$dir{'value'} =~ s/\s+$//g;
 		$dir{'words'} = &wsplit($dir{'value'});
 		$_[1]++;
 		@members = &parse_config_file($fh, $_[1], $_[2], $dir{'name'});
 		$dir{'members'} = \@members;
 		$dir{'eline'} = $_[1]-1;
+		$indent =~ s/\t/        /g;
+		$dir{'indent'} = length($indent);
 		push(@rv, \%dir);
 		}
-	elsif ($line =~ /^\s*(\S+)\s*(.*)$/) {
+	elsif ($line =~ /^(\s*)(\S+)\s*(.*)$/) {
 		# normal directive
 		local(%dir);
 		%dir = ('line', $_[1],
 			'eline', $_[1],
 			'file', $_[2],
 			'type', 0,
-			'name', $1,
-			'value', $2);
+			'name', $2,
+			'value', $3);
+		local $indent = $1;
+		$indent =~ s/\t/        /g;
+		$dir{'indent'} = length($indent);
 		if ($dir{'value'} =~ s/\\$//g) {
 			# multi-line directive!
 			while($line = <$fh>) {
@@ -318,7 +326,7 @@ return wantarray ? @vals : !@vals ? undef : $vals[$#vals];
 }
 
 # find_directive_struct(name, &directives)
-# Returns references to directives maching some name
+# Returns references to directives matching some name
 sub find_directive_struct
 {
 local (@vals, $ref);
@@ -381,7 +389,7 @@ push(@get_config_cache, &get_config_file($acc, \%seenfiles));
 foreach $v (@virt) {
 	my %seenfiles;
 	$mref = $v->{'members'};
-	foreach $idn ("ResourceConfig", "AccessConfig", "Include") {
+	foreach $idn ("ResourceConfig", "AccessConfig", "Include", "IncludeOptional") {
 		foreach $inc (&find_directive_struct($idn, $mref)) {
 			local @incs = &expand_apache_include(
 					$inc->{'words'}->[0]);
@@ -424,7 +432,8 @@ else {
 	}
 
 # Expand Include directives
-foreach $inc (&find_directive_struct("Include", \@rv)) {
+foreach $inc (&find_directive_struct("Include", \@rv),
+	      &find_directive_struct("IncludeOptional", \@rv)) {
 	local @incs = &expand_apache_include($inc->{'words'}->[0]);
 	foreach my $ginc (@incs) {
 		push(@rv, &get_config_file($ginc, $seen));
@@ -455,15 +464,46 @@ if ($incdir =~ /^(.*)\[\^([^\]]+)\](.*)$/) {
 return sort { $a cmp $b } glob($incdir);
 }
 
-# get_virtual_config(index)
+# get_virtual_config(index|name)
+# Returns the Apache config block with some index in the main config, or name
 sub get_virtual_config
 {
-local($conf, $c, $v);
-$conf = &get_config();
-if (!$_[0]) { $c = $conf; $v = undef; }
+local ($name) = @_;
+local $conf = &get_config();
+local ($c, $v);
+if (!$name) {
+	# Whole config
+	$c = $conf;
+	$v = undef;
+	}
+elsif ($name =~ /^\d+$/) {
+	# By index
+	$c = $conf->[$name]->{'members'};
+	$v = $conf->[$name];
+	}
 else {
-	$c = $conf->[$_[0]]->{'members'};
-	$v = $conf->[$_[0]];
+	# Find by name, in servername:port format
+	my ($sn, $sp) = split(/:/, $name);
+	VHOST: foreach my $virt (&find_directive_struct("VirtualHost", $conf)) {
+		local $vp = $virt->{'words'}->[0] =~ /:(\d+)$/ ? $1 : 80;
+		next if ($vp != $sp);
+		local $vn = &find_directive("ServerName", $virt->{'members'});
+		if (lc($vn) eq lc($sn) || lc($vn) eq lc("www.".$sn)) {
+			$c = $virt->{'members'};
+			$v = $virt;
+			last VHOST;
+			}
+		foreach my $n (&find_directive_struct("ServerAlias",
+						      $virt->{'members'})) {
+			local @lcw = map { lc($_) } @{$n->{'words'}};
+			if (&indexof($sn, @lcw) >= 0 ||
+			    &indexof("www.".$sn, @lcw) >= 0) {
+				$c = $virt->{'members'};
+				$v = $virt;
+				last VHOST;
+				}
+			}
+		}
 	}
 return wantarray ? ($c, $v) : $c;
 }
@@ -519,7 +559,15 @@ for($i=0; $i<@old || $i<@{$_[1]}; $i++) {
 			local($f, %v, $j);
 			$f = $_[2]->[0]->{'file'};
 			for($j=0; $_[2]->[$j]->{'file'} eq $f; $j++) { }
-			$l = $_[2]->[$j-1]->{'eline'}+1;
+			$lref = &read_file_lines($f);
+			if ($_[2] eq $_[3]) {
+				# Top-level, so add to the end of the file
+				$l = scalar(@$lref) + 1;
+				}
+			else {
+				# Add after last directive in the same section
+				$l = $_[2]->[$j-1]->{'eline'}+1;
+				}
 			%v = (	"line", $l,
 				"eline", $l,
 				"file", $f,
@@ -529,7 +577,6 @@ for($i=0; $i<@old || $i<@{$_[1]}; $i++) {
 				"words", &wsplit($v) );
 			&renumber($_[3], $l, $f, 1);
 			splice(@{$_[2]}, $j, 0, \%v);
-			$lref = &read_file_lines($f);
 			push(@files, $f);
 			splice(@$lref, $l, 0, "$_[0] $v");
 			}
@@ -554,7 +601,8 @@ for($i=0; $i<@old || $i<@{$_[1]}; $i++) {
 		$old[$i]->{'value'} = $v;
 		$old[$i]->{'words'} = &wsplit($v);
 		$old[$i]->{'eline'} = $old[$i]->{'line'};
-		splice(@$lref, $old[$i]->{'line'}, $len, "$_[0] $v");
+		splice(@$lref, $old[$i]->{'line'}, $len,
+			(" " x $old[$i]->{'indent'}).$_[0]." ".$v);
 		$change = $old[$i];
 		}
 	}
@@ -644,8 +692,8 @@ elsif (!$olddir && $newdir) {
 # Update the line numbers and filenames in a list of directives
 sub recursive_set_lines_files
 {
-local ($dirs, $line, $file) = @_;
-foreach my $d (@$dirs) {
+my ($dirs, $line, $file) = @_;
+foreach my $dir (@$dirs) {
 	$dir->{'line'} = $line;
 	$dir->{'file'} = $file;
 	if ($dir->{'type'}) {
@@ -696,7 +744,8 @@ foreach $d (@{$_[0]}) {
 	}
 }
 
-# server_root(path, &directives)
+# server_root(path)
+# Convert a relative path to being under the server root
 sub server_root
 {
 if (!$_[0]) { return undef; }
@@ -764,7 +813,9 @@ sub editable_directives
 local($m, $func, @rv, %done);
 foreach $m (keys %httpd_modules) {
 	$func = $m."_directives";
-	push(@rv, &$func($httpd_modules{$m}));
+	if (defined(&$func)) {
+		push(@rv, &$func($httpd_modules{$m}));
+		}
 	}
 @rv = grep { $_->{'type'} == $_[0] && $_->{$_[1]} &&
 	     !$done{$_->{'name'}}++ } @rv;
@@ -796,7 +847,7 @@ else {
 	}
 }
 
-# generate_inputs(&editors, &directives)
+# generate_inputs(&editors, &directives, [&skip])
 # Displays a 2-column list of options, for use inside a table
 sub generate_inputs
 {
@@ -828,8 +879,8 @@ foreach $e (@{$_[0]}) {
 		$names = " (";
 		foreach $ed (split(/\s+/, $e->{'name'})) {
 			# nodo50 v0.1 - Change 000004 - Open new window for Help in Apache module and mod_apachessl Help from http://www.apache-ssl.org and
-			# nodo50 v0.1 - Change 000004 - Abre nueva ventana para Ayuda del módulo Apache y para mod_apachessl busca la Ayuda en http://www.apache-ssl.org and
-			$names .= "<tt><a href='".($e->{'module'} eq 'mod_apachessl' ? 'http://www.apache-ssl.org/docs.html#'.$ed : $apache_docbase."/".$e->{'module'}.".html#".lc($ed))."'>".$ed."</a></tt> ";
+			# nodo50 v0.1 - Change 000004 - Abre nueva ventana para Ayuda del mÃ³dulo Apache y para mod_apachessl busca la Ayuda en http://www.apache-ssl.org and
+			$names .= "<tt>".&ui_link( ($e->{'module'} eq 'mod_apachessl' ? 'http://www.apache-ssl.org/docs.html#'.$ed : $apache_docbase."/".$e->{'module'}.".html#".lc($ed)), $ed )."</tt>&nbsp;";
 			#$names .= "<tt><a href='".$apache_docbase."/".$e->{'module'}.".html#".lc($ed)."'>".$ed."</a></tt> ";
 			# nodo50 v0.1 - Change 000004 - End
 			}
@@ -903,7 +954,7 @@ return ( [ $v =~ /\s/ && !$_[3] ? "\"$v\"" : $v ] );
 # Each choice is a display,value pair
 sub choice_input
 {
-local($i, $rv);
+my($i, $rv);
 for($i=3; $i<@_; $i++) {
 	$_[$i] =~ /^([^,]*),(.*)$/;
 	$rv .= &ui_oneradio($_[1], $2, $1, lc($2) eq lc($_[0]) ||
@@ -916,12 +967,11 @@ return $rv;
 # Each choice is a display,value pair
 sub choice_input_vert
 {
-local($i, $rv);
+my($i, $rv);
 for($i=3; $i<@_; $i++) {
 	$_[$i] =~ /^([^,]*),(.*)$/;
-	$rv .= sprintf "<input type=radio name=$_[1] value=\"$2\" %s> $1<br>\n",
-		lc($2) eq lc($_[0]) || !defined($_[0]) &&
-				       lc($2) eq lc($_[2]) ? "checked" : "";
+	$rv .= &ui_oneradio($_[1], $2, $1, lc($2) eq lc($_[0]) ||
+				!defined($_[0]) && lc($2) eq lc($_[2]))."<br>\n";
 	}
 return $rv;
 }
@@ -936,15 +986,16 @@ else { return ( [ $in{$_[0]} ] ); }
 # select_input(value, name, default, [choice]+)
 sub select_input
 {
-local($i, $rv);
-$rv = "<select name=\"$_[1]\">\n";
+my($i, @sel);
+my $selv;
 for($i=3; $i<@_; $i++) {
 	$_[$i] =~ /^([^,]*),(.*)$/;
-	$rv .= sprintf "<option value=\"$2\" %s> $1\n",
-		lc($2) eq lc($_[0]) || !defined($_[0]) && lc($2) eq lc($_[2]) ? "selected" : "";
+	if (lc($2) eq lc($_[0]) || !defined($_[0]) && lc($2) eq lc($_[2])) {
+		$selv = $2;
+		}
+	push(@sel, [ $2, $1 || "&nbsp;" ]);
 	}
-$rv .= "</select>\n";
-return $rv;
+return &ui_select($_[1], $selv, \@sel, 1);
 }
 
 # parse_choice(name, default)
@@ -956,8 +1007,8 @@ return &parse_choice(@_);
 # handler_input(value, name)
 sub handler_input
 {
-local($m, $func, @hl, $rv, $h);
-local $conf = &get_config();
+my($m, $func, @hl, @sel, $h);
+my $conf = &get_config();
 push(@hl, "");
 foreach $m (keys %httpd_modules) {
 	$func = $m."_handlers";
@@ -966,15 +1017,11 @@ foreach $m (keys %httpd_modules) {
 		}
 	}
 if (&indexof($_[0], @hl) < 0) { push(@hl, $_[0]); }
-$rv = "<select name=$_[1]>\n";
 foreach $h (&unique(@hl)) {
-	$rv .= sprintf "<option value=\"$h\" %s>$h\n",
-		$h eq $_[0] ? "selected" : "";
+    push(@sel, [$h, $h, ($h eq $_[0] ? "selected" : "")] );
 	}
-$rv .= sprintf "<option value=\"None\" %s>&lt;$text{'core_none'}&gt;\n",
-	$_[0] eq "None" ? "selected" : "";
-$rv .= "</select>\n";
-return $rv;
+push(@sel, ["None", "&lt;".$text{'core_none'}."&gt;", ($_[0] eq "None" ? "selected" : "")] );
+return &ui_select($_[1], undef, \@sel, 1);
 }
 
 # parse_handler(name)
@@ -999,8 +1046,7 @@ foreach $f (@{$_[0]}) {
 	push(@fl, $f) if (&indexof($f, @fl) < 0);
 	}
 foreach $f (&unique(@fl)) {
-	$rv .= sprintf "<input type=checkbox name=$_[1] value='%s' %s> %s\n",
-			$f, &indexof($f, @{$_[0]}) < 0 ? "" : "checked", $f;
+    $rv .= &ui_checkbox($_[1], $f, $f, (&indexof($f, @{$_[0]}) < 0 ? 0 : 1 ) ); 
 	}
 return $rv;
 }
@@ -1075,17 +1121,20 @@ close(USERS);
 # some context (global, virtual, directory or htaccess)
 sub config_icons
 {
+local ($ctx, $prog) = @_;
 local($m, $func, $e, %etype, $i, $c);
 foreach $m (sort { $a cmp $b } (keys %httpd_modules)) {
         $func = $m."_directives";
-	foreach $e (&$func($httpd_modules{$m})) {
-		if ($e->{$_[0]}) { $etype{$e->{'type'}}++; }
+	if (defined(&$func)) {
+		foreach $e (&$func($httpd_modules{$m})) {
+			if ($e->{$ctx}) { $etype{$e->{'type'}}++; }
+			}
 		}
         }
 local (@titles, @links, @icons);
 for($i=0; $text{"type_$i"}; $i++) {
 	if ($etype{$i} && $access_types{$i}) {
-		push(@links, $_[1]."type=$i");
+		push(@links, $prog."type=$i");
 		push(@titles, $text{"type_$i"});
 		push(@icons, "images/type_icon_$i.gif");
 		}
@@ -1106,18 +1155,18 @@ print "<p>\n";
 sub restart_button
 {
 local $rv;
-$args = "redir=".&urlize(&this_url());
+$args = "redir=".&urlize($gconfig{'webprefix'} . &this_url());
 local @rv;
 if (&is_apache_running()) {
 	if ($access{'apply'}) {
-		push(@rv, "<a href=\"restart.cgi?$args\">$text{'apache_apply'}</a>\n");
+		push(@rv, &ui_link("restart.cgi?$args", $text{'apache_apply'}) );
 		}
 	if ($access{'stop'}) {
-		push(@rv, "<a href=\"stop.cgi?$args\">$text{'apache_stop'}</a>\n");
+		push(@rv, &ui_link("stop.cgi?$args", $text{'apache_stop'}) );
 		}
 	}
 elsif ($access{'stop'}) {
-	push(@rv, "<a href=\"start.cgi?$args\">$text{'apache_start'}</a>\n");
+	push(@rv, &ui_link("start.cgi?$args", $text{'apache_start'}) );
 	}
 return join("<br>\n", @rv);
 }
@@ -1150,8 +1199,17 @@ return @rv;
 # Returns the httpd version and modules array
 sub httpd_info
 {
+local ($cmd) = @_;
+$cmd = &has_command($cmd);
+local @st = stat($cmd);
+local %cache;
+&read_file_cached($httpd_info_cache, \%cache);
+if ($cache{'cmd'} eq $cmd && $cache{'time'} == $st[9]) {
+	# Cache looks up to date
+	return ($cache{'version'}, [ split(/\s+/, $cache{'mods'}) ]);
+	}
 local(@mods, $verstr, $ver, $minor);
-$verstr = &backquote_command("\"$_[0]\" -v 2>&1");
+$verstr = &backquote_command(quotemeta($cmd)." -v 2>&1");
 if ($config{'httpd_version'}) {
 	$config{'httpd_version'} =~ /(\d+)\.([\d\.]+)/;
 	$ver = $1; $minor = $2; $minor =~ s/\.//g; $ver .= ".$minor";
@@ -1205,6 +1263,11 @@ else {
 		}
 	@mods = &unique(@mods);
 	}
+$cache{'cmd'} = $cmd;
+$cache{'time'} = $st[9];
+$cache{'version'} = $ver;
+$cache{'mods'} = join(" ", @mods);
+&write_file($httpd_info_cache, \%cache);
 return ($ver, \@mods);
 }
 
@@ -1222,7 +1285,7 @@ local $txtlen = length($txt);
 $txt = &html_escape($txt);
 print " " x $_[2];
 if ($_[3]) {
-	print "<a href=\"$_[3]\">",$txt,"</a>";
+	print &ui_link($_[3], $txt);
 	}
 else { print $txt; }
 print " " x (90 - $txtlen - $_[2] - length($lstr));
@@ -1301,7 +1364,8 @@ sub lock_apache_files
 {
 local $conf = &get_config();
 local $f;
-foreach $f (&unique(map { $_->{'file'} } @$conf)) {
+@main::locked_apache_files = &unique(map { $_->{'file'} } @$conf);
+foreach $f (@main::locked_apache_files) {
 	&lock_file($f);
 	}
 }
@@ -1310,9 +1374,10 @@ sub unlock_apache_files
 {
 local $conf = &get_config();
 local $f;
-foreach $f (&unique(map { $_->{'file'} } @$conf)) {
+foreach $f (@main::locked_apache_files) {
 	&unlock_file($f);
 	}
+@main::locked_apache_files = ( );
 }
 
 # directive_lines(directive, ...)
@@ -1358,7 +1423,7 @@ if ($httpd_modules{'core'} >= 1.301) {
 			}
 		}
 	local $out = &backquote_command("$cmd 2>&1");
-	if ($out && $out !~ /syntax\s+ok/i) {
+	if ($out && $out !~ /(syntax|Checking).*\s+ok/i) {
 		return $out;
 		}
 	}
@@ -1690,14 +1755,14 @@ local ($ver, $mods) = &httpd_info(&find_httpd());
 local @rv;
 local $m;
 
-# add compiled-in modules
+# Add compiled-in modules
 foreach $m (@$mods) {
 	if (-r "$module_root_directory/$m.pl") {
 		push(@rv, $m);
 		}
 	}
 
-# add dynamically loaded modules
+# Add dynamically loaded modules
 local $conf = &get_config();
 foreach $l (&find_directive_struct("LoadModule", $conf)) {
 	if ($l->{'words'}->[1] =~ /(mod_\S+)\.(so|dll)/ &&
@@ -1714,6 +1779,18 @@ foreach $l (&find_directive_struct("LoadModule", $conf)) {
 		}
 	}
 undef(@get_config_cache);	# Cache is no longer valid
+
+# Add dynamically loaded modules
+if ($config{'apachectl_path'}) {
+	&open_execute_command(APACHE,
+		"$config{'apachectl_path'} -M 2>/dev/null", 1);
+	while(<APACHE>) {
+		if (/(\S+)_module/ && -r "$module_root_directory/mod_${1}.pl") {
+			push(@rv, "mod_${1}");
+			}
+		}
+	close(APACHE);
+	}
 
 return &unique(@rv);
 }
@@ -1737,7 +1814,7 @@ if ($config{'defines_file'}) {
 	# or regular name=value format
 	local %def;
 	&read_env_file($config{'defines_file'}, \%def);
-	if ($config{'defines_name'}) {
+	if ($config{'defines_name'} && $def{$config{'defines_name'}}) {
 		# Looking for var like OPTIONS='-Dfoo -Dbar'
 		local $var = $def{$config{'defines_name'}};
 		foreach my $v (split(/\s+/, $var)) {
@@ -1803,7 +1880,8 @@ if ($config{'link_dir'}) {
 	opendir(LINKDIR, $config{'link_dir'});
 	foreach my $f (readdir(LINKDIR)) {
 		if ($f ne "." && $f ne ".." &&
-		    (&resolve_links($config{'link_dir'}."/".$f) eq $file ||
+		    (&simplify_path(
+		       &resolve_links($config{'link_dir'}."/".$f)) eq $file ||
 		     $short eq $f)) {
 			&unlink_logged($config{'link_dir'}."/".$f);
 			}
@@ -1930,6 +2008,23 @@ if ($gconfig{'os_type'} eq 'debian-linux') {
 else {
 	return "Operating system does not support Apache modules";
 	}
+}
+
+# is_virtualmin_domain(&virt)
+# Returns the domain hash if some virtualhost is managed by Virtualmin
+sub is_virtualmin_domain
+{
+local ($virt) = @_;
+return 0 if ($config{'allow_virtualmin'});
+local $n = &find_directive("ServerName", $virt->{'members'});
+return undef if (!$n);
+return undef if (!&foreign_check("virtual-server"));
+&foreign_require("virtual-server");
+local $d = &virtual_server::get_domain_by("dom", $n);
+return $d if ($d);
+$n =~ s/^www\.//i;
+local $d = &virtual_server::get_domain_by("dom", $n);
+return $d;
 }
 
 1;

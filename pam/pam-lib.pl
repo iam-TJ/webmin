@@ -116,9 +116,9 @@ else {
 sub list_modules
 {
 local (@rv, %done, %hasmod);
-foreach $d (split(/\s+/, $config{'lib_dirs'})) {
+foreach $d (map { glob($_) } split(/\s+/, $config{'lib_dirs'})) {
 	opendir(DIR, &translate_filename($d));
-	foreach $f (readdir(DIR)) {
+	foreach $f (sort { $a cmp $b } readdir(DIR)) {
 		local @st = stat(&translate_filename("$d/$f"));
 		push(@rv, $f) if (!$done{$st[1]}++ && $f =~ /^pam_.*\.so$/);
 		$hasmod{$f}++ if ($f =~ /^pam_.*\.so$/);
@@ -131,7 +131,7 @@ foreach $q (split(/\s+/, $config{'mod_equiv'})) {
 		@rv = grep { $_ ne $q1 } @rv;
 		}
 	}
-return &unique(@rv);
+return sort { $a cmp $b } &unique(@rv);
 }
 
 # include_style(&pam)

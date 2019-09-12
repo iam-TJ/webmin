@@ -25,6 +25,11 @@ if (!-x $config{'psql'} || -d $config{'psql'}) {
 # Check for alternate config file, and use
 if (!$hba_conf_file && -r $config{'alt_hba_conf'} && &is_postgresql_local()) {
 	($hba_conf_file) = split(/\t+/, $config{'hba_conf'});
+	my $hba_conf_dir = $hba_conf_file;
+	$hba_conf_dir =~ s/\/([^\/]+)$//;
+	if (!-d $hba_conf_dir) {
+		&make_dir($hba_conf_dir, 0777);
+		}
 	&copy_source_dest($config{'alt_hba_conf'}, $hba_conf_file);
 	}
 
@@ -101,6 +106,12 @@ elsif ($r == -1) {
 	print &ui_form_end([ [ undef, $text{'save'} ] ]);
 
 	print &text('index_emsg', "<tt>$rout</tt>"),"<p>\n";
+
+	# Button to edit user permissions
+	if ($access{'users'}) {
+		print &ui_form_start("list_hosts.cgi");
+		print &ui_form_end([ [ undef, $text{'index_edithosts'} ] ]);
+		}
 	}
 elsif ($r == -2) {
 	# Looks like a shared library problem
@@ -168,7 +179,12 @@ else {
 	push(@rowlinks, "<a href=newdb_form.cgi>$text{'index_add'}</a>")
 		if ($can_create);
 	if (!@icons) {
-		print "<b>$text{'index_nodbs'}</b> <p>\n";
+                if ($in{'search'}) {
+                        print "<b>$text{'index_nodbs3'}</b> <p>\n";
+                        }
+		else {
+			print "<b>$text{'index_nodbs'}</b> <p>\n";
+			}
 		}
 	elsif (@icons > $max_dbs && !$in{'search'}) {
 		# Too many databases to show .. display search and jump forms
@@ -245,38 +261,40 @@ else {
 			    'images/hosts.gif', 'images/grants.gif' );
 		&icons_table(\@links, \@titles, \@images);
 		}
+	}
 
-	print &ui_hr();
-	print &ui_buttons_start();
+print &ui_hr();
+print &ui_buttons_start();
 
-	# Show stop server button
-	if ($access{'stop'} && &is_postgresql_local()) {
-		print &ui_buttons_row("stop.cgi", $text{'index_stop'},
-				      $text{'index_stopmsg'});
-		}
+# Show stop server button
+if ($access{'stop'} && &is_postgresql_local() && $r != 0) {
+	print &ui_buttons_row("stop.cgi", $text{'index_stop'},
+			      $text{'index_stopmsg'});
+	}
 
+if ($r > 0) {
 	# Show backup all button
 	if ($can_all && $access{'backup'}) {
 		print &ui_buttons_row("backup_form.cgi", $text{'index_backup'},
 				      $text{'index_backupmsg'},
 				      &ui_hidden("all", 1));
 		}
+	}
 
-	print &ui_buttons_end();
+print &ui_buttons_end();
 
-	# Check if the optional perl modules are installed
-	if (&foreign_available("cpan")) {
-		eval "use DBI";
-		push(@needs, "DBI") if ($@);
-		$nodbi++ if ($@);
-		eval "use DBD::Pg";
-		push(@needs, "DBD::Pg") if ($@);
-		if (@needs) {
-			$needs = &urlize(join(" ", @needs));
-			print "<center><b>",&text(@needs == 2 ? 'index_nomods' : 'index_nomod', @needs,
-				"/cpan/download.cgi?source=3&cpan=$needs&mode=2&return=/$module_name/&returndesc=".&urlize($text{'index_return'})),
-				"</b></center>\n";
-			}
+# Check if the optional perl modules are installed
+if (&foreign_available("cpan")) {
+	eval "use DBI";
+	push(@needs, "DBI") if ($@);
+	$nodbi++ if ($@);
+	eval "use DBD::Pg";
+	push(@needs, "DBD::Pg") if ($@);
+	if (@needs) {
+		$needs = &urlize(join(" ", @needs));
+		print "<center><b>",&text(@needs == 2 ? 'index_nomods' : 'index_nomod', @needs,
+			"/cpan/download.cgi?source=3&cpan=$needs&mode=2&return=/$module_name/&returndesc=".&urlize($text{'index_return'})),
+			"</b></center>\n";
 		}
 	}
 

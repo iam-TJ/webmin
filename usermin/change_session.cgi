@@ -119,6 +119,7 @@ else {
 	$users[0]->{'pass'} = 'e';
 	}
 $miniserv{'pam_conv'} = $in{'pam_conv'};
+$miniserv{'pam_end'} = $in{'pam_end'};
 if ($in{'cmd_def'}) {
 	delete($gconfig{'passwd_cmd'});
 	}
@@ -127,9 +128,8 @@ else {
 		&error($text{'session_ecmd'});
 	$gconfig{'passwd_cmd'} = $in{'cmd'};
 	}
-if ($ver >= 1.153) {
-	$miniserv{'utmp'} = $in{'utmp'};
-	}
+$miniserv{'session_ip'} = $in{'session_ip'};
+$miniserv{'utmp'} = $in{'utmp'};
 &save_usermin_miniserv_users(@users);
 &unlock_file($miniserv{'userfile'});
 &put_usermin_miniserv_config(\%miniserv);

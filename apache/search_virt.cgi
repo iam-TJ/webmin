@@ -56,7 +56,8 @@ foreach $v (@virt) {
 	push(@vname, $text{'index_virt'});
 	push(@vlink, "virt_index.cgi?virt=".&indexof($v, @$conf));
 	$sname = scalar(&find_directive("ServerName", $vm));
-	if ($addr ne "_default_" && $addr ne "*" && $nv{&to_ipaddress($addr)}) {
+	if ($addr ne "_default_" && $addr ne "*" &&
+	    ($nv{&to_ipaddress($addr)} || $httpd_modules{'core'} >= 2.4)) {
 		push(@vdesc, &text('index_vname', "<tt>$sname</tt>",
 				   "<tt>$addr</tt>"));
 		}
@@ -110,14 +111,14 @@ else {
 		}
 	else {
 		print "<table width=100% border=1>\n";
-		print "<tr $tb> <td><b>$text{'index_type'}</b></td> ",
+		print "<tr $tb><td><b>$text{'index_type'}</b></td> ",
 		      "<td><b>$text{'index_addr'}</b></td> ",
 		      "<td><b>$text{'index_port'}</b></td> ",
 		      "<td><b>$text{'index_name'}</b></td> ",
 		      "<td><b>$text{'index_root'}</b></td> </tr>\n";
 		foreach $i (@match) {
 			print "<tr $cb>\n";
-			print "<td><a href='$vlink[$i]'>$vname[$i]</a></td>\n";
+			print "<td>".&ui_link($vlink[$i], $vname[$i])."</td>\n";
 			print "<td>$vaddr[$i]</td>\n";
 			print "<td>$vport[$i]</td>\n";
 			print "<td>$vserv[$i]</td>\n";

@@ -2,6 +2,7 @@ index_title=SpamAssassin Mail Filter
 index_ecmd=The SpamAssassin command $1 was not found on your system. Maybe it is not installed, or your <a href='$2'>module configuration</a> is incorrect.
 index_ecmd2=The SpamAssassin command $1 was not found on your system.
 index_econfig=The SpamAssassin local configuration file or directory $1 was not found on your system. Maybe SpamAssassin is not installed, or your <a href='$2'>module configuration</a> is incorrect.
+index_unknown=unknown
 index_edb=Failed to connect to the SpamAssassin configuration database : $1. Check the <a href='$2'>module configuration</a> to be sure you are using the correct settings.
 index_version=SpamAssassin version $1
 index_warn_usermin=SpamAssassin does not appear to be set up in your Procmail configuration file $2 or the global file $1, so any configuration done using this module will have no effect unless SpamAssassin has been setup globally.
@@ -12,13 +13,13 @@ index_applydesc=Click this button to apply the current SpamAssassin configuratio
 index_cpan=Because SpamAssassin is a Perl module, you can also install it automatically using Webmin's <a href='$2'>Perl Modules</a> module to download $1 from CPAN.
 index_spamassassin=SpamAssassin
 index_ecannot=You are not allowed to manage the SpamAssassin configuration file $1
-
 white_title=Allowed and Denied Addresses
 white_desc=The tables on this page allow you to specify From: and To: addresses for email that is always or never categorized as spam. Any other email will be processed as normal by SpamAssassin's rules. All email addresses can contain wildcards, like *@foo.com or *.foo.com to match entire domains.
 white_from=Senders to never classify as spam
 white_gfrom=System-wide senders to never classify as spam
 white_unfrom=Exceptions for senders to never classify as spam
 white_addr=Sender's address
+white_addr2=Recipient's address
 white_rcvd2=Sender to never classify as spam
 white_rcvdhost=Domain in Received header
 white_gunfrom=System-wide exceptions for senders to never classify as spam
@@ -63,6 +64,7 @@ score_localessel=Selected character sets ..
 score_auto=Whitelist score factor
 score_timeout=Seconds to wait for RBL queries
 score_received=Number of Received: headers to check with RBL
+score_trusted=Networks and hosts to trust
 score_describe=Test descriptions for report
 score_descr=Description
 score_err=Failed to save message scoring
@@ -223,6 +225,7 @@ log_priv=Modified miscellaneous privileged options
 log_setup=Setup Procmail for SpamAssassin
 log_procmail=Changed Procmail configuration
 log_import=Imported $1 allowed addresses
+log_manual=Manually edited configuration file
 
 import_title=Import Addresses
 import_err=Failed to import addresses
@@ -280,6 +283,44 @@ razor_epass=Missing password
 razor_doing=Now attempting to register and setup Razor ..
 razor_done=.. done.
 razor_failed=.. failed! See the error output above for the reason why.
+
+amavisd_title=Amavisd Spam Delivery
+amavisd_desc=The form can be used to change the Amavisd configuration that determines what happens to messages classified as spam.
+amavis_ok=Change Amavisd Delivery
+amavis_tab_config=Amavisd Configuration
+amavis_tab_quarantine=Spam Quarantine
+amavis_warn=If you use Amavisd for Spam filtering, some options will be ignored.
+amavis_econfig=The Amavisd configuration file $1 was not found on your system. Maybe Amavisd is not installed, or your <a href='$2'>module configuration</a> is incorrect.
+amavis_hits=Hits above which a message is considered spam.
+amavis_ehit=Hits above which a message is considered spam is not a value!
+amavis_ekill=Hits above which a Spam message is Quarantined is not a value!
+amavis_edsn=Hits above which no notification is sent to sender is not a value!
+amavis_ecut=Hits above which a Spam message is deleted is not a value!
+amavis_eheader=Value for Modify Subject: header is not a value!
+amavis_esize=Value for size above witch a message is not checked for Spam is not a value!
+amavis_echar=A single character must be entered for the X-Spam-Level: header
+amavis_esubject=Value for Prepend text to Subject: header is not a value!
+amavis_elocal=Value for disable Internet sources is not a value!
+amavis_quarantine_level=Hits above which a Spam message is Quarantined.
+amavis_dsn_level=Hits above which no notification is sent to sender.
+amavis_delete_level=Hits above which a Spam message is deleted.
+amavis_report_header=Insert X-Spam-Header in Spam message?
+amavis_level_char=Character used to display Spam-Level in X-Spam-Level: header.
+amavis_rewrite=Modify Subject: header of spam?
+amavis_rsubject=Prepend text to Subject: header
+amavis_size_limit=Message size in bytes above witch a message is not checked for Spam.
+amavis_local_only=Disable Internet sources for Spam checks?
+amavis_quarantine_desc=Show where Spam is Quarantined by Amavisd, display also Spam Stats if local Quarantine is enabled. If Quarantine is disabled or forwarded to a mail adress, Spam Stats can not be displayed.
+amavis_quarantine_off=Spam Quarantine is disabled on your system. Change <tt>spam_Quarantine_to</tt> to <tt>spam-quarantine</tt> in file <tt>$1</tt> to enable Quaratine.
+amavis_nostat=It's not possible to display Spam Stats.
+amavis_spam_admin=Mail adress where notifications are sent from (Spam admin)
+amavis_quarantine_mail=Spam in Quarantine is forwarded to mail adress
+amavis_quarantine_bsmtp=Spam is Quarantined in BSMTP format on local file system as
+amavis_quarantine_local=Spam is Quarantined in MBOX format on local file system as 
+amavis_quarantine_today=Spam mails in Quarantine today (24h)
+amavis_quarantine_week=Spam mails in Quarantine this week (7 days)
+amavis_quarantine_month=Spam mails in Quarantine this month (30 days)
+amavis_quarantine_total=Total number of Spam mails in Quarantine
 
 procmail_title=Procmail Spam Delivery
 procmail_ok=Change Procmail Delivery
@@ -361,7 +402,7 @@ awl_delete=Remove Selected Entries
 awl_white=Permanently Allow
 awl_black=Permanently Deny
 awl_cannot=Usermin could not open your auto-whitelist file <tt>$1</tt>, perhaps because it is in an un-supported format.
-awl_empty=Your auto-whitelist file <tt>$1</tt> does not contain any entries. It will be populated by SpamAsssassin as mail is processed by the system.
+awl_empty=Your auto-whitelist file <tt>$1</tt> does not contain any entries. It will be populated by SpamAssassin as mail is processed by the system.
 awl_user=Show auto-whitelist for user:
 awl_uok=Show
 awl_nofile=The user $1 does not have an auto-whitelist file.
@@ -380,4 +421,11 @@ dawl_ecannot=You are not allowed to manage the auto-whitelist for this user
 dawl_doing=Deleting auto-whitelists for all users ..
 dawl_done=.. deleted $2 entries from $1 users.
 dawl_title=Delete All Auto-Whitelists
+
+manual_title=Edit Config Files
+manual_file=Edit config file:
+manual_ok=OK
+manual_efile=Invalid configuration file!
+manual_err=Failed to save configuration file
+
 __norefs=1

@@ -214,11 +214,11 @@ index_return=Seznam pravidel
 index_rsetup=Konfigurace IP tabulek firewallu má být ve va¹em systému pøenastavena. Webmin nastaví nová výchozí pravidla, uchová je do ulo¾eného souboru $1. Tento soubor bude obsahovat inicializaèní nastavení, vycházející z typu firewallu, který si následnì vyberete..
 index_saveex=Ulo¾it firewall pravidla
 index_setup=Doposud nejsou nastaveny va va¹em systému ¾ádné IP tabulky. Webmin mù¾e to mù¾e pro vás nastavit a uschovat do úlo¾ného souboru $1 s poèáteèním nastavením, které je zalo¾eno na typu firewallu uvedeného ní¾e ..
-index_shorewall=Pozor! Vypadá to, ¾e pro generování va¹eho systémového firewallu se pou¾ívá Shorewall. Asi byste mìli radìji vyu¾ívat <a href='$1'>Modul Shorewall Firewall</a>.
+index_shorewall=Pozor! Vypadá to, ¾e pro generování va¹eho systémového firewallu se pou¾ívá Shorewall. Asi byste mìli radìji vyu¾ívat <a href='$1'>Modul Shoreline Firewall</a>.
 index_table_filter=Filtrování packetù (filter)
 index_table_mangle=Zmìna paketù (mangle)
 index_table_nat=Pøeklad sí»ové adresy (nat)
-index_title=Firewall Linuxu
+index_title=Firewall IPTables Linuxu
 index_unapply=Navrátit konfiguraci
 index_unapplydesc=Klepnutím na toto tlaèítko se resetuje konfigurace uvedená vý¹e na jednu z právì aktivních konfigurací.
 log_add_group=Pøidány do clusteru servery ze skupiny $1
@@ -293,3 +293,4 @@ setup_ecannot=Nemáte oprávnìní nastavit firewall
 setup_eiface=Nebylo vlo¾eno ¾ádné externí sí»ové rozhraní
 unapply_ecannot=Nemáte oprávnìní navrátit konfiguraci
 unapply_err=Chyba pøi zpìtné obnovì konfigurace
+eip6tables=Neznámý øádek v úlo¾ném souboru IP tabulek : $1

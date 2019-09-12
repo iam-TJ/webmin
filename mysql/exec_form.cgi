@@ -23,6 +23,12 @@ while(<OLD>) {
 	}
 close(OLD);
 
+# Build charset selector
+@css = &list_character_sets($in{'db'});
+$csel = &ui_select("charset", $sql_charset,
+		   [ [ "", "&lt;".$text{'default'}."&gt;" ],
+		     (map { [ $_->[0], $_->[1]." (".$_->[0].")" ] } @css) ]);
+
 # Form for executing an SQL command
 print &ui_tabs_start_tab("mode", "exec");
 print &text('exec_header', "<tt>$in{'db'}</tt>"),"<p>\n";
@@ -38,6 +44,7 @@ if (@old) {
 		"onClick='cmd.value = old.options[old.selectedIndex].value'"),
 	      " ",&ui_submit($text{'exec_clear'}, "clear"),"<br>\n";
 	}
+print "<b>$text{'exec_cs'}</b> ",$csel,"<br>\n";
 print &ui_form_end([ [ undef, $text{'exec_exec'} ] ]);
 print &ui_tabs_end_tab();
 
@@ -51,6 +58,7 @@ print &ui_radio_table("mode", 0, [
 	[ 0, $text{'exec_file'}, &ui_textbox("file", undef, 50)." ".
 				 &file_chooser_button("file", 0, 1) ],
 	[ 1, $text{'exec_upload'}, &ui_upload("upload", 50) ] ]);
+print "<b>$text{'exec_cs'}</b> ",$csel,"<br>\n";
 print &ui_form_end([ [ undef, $text{'exec_exec'} ] ]);
 print &ui_tabs_end_tab();
 
@@ -86,6 +94,8 @@ print &ui_table_row($text{'exec_format'},
 				 [ 1, $text{'csv_format1'} ],
 				 [ 2, $text{'csv_format2'} ] ]));
 
+print &ui_table_row($text{'exec_cs'}, $csel);
+
 print &ui_table_end();
 print &ui_form_end([ [ undef, $text{'exec_exec'} ] ]);
 print &ui_tabs_end_tab();
@@ -93,6 +103,6 @@ print &ui_tabs_end_tab();
 print &ui_tabs_end(1);
 
 &ui_print_footer("edit_dbase.cgi?db=$in{'db'}", $text{'dbase_return'},
-	"", $text{'index_return'});
+		 &get_databases_return_link($in{'db'}), $text{'index_return'});
 
 

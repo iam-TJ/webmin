@@ -7,12 +7,15 @@ Common functions for configuring miniserv and adjusting global Webmin settings.
 BEGIN { push(@INC, ".."); };
 use strict;
 use warnings;
+no warnings 'redefine';
 use WebminCore;
 &init_config();
 our ($module_root_directory, %text, %gconfig, $root_directory, %config,
      $module_name, $remote_user, $base_remote_user, $gpgpath,
-     $module_config_directory, @lang_order_list, @root_directories);
+     $module_config_directory, @lang_order_list, @root_directories,
+     $module_var_directory);
 do "$module_root_directory/gnupg-lib.pl";
+do "$module_root_directory/letsencrypt-lib.pl";
 use Socket;
 
 our @cs_codes = ( 'cs_page', 'cs_text', 'cs_table', 'cs_header', 'cs_link' );
@@ -21,23 +24,34 @@ our @cs_names = map { $text{$_} } @cs_codes;
 our $osdn_host = "prdownloads.sourceforge.net";
 our $osdn_port = 80;
 
-our $update_host = "www.webmin.com";
+our $update_host = "download.webmin.com";
 our $update_port = 80;
 our $update_page = "/updates/updates.txt";
 our $update_url = "http://$update_host:$update_port$update_page";
-our $redirect_url = "http://$update_host/cgi-bin/redirect.cgi";
+our $redirect_host = "www.webmin.com";
+our $redirect_url = "http://$redirect_host/cgi-bin/redirect.cgi";
 our $update_cache = "$module_config_directory/update-cache";
+if (!-r $update_cache) {
+	$update_cache = "$module_var_directory/update-cache";
+	}
+
+our $primary_host = "www.webmin.com";
+our $primary_port = 80;
 
 our $webmin_key_email = "jcameron\@webmin.com";
 our $webmin_key_fingerprint = "1719 003A CE3E 5A41 E2DE  70DF D97A 3AE9 11F6 3C51";
 
-our $standard_host = $update_host;
-our $standard_port = $update_port;
+our $authentic_key_email = "ilia\@rostovtsev.io";
+our $authentic_key_email_old = "ilia\@rostovtsev.ru";
+our $authentic_key_fingerprint = "EC60 F3DA 9CB7 9ADC CF56  0D1F 121E 166D D9C8 21AB";
+
+our $standard_host = $primary_host;
+our $standard_port = $primary_port;
 our $standard_page = "/download/modules/standard.txt";
 our $standard_ssl = 0;
 
-our $third_host = $update_host;
-our $third_port = $update_port;
+our $third_host = $primary_host;
+our $third_port = $primary_port;
 our $third_page = "/cgi-bin/third.cgi";
 our $third_ssl = 0;
 
@@ -48,6 +62,9 @@ our $cron_cmd = "$module_config_directory/update.pl";
 our $os_info_address = "os\@webmin.com";
 
 our $detect_operating_system_cache = "$module_config_directory/oscache";
+if (!-r $detect_operating_system_cache) {
+	$detect_operating_system_cache = "$module_var_directory/oscache";
+	}
 
 our @webmin_date_formats = ( "dd/mon/yyyy", "dd/mm/yyyy",
 			     "mm/dd/yyyy", "yyyy/mm/dd",
@@ -57,10 +74,16 @@ our @debug_what_events = ( 'start', 'read', 'write', 'ops', 'procs', 'diff', 'cm
 
 our $record_login_cmd = "$config_directory/login.pl";
 our $record_logout_cmd = "$config_directory/logout.pl";
+our $record_failed_cmd = "$config_directory/failed.pl";
 
-our $strong_ssl_ciphers = "ALL:!aNULL:!ADH:!eNULL:!LOW:!EXP:!SSLv2:RC4+RSA:+HIGH:+MEDIUM";
+our $strong_ssl_ciphers = "ECDHE-RSA-AES256-SHA384:AES256-SHA256:AES256-SHA256:RC4:HIGH:MEDIUM:+TLSv1:+TLSv1.1:+TLSv1.2:!MD5:!ADH:!aNULL:!eNULL:!NULL:!DH:!ADH:!EDH:!AESGCM";
+our $pfs_ssl_ciphers = "EECDH+AES:EDH+AES:-SHA1:EECDH+RC4:EDH+RC4:RC4-SHA:EECDH+AES256:EDH+AES256:AES256-SHA:!aNULL:!eNULL:!EXP:!LOW:!MD5";
 
 our $newmodule_users_file = "$config_directory/newmodules";
+
+our $first_install_file = "$config_directory/first-install";
+
+our $hidden_announce_file = "$module_config_directory/announce-hidden";
 
 =head2 setup_ca
 
@@ -77,7 +100,7 @@ my $acl = "$config_directory/acl";
 $conf =~ s/DIRECTORY/$acl/g;
 
 &lock_file("$acl/openssl.cnf");
-my $cfh;
+my $cfh = "CONF";
 &open_tempfile($cfh, ">$acl/openssl.cnf");
 &print_tempfile($cfh, $conf);
 &close_tempfile($cfh);
@@ -85,14 +108,14 @@ chmod(0600, "$acl/openssl.cnf");
 &unlock_file("$acl/openssl.cnf");
 
 &lock_file("$acl/index.txt");
-my $ifh;
+my $ifh = "INDEX";
 &open_tempfile($ifh, ">$acl/index.txt");
 &close_tempfile($ifh);
 chmod(0600, "$acl/index.txt");
 &unlock_file("$acl/index.txt");
 
 &lock_file("$acl/serial");
-my $sfh;
+my $sfh = "SERIAL";
 &open_tempfile($sfh, ">$acl/serial");
 &print_tempfile($sfh, "011E\n");
 &close_tempfile($sfh);
@@ -112,10 +135,10 @@ Installs a webmin module or theme, and returns either an error message
 or references to three arrays for descriptions, directories and sizes.
 On success or failure, the file is deleted if the unlink parameter is set.
 Unless the nodeps parameter is set to 1, any missing dependencies will cause
-installation to fail. 
+installation to fail.
 
 Any new modules will be granted to the users and groups named in the fourth
-paramter, which must be an array reference.
+parameter, which must be an array reference.
 
 =cut
 sub install_webmin_module
@@ -137,7 +160,8 @@ if ($two eq "\037\235") {
 		}
 	my $temp = $file =~ /\/([^\/]+)\.Z/i ? &transname("$1")
 						: &transname();
-	my $out = `uncompress -c "$file" 2>&1 >$temp`;
+	my $out = &backquote_command("uncompress -c ".&quote_path($file).
+				     " 2>&1 >$temp");
 	unlink($file) if ($need_unlink);
 	if ($?) {
 		unlink($temp);
@@ -171,7 +195,8 @@ elsif ($two eq "BZ") {
 		}
 	my $temp = $file =~ /\/([^\/]+)\.gz/i ? &transname("$1")
 						 : &transname();
-	my $out = `bunzip2 -c "$file" 2>&1 >$temp`;
+	my $out = &backquote_command("bunzip2 -c ".&quote_path($file).
+				     " 2>&1 >$temp");
 	unlink($file) if ($need_unlink);
 	if ($?) {
 		unlink($temp);
@@ -204,7 +229,6 @@ if ($type eq 'rpm' && $file =~ /\.rpm$/i &&
 		unlink($file) if ($need_unlink);
 		return &text('install_eirpm', "<tt>$out</tt>");
 		}
-	unlink("$config_directory/module.infos.cache");
 	&flush_webmin_caches();
 
 	$mdirs[0] = &module_root_directory($name);
@@ -259,7 +283,7 @@ else {
 		return $text{'install_enone'};
 		}
 
-	# Get the module.info or theme.info files to check dependancies
+	# Get the module.info or theme.info files to check dependencies
 	my $ver = &get_webmin_version();
 	my $tmpdir = &transname();
 	mkdir($tmpdir, 0700);
@@ -345,7 +369,9 @@ else {
 		}
 
 	# Extract all the modules and update perl path and ownership
-	my $out = `cd $install_root_directory ; tar xf "$file" 2>&1 >/dev/null`;
+	my $out = &backquote_command(
+		"cd $install_root_directory ; tar xf ".&quote_path($file).
+		" 2>&1 >/dev/null");
 	chdir($oldpwd);
 	if ($?) {
 		unlink($file) if ($need_unlink);
@@ -379,14 +405,30 @@ else {
 
 	# Copy appropriate config file from modules to /etc/webmin
 	my @permmods = grep { !-d "$config_directory/$_" } @newmods;
-	system("cd $root_directory ; $perl $root_directory/copyconfig.pl '$gconfig{'os_type'}/$gconfig{'real_os_type'}' '$gconfig{'os_version'}/$gconfig{'real_os_version'}' '$install_root_directory' '$config_directory' ".join(' ', @realmods)." >/dev/null");
+	system("cd $root_directory && $perl $root_directory/copyconfig.pl ".
+	       quotemeta("$gconfig{'os_type'}/$gconfig{'real_os_type'}")." ".
+	       quotemeta("$gconfig{'os_version'}/$gconfig{'real_os_version'}")." ".
+	       quotemeta($install_root_directory)." ".
+	       quotemeta($config_directory)." ".
+	       join(' ', @realmods)." >/dev/null");
 
 	# Set correct permissions on *new* config directory
 	if (&supports_users()) {
+		my @mydir = stat($module_config_directory);
+		my $myuser = @mydir ? $mydir[4] : "root";
+		my $mygroup = @mydir ? $mydir[5] : "bin";
+		my $myperms = @mydir ? sprintf("%o", $mydir[2] & 0777) : "og-rw";
 		foreach my $m (@permmods) {
-			system("chown -R root $config_directory/$m");
-			system("chgrp -R bin $config_directory/$m");
-			system("chmod -R og-rw $config_directory/$m");
+			system("chown -R $myuser $config_directory/$m");
+			system("chgrp -R $mygroup $config_directory/$m");
+			system("chmod -R $myperms $config_directory/$m");
+			}
+		}
+
+	# Set reasonable permissions on install directory
+	if (&supports_users()) {
+		foreach my $m (@newmods) {
+			system("chmod -R o-w $root_directory/$m");
 			}
 		}
 
@@ -421,7 +463,7 @@ sub grant_user_module
 my %acl;
 &read_acl(undef, \%acl);
 my $fh = "GRANTS";
-&open_tempfile($fh, ">".&acl_filename()); 
+&open_tempfile($fh, ">".&acl_filename());
 my $u;
 foreach $u (keys %acl) {
 	my @mods = @{$acl{$u}};
@@ -494,10 +536,11 @@ else {
 		closedir(DIR);
 		}
 
-	my $type;
-	open(TYPE, "$mdir/install-type");
-	chop($type = <TYPE>);
-	close(TYPE);
+	my $type = '';
+	if (open(TYPE, "$mdir/install-type")) {
+		chop($type = <TYPE>);
+		close(TYPE);
+		}
 
 	# Run the module's uninstall script
 	if (&check_os_support(\%minfo) &&
@@ -583,21 +626,44 @@ sub gnupg_setup
 {
 return ( 1, &text('enogpg', "<tt>gpg</tt>") ) if (!&has_command($gpgpath));
 
+my ($ok, $err) = &import_gnupg_key(
+	$webmin_key_email, $webmin_key_fingerprint,
+	"$module_root_directory/jcameron-key.asc");
+return ($ok, $err) if ($ok);
+
+($ok, $err) = &import_gnupg_key(
+	$authentic_key_email."|".$authentic_key_email_old,
+	$authentic_key_fingerprint,
+	"$root_directory/authentic-theme/THEME.pgp");
+return ($ok, $err) if ($ok);
+
+return (0);
+}
+
+=head2 import_gnupg_key(email, fingerprint, keyfile)
+
+Imports the given key if not already in the key list
+
+=cut
+sub import_gnupg_key
+{
+my ($email, $finger, $path) = @_;
+return (0) if (!-r $path);
+
 # Check if we already have the key
 my @keys = &list_keys();
 foreach my $k (@keys) {
-	return ( 0 ) if ($k->{'email'}->[0] eq $webmin_key_email &&
-		         &key_fingerprint($k) eq $webmin_key_fingerprint);
+	return ( 0 ) if ($k->{'email'}->[0] =~ /^$email$/ &&
+		         &key_fingerprint($k) eq $finger);
 	}
 
 # Import it if not
 &list_keys();
-my $out = &backquote_logged(
-	"$gpgpath --import $module_root_directory/jcameron-key.asc 2>&1");
+my $out = &backquote_logged("$gpgpath --import $path 2>&1");
 if ($?) {
 	return (2, $out);
 	}
-return 0;
+return (0);
 }
 
 =head2 list_standard_modules
@@ -707,7 +773,13 @@ Rounds a version number down to the nearest .01
 =cut
 sub base_version
 {
-return sprintf("%.2f0", $_[0] - 0.005);
+my ($ver) = @_;
+#remove waning about (possible) postfixes from update-from-repo.sh
+$ver =~ s/[-a-z:_].*//gi;
+if ($ver =~ /^((\d+)\.(\d+))\.*/) {
+	$ver = $1;
+	}
+return sprintf("%.2f0", $ver);
 }
 
 =head2 get_newmodule_users
@@ -786,7 +858,7 @@ return @sockets;
 
 =head2 fetch_updates(url, [login, pass], [sig-mode])
 
-Returns a list of updates from some URL, or calls &error. Each element is an 
+Returns a list of updates from some URL, or calls &error. Each element is an
 array reference containing :
 
 =item Module directory name.
@@ -818,7 +890,7 @@ $host || &error($text{'update_eurl'});
 
 # Download the file
 my $temp = &transname();
-&http_download($host, $port, $page, $temp, undef, undef, $ssl, $user, $pass,
+&retry_http_download($host, $port, $page, $temp, undef, undef, $ssl, $user, $pass,
 	       0, 0, 1);
 
 # Download the signature, if we can check it
@@ -826,7 +898,7 @@ my ($ec, $emsg) = &gnupg_setup();
 if (!$ec && $sigmode) {
 	my $err;
 	my $sig;
-	&http_download($host, $port, $page."-sig.asc", \$sig,
+	&retry_http_download($host, $port, $page."-sig.asc", \$sig,
 		       \$err, undef, $ssl, $user, $pass, 0, 0, 1);
 	if ($err) {
 		$sigmode == 2 && &error(&text('update_enosig', $err));
@@ -975,16 +1047,18 @@ line.
 =cut
 sub validate_key_cert
 {
-my $key = &read_file_contents($_[0]);
-$key =~ /BEGIN RSA PRIVATE KEY/i ||
-    $key =~ /BEGIN PRIVATE KEY/i ||
-	&error(&text('ssl_ekey', $_[0]));
-if (!$_[1]) {
-	$key =~ /BEGIN CERTIFICATE/ || &error(&text('ssl_ecert', $_[0]));
+my ($keyfile, $certfile) = @_;
+-r $keyfile || return &error(&text('ssl_ekey', $keyfile));
+my $key = &read_file_contents($keyfile);
+$key =~ /BEGIN (RSA |EC )?PRIVATE KEY/i ||  
+	&error(&text('ssl_ekey2', $keyfile));
+if (!$certfile) {
+	$key =~ /BEGIN CERTIFICATE/ || &error(&text('ssl_ecert2', $keyfile));
 	}
 else {
-	my $cert = &read_file_contents($_[1]);
-	$cert =~ /BEGIN CERTIFICATE/ || &error(&text('ssl_ecert', $_[1]));
+	-r $certfile || return &error(&text('ssl_ecert', $certfile));
+	my $cert = &read_file_contents($certfile);
+	$cert =~ /BEGIN CERTIFICATE/ || &error(&text('ssl_ecert2', $certfile));
 	}
 }
 
@@ -1015,7 +1089,7 @@ if ($cache) {
 	}
 my $temp = &transname();
 my $perl = &get_perl_path();
-system("$perl $root_directory/oschooser.pl $file $temp 1");
+system("$root_directory/oschooser.pl $file $temp 1");
 my %rv;
 &read_env_file($temp, \%rv);
 $rv{'time'} = time();
@@ -1058,13 +1132,24 @@ my %miniserv;
 my %realos = &detect_operating_system(undef, 1);
 if (($realos{'os_version'} ne $gconfig{'os_version'} ||
      $realos{'os_type'} ne $gconfig{'os_type'}) &&
+    $realos{'os_version'} && $realos{'os_type'} &&
     &foreign_available("webmin")) {
-	push(@notifs, 
-		&ui_form_start("$gconfig{'webprefix'}/webmin/fix_os.cgi").
-		&text('os_incorrect', $realos{'real_os_type'},
-				    $realos{'real_os_version'})."<p>\n".
-		&ui_form_end([ [ undef, $text{'os_fix'} ] ])
-		);
+	my ($realminor) = split(/\./, $realos{'os_version'});
+	my ($minor) = split(/\./, $gconfig{'os_version'});
+	if ($realos{'os_type'} eq $gconfig{'os_type'} &&
+	    $realminor == $minor) {
+		# Only the minor version number changed - no need to apply
+		&apply_new_os_version(\%realos);
+		}
+	else {
+		# Large enough change to tell the user
+		push(@notifs,
+		    &ui_form_start("$gconfig{'webprefix'}/webmin/fix_os.cgi").
+		    &text('os_incorrect', $realos{'real_os_type'},
+		    		          $realos{'real_os_version'})."<p>\n".
+		    &ui_form_end([ [ undef, $text{'os_fix'} ] ])
+		    );
+		}
 	}
 
 # Password close to expiry
@@ -1130,8 +1215,10 @@ if (&foreign_check("acl")) {
 
 # New Webmin version is available, but only once per day
 my $now = time();
+my %access = &get_module_acl();
+my %disallow = map { $_, 1 } split(/\s+/, $access{'disallow'});
 if (&foreign_available($module_name) && !$noupdates &&
-    !$gconfig{'nowebminup'}) {
+    !$gconfig{'nowebminup'} && !$disallow{'upgrade'}) {
 	if (!$config{'last_version_check'} ||
             $now - $config{'last_version_check'} > 24*60*60) {
 		# Cached last version has expired .. re-fetch
@@ -1142,7 +1229,8 @@ if (&foreign_available($module_name) && !$noupdates &&
 			&save_module_config();
 			}
 		}
-	if ($config{'last_version_number'} > &get_webmin_version()) {
+	if ($config{'last_version_number'} &&
+	    $config{'last_version_number'} > &get_webmin_version()) {
 		# New version is out there .. offer to upgrade
 		my $mode = &get_install_type();
 		my $checksig = 0;
@@ -1166,7 +1254,7 @@ if (&foreign_available($module_name) && !$noupdates &&
 
 # Webmin module updates
 if (&foreign_available($module_name) && !$noupdates &&
-    !$gconfig{'nomoduleup'}) {
+    !$gconfig{'nomoduleup'} && !$disallow{'upgrade'}) {
 	my @st = stat($update_cache);
 	my $allupdates = [ ];
 	my @urls = $config{'upsource'} ?
@@ -1223,6 +1311,18 @@ if (&foreign_available($module_name) && !$noupdates &&
 		$msg .= &ui_hidden("checksig", $config{'upchecksig'});
 		$msg .= &ui_form_end([ [ undef, $text{'notif_updateok'} ] ]);
 		push(@notifs, $msg);
+		}
+	}
+
+# Reboot needed
+if (&foreign_check("package-updates") && &foreign_available("init")) {
+	&foreign_require("package-updates");
+	if (&package_updates::check_reboot_required()) {
+		push(@notifs,
+		     &ui_form_start("$gconfig{'webprefix'}/init/reboot.cgi",
+				    "form-data").
+		     $text{'notif_reboot'}."<p>\n".
+		     &ui_form_end([ [ undef, $text{'notif_rebootok'} ] ]));
 		}
 	}
 
@@ -1313,7 +1413,7 @@ if (exists($gconfig{'shared_root'}) && $gconfig{'shared_root'} eq '1') {
 	return 1;
 	}
 elsif (exists($gconfig{'shared_root'}) && $gconfig{'shared_root'} eq '0') {
-	# Definately not shared
+	# Definitely not shared
 	return 0;
 	}
 if (&running_in_zone()) {
@@ -1404,25 +1504,26 @@ else {
 for(my $i=1; $i<@_; $i++) {
 	my $mismatch = 0;
 	my $ip = $_[$i];
-        if ($ip =~ /^(\S+)\/(\d+)$/) {
+        if ($ip =~ /^([0-9\.]+)\/(\d+)$/) {
                 # Convert CIDR to netmask format
                 $ip = $1."/".&prefix_to_mask($2);
                 }
-	if ($ip =~ /^(\S+)\/(\S+)$/) {
+	if ($ip =~ /^([0-9\.]+)\/([0-9\.]+)$/) {
 		# Compare with IPv4 network/mask
 		my @mo = split(/\./, $1);
 		my @ms = split(/\./, $2);
 		for(my $j=0; $j<4; $j++) {
-			if ((int($io[$j]) & int($ms[$j])) != int($mo[$j])) {
+			if ((int($io[$j]) & int($ms[$j])) != (int($mo[$j]) & int($ms[$j]))) {
 				$mismatch = 1;
 				}
 			}
 		}
-	elsif ($_[$i] =~ /^(\S+)-(\S+)$/) {
+	elsif ($_[$i] =~ /^([0-9\.]+)-([0-9\.]+)$/) {
 		# Compare with an IPv4 range (separated by a hyphen -)
-		local ($remote, $min, $max);
-		@low = split(/\./, $1); @high = split(/\./, $2);
-		for($j=0; $j<4; $j++) {
+		my ($remote, $min, $max);
+		my @low = split(/\./, $1);
+		my @high = split(/\./, $2);
+		for(my $j=0; $j<4; $j++) {
 			$remote += $io[$j] << ((3-$j)*8);
 			$min += $low[$j] << ((3-$j)*8);
 			$max += $high[$j] << ((3-$j)*8);
@@ -1433,7 +1534,7 @@ for(my $i=1; $i<@_; $i++) {
 		}
 	elsif ($ip =~ /^\*(\.\S+)$/) {
 		# Compare with hostname regexp
-		$mismatch = 1 if ($hn !~ /$1$/);
+		$mismatch = 1 if ($hn !~ /^.*\Q$1\E$/i);
 		}
 	elsif ($ip eq 'LOCAL') {
 		# Just assume OK for now
@@ -1449,10 +1550,19 @@ for(my $i=1; $i<@_; $i++) {
 			}
 		}
 	elsif ($_[$i] =~ /^[a-f0-9:]+$/) {
-		# Compare with IPv6 address or network
-		my @mo = split(/:/, $_[$i]);
-		while(@mo && !$mo[$#mo]) { pop(@mo); }
-		for(my $j=0; $j<@mo; $j++) {
+		# Compare with a full IPv6 address
+		if (&canonicalize_ip6($_[$i]) ne canonicalize_ip6($_[0])) {
+			$mismatch = 1;
+			}
+		}
+	elsif ($_[$i] =~ /^([a-f0-9:]+)\/(\d+)$/) {
+		# Compare with an IPv6 network
+		my $v6size = $2;
+		my $v6addr = &canonicalize_ip6($1);
+		my $bytes = $v6size / 8;
+		my @mo = &expand_ipv6_bytes($v6addr);
+		my @io = &expand_ipv6_bytes(&canonicalize_ip6($_[0]));
+		for(my $j=0; $j<$bytes; $j++) {
 			if ($mo[$j] ne $io[$j]) {
 				$mismatch = 1;
 				}
@@ -1466,6 +1576,24 @@ for(my $i=1; $i<@_; $i++) {
 	}
 return 0;
 }
+
+=head2 expand_ipv6_bytes(address)
+
+Given a canonical IPv6 address, split it into an array of bytes
+
+=cut
+sub expand_ipv6_bytes
+{
+my ($addr) = @_;
+my @rv;
+foreach my $w (split(/:/, $addr)) {
+	$w =~ /^(..)(..)$/ || return ( );
+	push(@rv, hex($1), hex($2));
+	}
+return @rv;
+}
+
+
 
 =head2 prefix_to_mask(prefix)
 
@@ -1490,22 +1618,42 @@ sub valid_allow
 {
 my ($h) = @_;
 if ($h =~ /^([0-9\.]+)\/(\d+)$/) {
+	# IPv4 address/cidr
 	&check_ipaddress($1) ||
 		return &text('access_enet', "$1");
 	$2 >= 0 && $2 <= 32 ||
 		return &text('access_ecidr', "$2");
 	}
 elsif ($h =~ /^([0-9\.]+)\/([0-9\.]+)$/) {
+	# IPv4 address/netmask
 	&check_ipaddress($1) ||
 		return &text('access_enet', "$1");
 	&check_ipaddress($2) ||
 		return &text('access_emask', "$2");
 	}
+elsif ($h =~ /^([0-9\.]+)\-([0-9\.]+)$/) {
+	# IPv4 address
+	&check_ipaddress("$1") ||
+		return &text('access_eip', "$1");
+	&check_ipaddress("$2") ||
+		return &text('access_eip', "$2");
+	}
 elsif ($h =~ /^[0-9\.]+$/) {
+	# IPv4 address
 	&check_ipaddress($h) ||
 		return &text('access_eip', $h);
 	}
+elsif ($h =~ /^([a-f0-9:]+)\/(\d+)$/) {
+	# IPv6 address/prefix
+	&check_ip6address($1) ||
+		return &text('access_eip6', $1);
+	$2 >= 0 && $2 <= 128 ||
+		return &text('access_ecidr6', "$2");
+	$2 % 8 == 0 ||
+		return &text('access_ecidr8', "$2");
+	}
 elsif ($h =~ /^[a-f0-9:]+$/) {
+	# IPv6 address
 	&check_ip6address($h) ||
 		return &text('access_eip6', $h);
 	}
@@ -1533,7 +1681,7 @@ a package name and the relative path of the .pl file to pre-load.
 =cut
 sub get_preloads
 {
-my @rv = map { [ split(/=/, $_) ] } split(/\s+/, $_[0]->{'preload'});
+my @rv = map { [ split(/=/, $_) ] } split(/\s+/, $_[0]->{'preload'} || "");
 return @rv;
 }
 
@@ -1618,11 +1766,15 @@ else {
 	if ($root_directory eq "/usr/libexec/webmin") {
 		$mode = "rpm";
 		}
-	elsif ($root_directory eq "/usr/shard/webmin") {
+	elsif ($root_directory eq "/usr/share/webmin") {
 		$mode = "deb";
 		}
 	elsif ($root_directory eq "/opt/webmin") {
 		$mode = "solaris-pkg";
+		}
+	elsif (&has_command("eix") &&
+	       &backquote_command("eix webmin 2>/dev/null") =~ /Installed/i) {
+		$mode = "portage";
 		}
 	else {
 		$mode = undef;
@@ -1678,29 +1830,38 @@ sub cert_info
 {
 my %rv;
 local $_;
-open(OUT, "openssl x509 -in ".quotemeta($_[0])." -issuer -subject -enddate |");
+open(OUT, "openssl x509 -in ".quotemeta($_[0])." -issuer -subject -enddate -text |");
 while(<OUT>) {
 	s/\r|\n//g;
-	if (/subject=.*CN=([^\/]+)/) {
+	if (/subject=.*CN\s*=\s*([^\/]+)/) {
 		$rv{'cn'} = $1;
 		}
-	if (/subject=.*O=([^\/]+)/) {
+	if (/subject=.*O\s*=\s*([^\/]+)/) {
 		$rv{'o'} = $1;
 		}
-	if (/subject=.*Email=([^\/]+)/) {
+	if (/subject=.*Email\s*=\s*([^\/]+)/) {
 		$rv{'email'} = $1;
 		}
-	if (/issuer=.*CN=([^\/]+)/) {
+	if (/issuer=.*CN\s*=\s*([^\/]+)/) {
 		$rv{'issuer_cn'} = $1;
 		}
-	if (/issuer=.*O=([^\/]+)/) {
+	if (/issuer=.*O\s*=\s*([^\/]+)/) {
 		$rv{'issuer_o'} = $1;
 		}
-	if (/issuer=.*Email=([^\/]+)/) {
+	if (/issuer=.*Email\s*=\s*([^\/]+)/) {
 		$rv{'issuer_email'} = $1;
 		}
-	if (/notAfter=(.*)/) {
+	if (/notAfter\s*=\s*(.*)/) {
 		$rv{'notafter'} = $1;
+		}
+	if (/Subject\s+Alternative\s+Name/i) {
+		my $alts = <OUT>;
+		$alts =~ s/^\s+//;
+		foreach my $a (split(/[, ]+/, $alts)) {
+			if ($a =~ /^DNS:(\S+)/) {
+				push(@{$rv{'alt'}}, $1);
+				}
+			}
 		}
 	}
 close(OUT);
@@ -1790,7 +1951,7 @@ my ($defhost, $defemail, $deforg) = @_;
 my $rv;
 
 $rv .= &ui_table_row($text{'ssl_cn'},
-		    &ui_opt_textbox("commonName", $defhost, 30,
+		    &ui_opt_textbox("commonName", $defhost, 50,
 				    $text{'ssl_all'}));
 
 $rv .= &ui_table_row($text{'ca_email'},
@@ -1834,8 +1995,14 @@ my ($in, $keyfile, $certfile) = @_;
 my %in = %$in;
 
 # Validate inputs
-$in{'commonName_def'} || $in{'commonName'} =~ /^[A-Za-z0-9\.\-\*]+$/ ||
-	return $text{'newkey_ecn'};
+my @cns;
+if (!$in{'commonName_def'}) {
+	@cns = split(/\s+/, $in{'commonName'});
+	@cns || return $text{'newkey_ecns'};
+	foreach my $cn (@cns) {
+		$cn =~ /^[A-Za-z0-9\.\-\*]+$/ || return $text{'newkey_ecn'};
+		}
+	}
 $in{'size_def'} || $in{'size'} =~ /^\d+$/ || return $text{'newkey_esize'};
 $in{'days'} =~ /^\d+$/ || return $text{'newkey_edays'};
 $in{'countryName'} =~ /^\S\S$/ || return $text{'newkey_ecountry'};
@@ -1852,20 +2019,19 @@ if (!$cmd) {
 # Run openssl and feed it key data
 my $ctemp = &transname();
 my $ktemp = &transname();
-my $outtemp = &transname();
 my $size = $in{'size_def'} ? $default_key_size : quotemeta($in{'size'});
-open(CA, "| $cmd req -newkey rsa:$size -x509 -nodes -out $ctemp -keyout $ktemp -days ".quotemeta($in{'days'})." >$outtemp 2>&1");
-print CA ($in{'countryName'} || "."),"\n";
-print CA ($in{'stateOrProvinceName'} || "."),"\n";
-print CA ($in{'cityName'} || "."),"\n";
-print CA ($in{'organizationName'} || "."),"\n";
-print CA ($in{'organizationalUnitName'} || "."),"\n";
-print CA ($in{'commonName_def'} ? "*" : $in{'commonName'}),"\n";
-print CA ($in{'emailAddress'} || "."),"\n";
-close(CA);
-my $rv = $?;
-my $out = &read_file_contents($outtemp);
-unlink($outtemp);
+my $subject = &build_ssl_subject($in{'countryName'},
+				 $in{'stateOrProvinceName'},
+				 $in{'cityName'},
+				 $in{'organizationName'},
+				 $in{'organizationalUnitName'},
+				 \@cns,
+				 $in{'emailAddress'});
+my $conf = &build_ssl_config(\@cns);
+my $out = &backquote_logged(
+	"$cmd req -newkey rsa:$size -x509 -sha256 -nodes -out $ctemp -keyout $ktemp ".
+	"-days ".quotemeta($in{'days'})." -subj ".quotemeta($subject)." ".
+	"-config $conf -reqexts v3_req -utf8 2>&1");
 if (!-r $ctemp || !-r $ktemp || $?) {
 	return $text{'newkey_essl'}."<br>"."<pre>".&html_escape($out)."</pre>";
 	}
@@ -1875,7 +2041,7 @@ my $certout = &read_file_contents($ctemp);
 my $keyout = &read_file_contents($ktemp);
 unlink($ctemp, $ktemp);
 
-my ($kfh, $cfh);
+my ($kfh, $cfh) = ("KEY", "CERT");
 &open_lock_tempfile($kfh, ">$keyfile");
 &print_tempfile($kfh, $keyout);
 if ($certfile) {
@@ -1893,6 +2059,201 @@ else {
 &set_ownership_permissions(undef, undef, 0600, $keyfile);
 
 return undef;
+}
+
+=head2 parse_ssl_csr_form(&in, keyfile, csrfile)
+
+Parses the CSR generation form, and creates new key and CSR files.
+Returns undef on success or an error message on failure.
+
+=cut
+sub parse_ssl_csr_form
+{
+my ($in, $keyfile, $csrfile) = @_;
+my %in = %$in;
+
+# Validate inputs
+my @cns;
+if (!$in{'commonName_def'}) {
+	@cns = split(/\s+/, $in{'commonName'});
+	@cns || return $text{'newkey_ecns'};
+	foreach my $cn (@cns) {
+		$cn =~ /^[A-Za-z0-9\.\-\*]+$/ || return $text{'newkey_ecn'};
+		}
+	}
+else {
+	@cns = ( "*" );
+	}
+$in{'size_def'} || $in{'size'} =~ /^\d+$/ || return $text{'newkey_esize'};
+$in{'days'} =~ /^\d+$/ || return $text{'newkey_edays'};
+$in{'countryName'} =~ /^\S\S$/ || return $text{'newkey_ecountry'};
+
+# Work out SSL command
+my %aclconfig = &foreign_config('acl');
+&foreign_require("acl");
+my $cmd = &acl::get_ssleay();
+if (!$cmd) {
+	return &text('newkey_ecmd', "<tt>$aclconfig{'ssleay'}</tt>",
+		     "$gconfig{'webprefix'}/config.cgi?acl");
+	}
+
+# Generate the key
+my $ktemp = &transname();
+my $size = $in{'size_def'} ? $default_key_size : quotemeta($in{'size'});
+my $out = &backquote_command("$cmd genrsa -out ".quotemeta($ktemp)." $size 2>&1 </dev/null");
+if (!-r $ktemp || $?) {
+	return $text{'newkey_essl'}."<br>"."<pre>".&html_escape($out)."</pre>";
+	}
+
+# Run openssl and feed it key data
+my ($ok, $ctemp) = &generate_ssl_csr(
+			$ktemp,
+			$in{'countryName'},
+			$in{'stateOrProvinceName'},
+			$in{'cityName'},
+			$in{'organizationName'},
+			$in{'organizationalUnitName'},
+			\@cns,
+			$in{'emailAddress'});
+if (!$ok) {
+	return $text{'newkey_essl'}."<br>".
+	       "<pre>".&html_escape($ctemp)."</pre>";
+	}
+
+# Write to the final files
+my $csrout = &read_file_contents($ctemp);
+my $keyout = &read_file_contents($ktemp);
+unlink($ctemp, $ktemp);
+
+my ($kfh, $cfh);
+&open_lock_tempfile($kfh, ">$keyfile");
+&print_tempfile($kfh, $keyout);
+&close_tempfile($kfh);
+&set_ownership_permissions(undef, undef, 0600, $keyfile);
+&open_lock_tempfile($cfh, ">$csrfile");
+&print_tempfile($cfh, $csrout);
+&close_tempfile($cfh);
+&set_ownership_permissions(undef, undef, 0600, $csrfile);
+
+return undef;
+}
+
+# build_ssl_subject(country, state, city, org, orgunit, cname|&cnames, email)
+# Generate a full subject line suitable for use with the -subj parameter
+sub build_ssl_subject
+{
+my ($country, $state, $city, $org, $orgunit, $cn, $email) = @_;
+$org =~ s/[\177-\377]//g if ($org);		# Remove non-ascii chars
+$orgunit =~ s/[\177-\377]//g if ($orgunit);
+my @cns = ref($cn) ? @$cn : ( $cn );
+my $subject;
+$city = substr($city, 0, 64) if ($city && length($city) > 64);
+$org = substr($org, 0, 64) if ($org && length($org) > 64);
+$orgunit = substr($orgunit, 0, 64) if ($orgunit && length($orgunit) > 64);
+$email = substr($email, 0, 64) if ($email && length($email) > 64);
+$subject .= "/C=$country" if ($country);
+$subject .= "/ST=$state" if ($state);
+$subject .= "/L=$city" if ($city);
+$subject .= "/O=$org" if ($org);
+$subject .= "/OU=$orgunit" if ($orgunit);
+$subject .= "/CN=$cns[0]";
+$subject .= "/emailAddress=$email" if ($email);
+return $subject;
+}
+
+# build_ssl_config(cname|&cnames)
+# Create a temporary openssl config file that is setup to include altnames, if needed
+sub build_ssl_config
+{
+my ($cn) = @_;
+my @cns = ref($cn) ? @$cn : ( $cn );
+my $conf = &find_openssl_config_file();
+$conf || &error("No OpenSSL configuration file found on this system!");
+if (@cns <= 1) {
+	# No special handling needed
+	return $conf;
+	}
+my $temp = &transname();
+&copy_source_dest($conf, $temp);
+shift(@cns);	# First one is part of the CN=
+
+# Make sure subjectAltNames is set in .cnf file, in the right places
+my $lref = &read_file_lines($temp);
+my $i = 0;
+my $found_req = 0;
+my $found_ca = 0;
+my $altline = "subjectAltName=".join(",", map { "DNS:$_" } @cns);
+foreach my $l (@$lref) {
+	if ($l =~ /^\s*\[\s*v3_req\s*\]/ && !$found_req) {
+		splice(@$lref, $i+1, 0, $altline);
+		$found_req = 1;
+		}
+	if ($l =~ /^\s*\[\s*v3_ca\s*\]/ && !$found_ca) {
+		splice(@$lref, $i+1, 0, $altline);
+		$found_ca = 1;
+		}
+	$i++;
+	}
+# If v3_req or v3_ca sections are missing, add at end
+if (!$found_req) {
+	push(@$lref, "[ v3_req ]", $altline);
+	}
+if (!$found_ca) {
+	push(@$lref, "[ v3_ca ]", $altline);
+	}
+
+# Add copyall line if needed
+$i = 0;
+my $found_copy = 0;
+my $copyline = "copy_extensions=copyall";
+foreach my $l (@$lref) {
+	if ($l =~ /^\s*\#*\s*copy_extensions\s*=/) {
+		$l = $copyline;
+		$found_copy = 1;
+		last;
+		}
+	elsif ($l =~ /^\s*\[\s*CA_default\s*\]/) {
+		$found_ca = $i;
+		}
+	$i++;
+	}
+if (!$found_copy) {
+	if ($found_ca) {
+		splice(@$lref, $found_ca+1, 0, $copyline);
+		}
+	else {
+		push(@$lref, "[ CA_default ]", $copyline);
+		}
+	}
+
+&flush_file_lines($temp);
+return $temp;
+}
+
+# generate_ssl_csr(keyfile, country, state, city, org, orgunit, cname|&cnames,
+# 		   email, ["sha1"|"sha2"])
+# Generates a new CSR, and returns either 1 and the temp file path, or 0 and
+# an error message
+sub generate_ssl_csr
+{
+my ($ktemp, $country, $state, $city, $org, $orgunit, $cn, $email, $ctype) = @_;
+$ctype ||= "sha2";
+&foreign_require("acl");
+my $ctemp = &transname();
+my $cmd = &acl::get_ssleay();
+my $subject = &build_ssl_subject($country, $state, $city, $org, $orgunit, $cn,$email);
+my $conf = &build_ssl_config($cn);
+my $ctypeflag = $ctype eq "sha2" ? "-sha256" : "";
+my $out = &backquote_command(
+	"$cmd req -new -key $ktemp -out $ctemp $ctypeflag ".
+	"-subj ".quotemeta($subject)." -config $conf -reqexts v3_req ".
+	"-utf8 2>&1");
+if (!-r $ctemp || $?) {
+	return (0, $out);
+	}
+else {
+	return (1, $ctemp);
+	}
 }
 
 =head2 build_installed_modules(force-all, force-mod)
@@ -1947,7 +2308,8 @@ sub get_latest_webmin_version
 {
 my $file = &transname();
 my ($error, $version);
-&http_download($update_host, $update_port, '/', $file, \$error);
+&http_download($primary_host, $primary_port, '/', $file, \$error, undef, 0,
+	       undef, undef, 5);
 return (0, $error) if ($error);
 open(FILE, $file);
 while(<FILE>) {
@@ -1959,7 +2321,7 @@ while(<FILE>) {
 close(FILE);
 unlink($file);
 return $version ? (1, $version)
-		: (0, "No version number found at $update_host");
+		: (0, "No version number found at $primary_host");
 }
 
 =head2 filter_updates(&updates, [version], [include-third], [include-missing])
@@ -2014,6 +2376,476 @@ foreach my $u (@$allupdates) {
 	push(@updates, $u);
 	}
 return \@updates;
+}
+
+# get_clone_source(dir)
+# Given a module dir, returns the dir of its original
+sub get_clone_source
+{
+my ($dir) = @_;
+my $lnk = readlink(&module_root_directory($dir));
+return undef if (!$lnk);
+if ($lnk =~ /\/([^\/]+)$/) {
+	return $1;
+	}
+elsif ($lnk =~ /^[^\/ ]+$/) {
+	return $lnk;
+	}
+return undef;
+}
+
+# retry_http_download(host, port, etc..)
+# Calls http_download until it succeeds
+sub retry_http_download
+{
+my ($host, $port, $page, $dest, $error, $cbfunc, $ssl, $user, $pass,
+    $timeout, $osdn, $nocache, $headers) = @_;
+my $tries = 5;
+my $i = 0;
+my $tryerror;
+while($i < $tries) {
+	$tryerror = undef;
+	&http_download($host, $port, $page, $dest, \$tryerror, $cbfunc, $ssl, $user,
+		       $pass, $timeout, $osdn, $nocache, $headers);
+	if (!$tryerror) {
+		last;
+		}
+	$i++;
+	sleep($i);
+	}
+if ($tryerror) {
+	# Failed every time
+	if (ref($error)) {
+		$$error = $tryerror;
+		}
+	else {
+		&error($tryerror);
+		}
+	}
+}
+
+# list_twofactor_providers()
+# Returns a list of all supported providers, each of which is an array ref
+# containing an ID, name and URL for more info
+sub list_twofactor_providers
+{
+return ( [ 'totp', $text{'twofactor_totp'},
+	   'http://en.wikipedia.org/wiki/Google_Authenticator' ],
+	 [ 'authy', $text{'twofactor_authy'},
+	   'http://www.authy.com/' ] );
+}
+
+# show_twofactor_apikey_authy(&miniserv)
+# Returns HTML for the form for authy-specific provider inputs
+sub show_twofactor_apikey_authy
+{
+my ($miniserv) = @_;
+my $rv;
+$rv .= ui_table_row($text{'twofactor_apikey'},
+	ui_textbox("authy_apikey", $miniserv->{'twofactor_apikey'}, 40));
+return $rv;
+}
+
+# validate_twofactor_apikey_authy(&in, &miniserv)
+# Validates inputs from show_twofactor_apikey_authy, and stores them. Returns
+# undef if OK, or an error message on failure
+sub validate_twofactor_apikey_authy
+{
+my ($in, $miniserv) = @_;
+my $key = $in->{'authy_apikey'};
+my $test = $miniserv->{'twofactor_test'};
+$key =~ /^\S+$/ || return $text{'twofactor_eapikey'};
+my $host = $test ? "sandbox-api.authy.com" : "api.authy.com";
+my $port = $test ? 80 : 443;
+my $page = "/protected/xml/app/details?api_key=".&urlize($key);
+my $ssl = $test ? 0 : 1;
+my ($out, $err);
+&http_download($host, $port, $page, \$out, \$err, undef, $ssl, undef, undef,
+	       60, 0, 1);
+if ($err =~ /401/) {
+	return $text{'twofactor_eauthykey'};
+	}
+elsif ($err) {
+	return &text('twofactor_eauthy', $err);
+	}
+$miniserv->{'twofactor_apikey'} = $key;
+return undef;
+}
+
+# show_twofactor_form_authy(&webmin-user)
+# Returns HTML for a form for enrolling for Authy two-factor
+sub show_twofactor_form_authy
+{
+my ($user) = @_;
+my $rv;
+$rv .= &ui_table_row($text{'twofactor_email'},
+	&ui_textbox("email", undef, 40));
+$rv .= &ui_table_row($text{'twofactor_country'},
+	&ui_textbox("country", undef, 3));
+$rv .= &ui_table_row($text{'twofactor_phone'},
+	&ui_textbox("phone", undef, 20));
+return $rv;
+}
+
+# parse_twofactor_form_authy(&in, &user)
+# Parses inputs from show_twofactor_form_authy, and returns a hash ref with
+# enrollment details on success, or an error message on failure.
+sub parse_twofactor_form_authy
+{
+my ($in, $user) = @_;
+$in->{'email'} =~ /^\S+\@\S+$/ || return $text{'twofactor_eemail'};
+$in->{'country'} =~ s/^\+//;
+$in->{'country'} =~ /^\d{1,3}$/ || return $text{'twofactor_ecountry'};
+$in->{'phone'} =~ /^[0-9\- ]+$/ || return $text{'twofactor_ephone'};
+return { 'email' => $in->{'email'},
+	 'country' => $in->{'country'},
+	 'phone' => $in->{'phone'} };
+}
+
+# enroll_twofactor_authy(&details, &user)
+# Attempts to enroll a user for Authy two-factor. Returns undef on success and
+# sets twofactor_id in &user, or an error message on failure.
+sub enroll_twofactor_authy
+{
+my ($details, $user) = @_;
+my %miniserv;
+&get_miniserv_config(\%miniserv);
+my $host = $miniserv{'twofactor_test'} ? "sandbox-api.authy.com"
+				       : "api.authy.com";
+my $port = $miniserv{'twofactor_test'} ? 80 : 443;
+my $page = "/protected/xml/users/new?api_key=".
+	   &urlize($miniserv{'twofactor_apikey'});
+my $ssl = $miniserv{'twofactor_test'} ? 0 : 1;
+my $content = "user[email]=".&urlize($details->{'email'})."&".
+	      "user[country_code]=".&urlize($details->{'country'})."&".
+	      "user[cellphone]=".&urlize($details->{'phone'});
+my ($out, $err);
+&http_post($host, $port, $page, $content, \$out, \$err, undef, $ssl, undef,
+	   undef, 60, 0, 1);
+return $err if ($err);
+if ($out =~ /<id[^>]*>([^<]+)<\/id>/i) {
+	$user->{'twofactor_id'} = $1;
+	$user->{'twofactor_apikey'} = $miniserv{'twofactor_apikey'};
+	return undef;
+	}
+else {
+	return &text('twofactor_eauthyenroll',
+		     "<pre>".&html_escape($out)."</pre>");
+	}
+}
+
+# validate_twofactor_authy(id, token, apikey)
+# Checks the validity of some token for a user ID
+sub validate_twofactor_authy
+{
+my ($id, $token, $apikey) = @_;
+$id =~ /^\d+$/ || return $text{'twofactor_eauthyid'};
+$token =~ /^\d+$/ || return $text{'twofactor_eauthytoken'};
+my %miniserv;
+&get_miniserv_config(\%miniserv);
+my $host = $miniserv{'twofactor_test'} ? "sandbox-api.authy.com"
+				       : "api.authy.com";
+my $port = $miniserv{'twofactor_test'} ? 80 : 443;
+my $page = "/protected/xml/verify/$token/$id?api_key=".&urlize($apikey).
+	   "&force=true";
+my $ssl = $miniserv{'twofactor_test'} ? 0 : 1;
+my ($out, $err);
+&http_download($host, $port, $page, \$out, \$err, undef, $ssl, undef, undef,
+	       60, 0, 1);
+if ($err && $err =~ /401/) {
+	# Token rejected
+	return $text{'twofactor_eauthyotp'};
+	}
+elsif ($err) {
+	# Some other error
+	return $err;
+	}
+elsif ($out && $out =~ /<success[^>]*>([^<]+)<\/success>/i) {
+	if (lc($1) eq "true") {
+		# Worked!
+		return undef;
+		}
+	elsif ($out =~ /<message[^>]*>([^<]+)<\/message>/i) {
+		# Failed, but with a message
+		return $1;
+		}
+	else {
+		# Failed, not sure why
+		return $out;
+		}
+	}
+else {
+	# Unknown output
+	return $out;
+	}
+}
+
+# validate_twofactor_apikey_totp()
+# Checks that the needed Perl module for TOPT is installed.
+sub validate_twofactor_apikey_totp
+{
+my ($miniserv, $in) = @_;
+eval "use Authen::OATH";
+if ($@) {
+	return &text('twofactor_etotpmodule', 'Authen::OATH',
+	    "../cpan/download.cgi?source=3&cpan=Authen::OATH&mode=2&".
+	    "return=/$module_name/&returndesc=".&urlize($text{'index_return'}))
+	}
+return undef;
+}
+
+# show_twofactor_form_totp(&user)
+# Show form allowing the user to choose a twofactor secret
+sub show_twofactor_form_totp
+{
+my ($user) = @_;
+my $secret = $user->{'twofactor_id'};
+$secret = undef if ($secret !~ /^[A-Z0-9=]{16}$/i);
+my $rv;
+$rv .= &ui_table_row($text{'twofactor_secret'},
+	&ui_opt_textbox("totp_secret", $secret, 20, $text{'twofactor_secret1'},
+			$text{'twofactor_secret0'}));
+return $rv;
+}
+
+# parse_twofactor_form_totp(&in, &user)
+# Generate or use a secret key for this user
+sub parse_twofactor_form_totp
+{
+my ($in, $user) = @_;
+if ($in->{'totp_secret_def'}) {
+	$user->{'twofactor_id'} = &encode_base32(&generate_base32_secret());
+	}
+else {
+	$in{'totp_secret'} =~ /^[A-Z0-9=]{16}$/i ||
+		return $text{'twofactor_esecret'};
+	$user->{'twofactor_id'} = $in{'totp_secret'};
+	}
+return { };
+}
+
+# generate_base32_secret([length])
+# Returns a base-32 encoded secret of by default 10 bytes
+sub generate_base32_secret
+{
+my ($length) = @_;
+$length ||= 10;
+&seed_random();
+my $secret = "";
+while(length($secret) < $length) {
+	$secret .= chr(rand()*256);
+	}
+return $secret;
+}
+
+# enroll_twofactor_totp(&in, &user)
+# Generate a secret for this user, based-32 encoded
+sub enroll_twofactor_totp
+{
+my ($in, $user) = @_;
+$user->{'twofactor_id'} ||= &encode_base32(&generate_base32_secret());
+return undef;
+}
+
+# message_twofactor_totp(&user)
+# Returns HTML to display after a user enrolls
+sub message_twofactor_totp
+{
+my ($user) = @_;
+my $url = "https://chart.googleapis.com/chart".
+	  "?chs=200x200&chld=M|0&cht=qr&chl=otpauth://totp/".
+	  $user->{'name'}."%3Fsecret%3D".$user->{'twofactor_id'};
+my $rv;
+$rv .= &text('twofactor_qrcode', "<tt>$user->{'twofactor_id'}</tt>")."<p>\n";
+$rv .= "<img src='$url' border=0><p>\n";
+return $rv;
+}
+
+# validate_twofactor_totp(id, token, apikey)
+# Checks the validity of some token with google authenticator
+sub validate_twofactor_totp
+{
+my ($id, $token, $apikey) = @_;
+$id =~ /^[A-Z0-9=]+$/i || return $text{'twofactor_etotpid'};
+$token =~ /^\d+$/ || return $text{'twofactor_etotptoken'};
+eval "use Authen::OATH";
+if ($@) {
+	return &text('twofactor_etotpmodule2', 'Authen::OATH');
+	}
+my $secret = &decode_base32($id);
+my $oauth = Authen::OATH->new();
+my $now = time();
+foreach my $t ($now - 30, $now, $now + 30) {
+	my $expected = $oauth->totp($secret, $t);
+	return undef if ($expected eq $token);
+	}
+return $text{'twofactor_etotpmatch'};
+}
+
+# canonicalize_ip6(address)
+# Converts an address to its full long form. Ie. 2001:db8:0:f101::20 to
+# 2001:0db8:0000:f101:0000:0000:0000:0020
+sub canonicalize_ip6
+{
+my ($addr) = @_;
+return $addr if (!&check_ip6address($addr));
+my @w = split(/:/, $addr);
+my $idx = &indexof("", @w);
+if ($idx >= 0) {
+	# Expand ::
+	my $mis = 8 - scalar(@w);
+	my @nw = @w[0..$idx];
+	for(my $i=0; $i<$mis; $i++) {
+		push(@nw, 0);
+		}
+	push(@nw, @w[$idx+1 .. $#w]);
+	@w = @nw;
+	}
+foreach my $w (@w) {
+	while(length($w) < 4) {
+		$w = "0".$w;
+		}
+	}
+return lc(join(":", @w));
+}
+
+# list_visible_themes([current-theme])
+# Lists all themes the user should be able to use, possibly including their
+# current theme if one is set.
+sub list_visible_themes
+{
+my ($curr) = @_;
+my @rv;
+my %done;
+foreach my $theme (&list_themes()) {
+	my $iscurr = $curr && $theme->{'dir'} eq $curr;
+	next if (-l $root_directory."/".$theme->{'dir'} &&
+		 $theme->{'dir'} =~ /\d+$/ &&
+		 !$iscurr);
+	next if ($done{$theme->{'desc'}}++ && !$iscurr);
+	push(@rv, $theme);
+	}
+return @rv;
+}
+
+# apply_new_os_version(&info)
+# Update the Webmin and Usermin detected OS name and version
+sub apply_new_os_version
+{
+my %osinfo = %{$_[0]};
+
+# Do Webmin
+&lock_file("$config_directory/config");
+$gconfig{'real_os_type'} = $osinfo{'real_os_type'};
+$gconfig{'real_os_version'} = $osinfo{'real_os_version'};
+$gconfig{'os_type'} = $osinfo{'os_type'};
+$gconfig{'os_version'} = $osinfo{'os_version'};
+&write_file("$config_directory/config", \%gconfig);
+&unlock_file("$config_directory/config");
+
+# Do Usermin too, if installed and running an equivalent version
+if (&foreign_installed("usermin")) {
+	&foreign_require("usermin");
+	my %miniserv;
+	&usermin::get_usermin_miniserv_config(\%miniserv);
+	my @ust = stat("$miniserv{'root'}/os_list.txt");
+	my @wst = stat("$root_directory/os_list.txt");
+	if ($ust[7] == $wst[7]) {
+		# os_list.txt is the same, so we can assume the same OS codes
+		# are supported
+		my %uconfig;
+		&lock_file($usermin::usermin_config);
+		&usermin::get_usermin_config(\%uconfig);
+		$uconfig{'real_os_type'} = $osinfo{'real_os_type'};
+		$uconfig{'real_os_version'} = $osinfo{'real_os_version'};
+		$uconfig{'os_type'} = $osinfo{'os_type'};
+		$uconfig{'os_version'} = $osinfo{'os_version'};
+		&usermin::put_usermin_config(\%uconfig);
+		&unlock_file($usermin::usermin_config);
+		}
+	}
+}
+
+sub find_letsencrypt_cron_job
+{
+if (&foreign_check("webmincron")) {
+	&foreign_require("webmincron");
+	return &webmincron::find_webmin_cron($module_name,
+					     'renew_letsencrypt_cert');
+	}
+return undef;
+}
+
+# renew_letsencrypt_cert()
+# Called by cron to renew the last requested cert
+sub renew_letsencrypt_cert
+{
+my @doms = split(/\s+/, $config{'letsencrypt_doms'});
+my $webroot = $config{'letsencrypt_webroot'};
+my $mode = $config{'letsencrypt_mode'} || "web";
+my $size = $config{'letsencrypt_size'};
+if (!@doms) {
+	print "No domains saved to renew cert for!\n";
+	return;
+	}
+if (!$webroot) {
+	print "No webroot saved to renew cert for!\n";
+	return;
+	}
+elsif (!-d $webroot) {
+	print "Webroot $webroot does not exist!\n";
+	return;
+	}
+my ($ok, $cert, $key, $chain) = &request_letsencrypt_cert(\@doms, $webroot,
+							  undef, $size, $mode);
+if (!$ok) {
+	print "Failed to renew certificate : $cert\n";
+	return;
+	}
+
+# Copy into place
+my %miniserv;
+&lock_file($ENV{'MINISERV_CONFIG'});
+&get_miniserv_config(\%miniserv);
+
+&lock_file($miniserv{'keyfile'});
+&copy_source_dest($key, $miniserv{'keyfile'});
+&unlock_file($miniserv{'keyfile'});
+
+&lock_file($miniserv{'certfile'});
+&copy_source_dest($cert, $miniserv{'certfile'});
+&unlock_file($miniserv{'certfile'});
+
+if ($chain) {
+	&lock_file($miniserv{'extracas'});
+	&copy_source_dest($chain, $miniserv{'extracas'});
+	&unlock_file($miniserv{'extracas'});
+	}
+else {
+	delete($miniserv{'extracas'});
+	}
+&put_miniserv_config(\%miniserv);
+&unlock_file($ENV{'MINISERV_CONFIG'});
+&restart_miniserv(1);
+}
+
+# find_openssl_config_file()
+# Returns the full path to the OpenSSL config file, or undef if not found
+sub find_openssl_config_file
+{
+my %vconfig = &foreign_config("virtual-server");
+foreach my $p ($vconfig{'openssl_cnf'},		# Virtualmin module config
+	       "/etc/ssl/openssl.cnf",		# Debian and FreeBSD
+	       "/etc/openssl.cnf",
+               "/usr/local/etc/openssl.cnf",
+	       "/etc/pki/tls/openssl.cnf",	# Redhat
+	       "/opt/csw/ssl/openssl.cnf",	# Solaris CSW
+	       "/opt/csw/etc/ssl/openssl.cnf",	# Solaris CSW
+	       "/System/Library/OpenSSL/openssl.cnf", # OSX
+	      ) {
+	return $p if ($p && -r $p);
+	}
+return undef;
 }
 
 1;

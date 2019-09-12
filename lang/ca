@@ -62,6 +62,7 @@ modify=Modifica
 reset=Reinicia
 ok=Bé
 cancel=Cancel·la
+fail=Ha fallat
 helpsearch=Busca Documents...
 switch_remote_euser=L'usuari Unix $1 no existeix.
 programname=Webmin
@@ -123,19 +124,21 @@ help_eexec=$1 ha fallat: $2
 referer_title=Avís de Seguretat
 referer_warn=<b>Atenció!</b> Webmin ha detectat que el programa $2 és un enllaç a l'URL $1, que sembla ser que queda fora del servidor Webmin. Això pot ser un intent d'enganyar el servidor per tal que executi una ordre perillosa.
 referer_warn_unknown=<b>Atenció!</b> Webmin ha detectat que el programa $1 és un enllaç a un URL desconegut, que sembla ser que queda fora del servidor Webmin. Això pot ser un intent d'enganyar el servidor per tal que executi una ordre perillosa.
-referer_ok=Continua executant el programa Webmin
-referer_again=No tornis a mostrar aquest avís
-referer_eurl=URL original invàlid!
-referer_eself=referer_save.cgi no es pot enllaçar directament!
+referer_fix1=Si això és un enllaç legítim, pots permetre els enllaços des d'aquest URL tal i com segueix:<ul><li>Entra a Webmin normalment.<li>Ves al mòdul de <b>Configuració de Webmin</b>.<li>Fes clic a la icona de Referenciadors Fiables.<li>Introdueix el nom de host $1 al camp <b>Llocs Web fiables</b>, i fes clic a <b>Desa</b>.</ul>
+referer_fix2=Alternativament, pots configurar Webmin per que permeti aquest enllaç des de la línia d'ordres:<ul><li>Entra com a <tt>root</tt> i edita el fitxer <tt>/etc/webmin/config</tt>.<li>Afegeix-hi la línia <tt>referers=$1</tt> al final o, si ja existeix una línia <tt>referers</tt>, afegeix-hi <tt>$1</tt>.<li>Desa el fitxer.</ul>
+referer_fix3u=Assegura't que el teu navegador està configurat per enviar la informació del referenciador per tal que Webmin ho pugui verificar.
+referer_fix2u=Alternativament, pots configurar Webmin per permetre enllaços des de referenciadors desconeguts:<ul><li>Entra com a <tt>root</tt> i edita el fitxer <tt>/etc/webmin/config</tt>.<li>Busca la línia <tt>referers_none=1</tt> i canvia-la per <tt>referers_none=0</tt>.<li>Desa el fitxer.</ul><p>ATENCIÓ - això té l'efecte secundari d'obrir el sistema a atacs XSS reflectits i per tant no és recomanable!!
 
 session_header=Entrada a Webmin
 session_mesg=Per entrar al servidor Webmin de $1, has d'introduir un nom d'usuari i una contrasenya.
 session_mesg2=Per entrar, has d'introduir un nom d'usuari i una contrasenya.
 session_user=Usuari
 session_pass=Contrasenya
+session_twofactor=Testimoni de dos factors
 session_login=Entra
 session_clear=Neteja
 session_failed=L'entrada ha fallat. Prova-ho un altre cop, si et plau.
+session_twofailed=L'autenticació de dos factors ha fallat: $1
 session_logout=Has sortit amb èxit. Utilitza el formulari de sota per tornar a entrar.
 session_timed_out=La sessió s'ha cancel·lat després de $1 minuts d'inactivitat.
 session_save=Recorda la contrasenya
@@ -223,7 +226,7 @@ sday_6=Dss
 
 emodule=Accés denegat : L'usuari $1 no té permís per utilitzar el mòdul $2
 emodulecheck=El mòdul $1 no està disponible en aquest sistema
-elock_tries=No he pogut bloquejar el fitxer $1 després de $2 minuts
+elock_tries2=No he pogut bloquejar el fitxer $1 després de $2 minuts. Darrer error: $3
 
 skill_high=Expert
 skill_medium=Mitjà
@@ -301,6 +304,7 @@ ui_edate=Data invàlida
 ui_etime=Hora invàlida
 ui_paging=Mostrant les files $1 a $2 de $3
 ui_rowlabel=$2 a la fila $1:
+ui_filterbox=Tipus a filtrar...
 
 header_statusmsg=$1 ha entrat a $2 $3 el $4 ($5)
 
@@ -348,5 +352,17 @@ sql_eldapdriver=No s'ha pogut carregar el mòdul perl de LDAP
 sql_eldapconnect=No s'ha pogut connectar amb el servidor LDAP $1
 sql_eldaptls=No s'ha pogut iniciar el xifratge TLS per a LDAP: $1
 sql_eldaplogin=No s'ha pogut entrar al servidor LDAP com a $1: $2
+
+log_email_subject=Acció de Webmin a $1
+log_email_global=Acció global de Webmin
+log_email_desc=Aquest correu ha estat enviat per Webmin en resposta a l'acció d'un usuari.
+log_email_mod=Mòdul de Webmin: $1
+log_email_moddesc=Títol del mòodul: $1
+log_email_time=Acció efectuada a: $1
+log_email_system=Efectuada al sistema: $1
+log_email_user=Efectuada per l'usuari: $1
+log_email_script=Script de Webmin: $1
+log_email_session=ID de sessió: $1
+log_email_remote=Adreça del client: $1
 
 __norefs=1

@@ -1,9 +1,12 @@
 #!/usr/local/bin/perl
 # Command-line script to enable status collection
 
-$no_acl_check++;
-require 'system-status-lib.pl';
-$ARGV[0] eq 'none' || $ARGV[0] =~ /^[1-9][0-9]*$/ && $ARGV[0] <= 60 ||
+use strict;
+use warnings;
+our (%config);
+require './system-status-lib.pl';
+my $zero = @ARGV ? $ARGV[0] : '';
+$zero eq 'none' || $zero =~ /^[1-9][0-9]*$/ && $zero <= 60 ||
 	die "usage: enable-collection.pl none|<mins>";
 
 $config{'collect_interval'} = $ARGV[0];

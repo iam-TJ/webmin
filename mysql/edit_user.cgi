@@ -24,6 +24,19 @@ else {
 		}
 	}
 
+# Check if this is a Virtualmin-managed user
+if (!$in{'new'} && &foreign_check("virtual-server")) {
+	&foreign_require("virtual-server");
+	my $d = &virtual_server::get_domain_by("mysql_user", $u->[1],
+					       "parent", "");
+	$d ||= &virtual_server::get_domain_by("user", $u->[1],
+                                              "parent", "");
+	if ($d) {
+		print "<b>",&text('user_vwarning',
+			&virtual_server::show_domain_name($d)),"</b><p>\n";
+		}
+	}
+
 # Form header
 print &ui_form_start("save_user.cgi", "post");
 if ($in{'new'}) {
@@ -57,17 +70,18 @@ print &ui_table_row($text{'user_host'},
 			$text{'user_any'}));
 
 # User's permissions
-for($i=3; $i<=&user_priv_cols()+3-1; $i++) {
-	push(@opts, [ $i, $text{"user_priv$i"} ]);
-	push(@sel, $i) if ($u->[$i] eq 'Y');
+foreach my $f (&priv_fields('user')) {
+	push(@opts, $f);
+	push(@sel, $f->[0]) if ($u->[$fieldmap{$f->[0]}] eq 'Y');
 	}
 print &ui_table_row($text{'user_perms'},
 	&ui_select("perms", \@sel, \@opts, 10, 1, 1));
 
 # Various per-user limits
+$remote_mysql_version = &get_remote_mysql_version();
 foreach $f ('max_user_connections', 'max_connections',
 	    'max_questions', 'max_updates') {
-	if ($mysql_version >= 5 && $fieldmap{$f}) {
+	if ($remote_mysql_version >= 5 && $fieldmap{$f}) {
 		print &ui_table_row($text{'user_'.$f},
 			&ui_opt_textbox($f,
 				$u->[$fieldmap{$f}] || undef,
@@ -77,13 +91,15 @@ foreach $f ('max_user_connections', 'max_connections',
 	}
 
 # SSL needed?
-if ($mysql_version >= 5 && $fieldmap{'ssl_type'}) {
+if ($remote_mysql_version >= 5 && $fieldmap{'ssl_type'}) {
 	print &ui_table_row($text{'user_ssl'},
 		&ui_select("ssl_type", uc($u->[$fieldmap{'ssl_type'}]),
 			[ [ '', $text{'user_ssl_'} ],
 			  [ 'ANY', $text{'user_ssl_any'} ],
 			  [ 'X509', $text{'user_ssl_x509'} ] ],
 			1, 0, 1));
+	print &ui_table_row($text{'user_cipher'},
+		&ui_textbox("ssl_cipher", $u->[$fieldmap{'ssl_cipher'}], 80));
 	}
 
 print &ui_table_end();

@@ -1,13 +1,18 @@
 #!/usr/local/bin/perl
 # create_master.cgi
 # Create a new master zone
+use strict;
+use warnings;
+# Globals
+our (%access, %text, %in, %config);
 
 require './bind8-lib.pl';
 &ReadParse();
 &error_setup($text{'mcreate_err'});
 $access{'master'} || &error($text{'mcreate_ecannot'});
 $access{'ro'} && &error($text{'master_ero'});
-$conf = &get_config();
+my $conf = &get_config();
+my ($view, $viewname, $vconf);
 if ($in{'view'} ne '') {
 	$view = $conf->[$in{'view'}];
 	&can_edit_view($view) || &error($text{'master_eviewcannot'});
@@ -21,7 +26,7 @@ else {
 
 # validate inputs
 if ($in{'rev'}) {
-	local($ipv4);
+	my $ipv4;
 	($ipv4 = &check_net_ip($in{'zone'})) ||
 	    $config{'support_aaaa'} &&
 	    ($in{'zone'} =~ /^([\w:]+)(\/\d+)?$/ && &check_ip6address($1)) ||
@@ -54,7 +59,7 @@ $in{'expiry'} =~ /^\d+$/ ||
         &error(&text('master_eexpiry', $in{'expiry'}));
 $in{'minimum'} =~ /^\d+$/ ||
         &error(&text('master_eminimum', $in{'minimum'}));
-$base = $access{'dir'} ne '/' ? $access{'dir'} :
+my $base = $access{'dir'} ne '/' ? $access{'dir'} :
 	$config{'master_dir'} ? $config{'master_dir'} :
 				&base_directory($conf);
 $base =~ s/\/+$// if ($base ne '/');
@@ -63,14 +68,14 @@ if ($base !~ /^([a-z]:)?\//) {
 	$base = &base_directory()."/".$base;
 	}
 if ($in{'tmpl'}) {
-	for($i=0; $config{"tmpl_$i"}; $i++) {
-		@c = split(/\s+/, $config{"tmpl_$i"}, 3);
+	for(my $i=0; $config{"tmpl_$i"}; $i++) {
+		my @c = split(/\s+/, $config{"tmpl_$i"}, 3);
 		if ($c[1] eq 'A' && !$c[2] && !&check_ipaddress($in{'ip'})) {
 			&error($text{'master_eip'});
 			}
 		}
 	}
-foreach $z (&find("zone", $vconf)) {
+foreach my $z (&find("zone", $vconf)) {
 	if (lc($z->{'value'}) eq lc($in{'zone'})) {
 		&error($text{'master_etaken'});
 		}
@@ -89,10 +94,11 @@ else {
 					  $view ? $view->{'value'} : undef);
 	}
 -r &make_chroot($in{'file'}) && &error(&text('create_efile4', $in{'file'}));
+my @mips;
 if ($in{'onslave'}) {
 	@mips = split(/\s+/, $in{'mip'});
 	@mips || &error($text{'master_emips'});
-	foreach $m (@mips) {
+	foreach my $m (@mips) {
 		&check_ipaddress($m) || &error(&text('master_emip', $m));
 		}
 	}
@@ -109,12 +115,12 @@ if ($in{'onslave'}) {
 
 if ($config{'relative_paths'}) {
 	# Make path relative to BIND base directory
-	$bdir = &base_directory($conf);
+	my $bdir = &base_directory($conf);
 	$in{'file'} =~ s/^\Q$bdir\/\E//;
 	}
 
 # create the zone directive
-$dir = { 'name' => 'zone',
+my $dir = { 'name' => 'zone',
 	 'values' => [ $in{'zone'} ],
 	 'type' => 1,
 	 'members' => [ { 'name' => 'type',
@@ -125,16 +131,22 @@ $dir = { 'name' => 'zone',
 
 # Add also-notify for slaves
 if ($in{'onslave'}) {
-	@slaves = &list_slave_servers();
+	my @slaves = &list_slave_servers();
 	if (@slaves) {
-		$also = { 'name' => 'also-notify',
-			  'type' => 1,
-			  'members' => [ ] };
-		foreach $s (@slaves) {
+		my $also = { 'name' => 'also-notify',
+			     'type' => 1,
+			     'members' => [ ] };
+		my $allow = { 'name' => 'allow-transfer',
+			      'type' => 1,
+			      'members' => [ ] };
+		foreach my $s (@slaves) {
 			push(@{$also->{'members'}},
+                             { 'name' => &to_ipaddress($s->{'host'}) });
+			push(@{$allow->{'members'}},
                              { 'name' => &to_ipaddress($s->{'host'}) });
 			}
 		push(@{$dir->{'members'}}, $also);
+		push(@{$dir->{'members'}}, $allow);
 		push(@{$dir->{'members'}}, { 'name' => 'notify',
 					     'values' => [ 'yes' ] });
 		}
@@ -142,17 +154,13 @@ if ($in{'onslave'}) {
 
 # create the zone
 &create_zone($dir, $conf, $in{'view'});
-&set_ownership(&make_chroot($config{'named_conf'}));
 &webmin_log("create", "master", $in{'zone'}, \%in);
 
 &add_zone_access($in{'zone'});
 
-# Get the new zone's index
-$idx = &get_zone_index($in{'zone'}, $in{'view'});
-
 # Create on slave servers
 if ($in{'onslave'} && $access{'remote'}) {
-	@slaveerrs = &create_on_slaves($in{'zone'}, $mips[0],
+	my @slaveerrs = &create_on_slaves($in{'zone'}, $mips[0],
 			$in{'sfile_def'} == 1 ? "none" :
 			$in{'sfile_def'} == 2 ? undef : $in{'sfile'},
 			undef, $viewname);
@@ -163,6 +171,27 @@ if ($in{'onslave'} && $access{'remote'}) {
 		}
 	}
 
-&redirect("edit_master.cgi?index=$idx&view=$in{'view'}");
+# Automatically sign zone if required 
+if (&have_dnssec_tools_support() && $in{'enable_dt'}) {
+	my $err;
+	my $nsec3 = 0;
+	my $zone = &get_zone_name($in{'zone'},
+			$in{'view'} eq '' ? 'ANY' : $in{'view'});
 
+	if ($zone) {
+		if ($in{'dne'} eq "NSEC") {
+			$nsec3 = 0;
+		} elsif ($in{'dne'} eq "NSEC3") {
+			$nsec3 = 1;
+		} else {
+			&error($text{'dt_zone_edne'});
+		}
+
+		# Sign zone 
+		$err = &dt_sign_zone($zone, $nsec3);
+		&error($err) if ($err);
+	}
+}
+
+&redirect("edit_master.cgi?zone=$in{'zone'}&view=$in{'view'}");
 

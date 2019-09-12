@@ -41,8 +41,7 @@ if (@links) {
 			local ($type) = grep { $_->[0] eq $s->{'type'} }
 					     @servers::server_types;
 			print &ui_columns_row([
-				"<a href='edit_host.cgi?id=$h->{'id'}'>".
-				($s->{'host'} || &get_system_hostname())."</a>",
+				&ui_link("edit_host.cgi?id=$h->{'id'}",($s->{'host'} || &get_system_hostname())),
 				$s->{'desc'},
 				$h->{'version'},
 				$type->[1],
@@ -62,16 +61,16 @@ else {
 # Build common selectors
 @wgroups = &all_groups(\@hosts);
 $modsel2 = $modsel = "<select name=mod>\n";
-$modsel2 .= "<option value=''>$text{'index_gacl'}\n";
+$modsel2 .= "<option value=''>$text{'index_gacl'}</option>\n";
 foreach $m (&all_modules(\@hosts)) {
-	$modsel .= "<option value=$m->{'dir'}>$m->{'desc'}\n";
-	$modsel2 .= "<option value=$m->{'dir'}>$m->{'desc'}\n";
+	$modsel .= "<option value=$m->{'dir'}>$m->{'desc'}</option>\n";
+	$modsel2 .= "<option value=$m->{'dir'}>$m->{'desc'}</option>\n";
 	}
 $modsel .= "</select>\n";
 $modsel2 .= "</select>\n";
 $themesel = "<select name=theme>\n";
 foreach $t (&all_themes(\@hosts)) {
-	$themesel .= "<option value=$t->{'dir'}>$t->{'desc'}\n";
+	$themesel .= "<option value=$t->{'dir'}>$t->{'desc'}</option>\n";
 	}
 $themesel .= "</select>\n";
 
@@ -79,11 +78,11 @@ $themesel .= "</select>\n";
 print "<table width=100%><tr>\n";
 @addservers = grep { !$gothost{$_->{'id'}} } @servers;
 if (@addservers) {
-	print "<form action=add.cgi><td>\n";
+	print "<td><form action=add.cgi><td>\n";
 	print "<input type=submit name=add value='$text{'index_add'}'>\n";
 	print "<select name=server>\n";
 	foreach $s (@addservers) {
-		print "<option value=$s->{'id'}>",&server_name($s),"\n";
+		print "<option value=$s->{'id'}>",&server_name($s),"</option>\n";
 		}
 	print "</select>\n";
 	print "</td></form>\n";
@@ -94,14 +93,14 @@ else { print "<td></td>\n"; }
 # Show button for adding server group
 @groups = &servers::list_all_groups(\@servers);
 if (@groups) {
-	print "<form action=add.cgi><td align=right>\n";
+	print "<td align=right><form action=add.cgi>\n";
 	print "<input type=submit name=gadd value='$text{'index_gadd'}'>\n";
 	print "<select name=group>\n";
 	foreach $g (@groups) {
-		print "<option>$g->{'name'}\n";
+		print "<option>$g->{'name'}</option>\n";
 		}
 	print "</select>\n";
-	print "</td></form>\n";
+	print "</form></td>\n";
 	$formno++;
 	}
 else { print "<td></td>\n"; }
@@ -112,20 +111,18 @@ if (@hosts) {
 	print &ui_hr();
 	print &ui_subheading($text{'index_modules'});
 	print "<table width=100%><tr>\n";
-	print "<form action=edit_mod.cgi><td>\n";
+	print "<td><form action=edit_mod.cgi>\n";
 	print "<input type=submit value=\"$text{'index_edit'}\">\n";
 	print $modsel;
-	print "</td>\n";
-
-	print "<td align=right><input type=submit name=tedit value=\"$text{'index_tedit'}\">\n";
+	print "<input type=submit name=tedit value=\"$text{'index_tedit'}\">\n";
 	print $themesel;
-	print "</td></form></tr>\n";
+	print "</form></td></tr>\n";
 	$formno++;
 
-	print "<tr> <form action=refresh.cgi><td align=left colspan=2>\n";
+	print "<tr> <td align=left colspan=2><form action=refresh.cgi>\n";
 	print "<input type=submit value='$text{'index_refresh'}'>\n";
 	&create_on_input(undef, 1, 1);
-	print "</td></form>\n";
+	print "</form></td>\n";
 	$formno++;
 	print "</table><p>\n";
 

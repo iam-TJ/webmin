@@ -11,12 +11,13 @@ if (@files == 1 && !$access{'anyfile'} && $access{'noconfig'}) {
 	$onefile = 1;
 	}
 
-&ui_print_header("<tt>$in{'file'}</tt>", $text{'list_title'}, "", undef, 0,
-		 $onefile);
+$fmt = $text{'list_format_'.&get_config_fmt($in{'file'})};
+&ui_print_header("<tt>".&html_escape($in{'file'})."</tt> ($fmt)",
+		 $text{'list_title'}, "", undef, 0, $onefile);
 
 @pages = ( "vars", "dirs", "db", "session", "safe", "limits",
-	   "errors", "misc" );
-@links = map { "edit_${_}.cgi?file=".&urlize($in{'file'}) } @pages;
+	   "errors", "misc", "manual" );
+@links = map { "edit_${_}.cgi?file=".&urlize($in{'file'})."&oneini=1" } @pages;
 @titles = map { $text{$_."_title"} } @pages;
 @icons = map { "images/$_.gif" } @pages;
 &icons_table(\@links, \@titles, \@icons, 4);

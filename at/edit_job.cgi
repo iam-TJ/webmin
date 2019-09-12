@@ -1,11 +1,14 @@
 #!/usr/local/bin/perl
 # edit_job.cgi
 # Display a command for deletion
+use strict;
+use warnings;
+our (%access, %text, %in);
 
 require './at-lib.pl';
 &ReadParse();
-@jobs = &list_atjobs();
-($job) = grep { $_->{'id'} eq $in{'id'} } @jobs;
+my @jobs = &list_atjobs();
+my ($job) = grep { $_->{'id'} eq $in{'id'} } @jobs;
 $job || &error($text{'edit_ejob'});
 &can_edit_user(\%access, $job->{'user'}) || &error($text{'edit_ecannot'});
 
@@ -16,7 +19,7 @@ print &ui_hidden("id", $in{'id'});
 print &ui_table_start($text{'edit_header'}, "width=100%", 4);
 
 # Run as user
-@uinfo = getpwnam($job->{'user'});
+my @uinfo = getpwnam($job->{'user'});
 $uinfo[6] =~ s/,.*$//g;
 print &ui_table_row($text{'index_user'},
 	&html_escape($job->{'user'}).
@@ -39,8 +42,7 @@ else {
 	print &ui_table_row($text{'edit_shortcmd'},
 		"<pre>".&html_escape(
 		    join("\n", &wrap_lines($job->{'realcmd'}, 80)))."</pre>".
-		"<a href='edit_job.cgi?full=1&id=".&urlize($in{'id'})."'>".
-		$text{'edit_showfull'}."</a>", 3);
+		&ui_link("edit_job.cgi?full=1&id=".&urlize($in{'id'}), $text{'edit_showfull'}), 3);
 	}
 
 print &ui_table_end();

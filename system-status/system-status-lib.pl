@@ -1,11 +1,23 @@
 # Functions for collecting general system info
 
+use strict;
+use warnings;
+no warnings 'redefine';
 BEGIN { push(@INC, ".."); };
 eval "use WebminCore;";
 &init_config();
-$systeminfo_cron_cmd = "$module_config_directory/systeminfo.pl";
-$collected_info_file = "$module_config_directory/info";
-$historic_info_dir = "$module_config_directory/history";
+our ($module_config_directory, %config, %gconfig, $module_name,
+     $no_log_file_changes, $module_var_directory);
+our $systeminfo_cron_cmd = "$module_config_directory/systeminfo.pl";
+our $collected_info_file = "$module_config_directory/info";
+if (!-e $collected_info_file) {
+	$collected_info_file = "$module_var_directory/info";
+	}
+our $historic_info_dir = "$module_config_directory/history";
+if (!-e $historic_info_dir) {
+	$historic_info_dir = "$module_var_directory/history";
+	}
+our $get_collected_info_cache;
 
 # collect_system_info()
 # Returns a hash reference containing system information
@@ -15,7 +27,7 @@ my $info = { };
 
 if (&foreign_check("proc")) {
 	# CPU and memory
-	&foreign_require("proc", "proc-lib.pl");
+	&foreign_require("proc");
 	if (defined(&proc::get_cpu_info)) {
 		my @c = &proc::get_cpu_info();
 		$info->{'load'} = \@c;
@@ -43,7 +55,7 @@ if (&foreign_check("proc")) {
 # Disk space on local filesystems
 if (&foreign_check("mount")) {
 	&foreign_require("mount");
-	($info->{'disk_total'}, $info->{'disk_free'}) =
+	($info->{'disk_total'}, $info->{'disk_free'}, $info->{'disk_fs'}) =
 		&mount::local_disk_space();
 	}
 
@@ -52,28 +64,26 @@ if (&foreign_installed("package-updates") && $config{'collect_pkgs'}) {
 	&foreign_require("package-updates");
 	my @poss = &package_updates::list_possible_updates(2, 1);
 	$info->{'poss'} = \@poss;
+	$info->{'reboot'} = &package_updates::check_reboot_required();
 	}
 
 # CPU and drive temps
-my @cpu = &get_current_cpu_temps();
-$info->{'cputemps'} = \@cpu if (@cpu);
+if (!$config{'collect_notemp'} && defined(&proc::get_current_cpu_temps)) {
+	my @cpu = &proc::get_current_cpu_temps();
+	$info->{'cputemps'} = \@cpu if (@cpu);
+	}
 my @drive = &get_current_drive_temps();
 $info->{'drivetemps'} = \@drive if (@drive);
 
 # IO input and output
-if ($gconfig{'os_type'} =~ /-linux$/) {
-	local $out = &backquote_command("vmstat 1 2 2>/dev/null");
-	if (!$?) {
-		local @lines = split(/\r?\n/, $out);
-		local @w = split(/\s+/, $lines[$#lines]);
-		shift(@w) if ($w[0] eq '');
-		if ($w[8] =~ /^\d+$/ && $w[9] =~ /^\d+$/) {
-			# Blocks in and out
-			$info->{'io'} = [ $w[8], $w[9] ];
-
-			# CPU user, kernel, idle, io, vm
-			$info->{'cpu'} = [ @w[12..16] ];
-			}
+if (defined(&proc::get_cpu_io_usage)) {
+	my ($user, $kernel, $idle, $io, $vm, $bin, $bout) =
+		&proc::get_cpu_io_usage();
+	if (defined($bin)) {
+		$info->{'io'} = [ $bin, $bout ];
+		}
+	if (defined($user)) {
+		$info->{'cpu'} = [ $user, $kernel, $idle, $io, $vm ];
 		}
 	}
 
@@ -84,15 +94,23 @@ return $info;
 # Returns the most recently collected system information, or the current info
 sub get_collected_info
 {
-my $infostr = $config{'collect_interval'} eq 'none' ? undef :
-			&read_file_contents($collected_info_file);
-if ($infostr) {
-	my $info = &unserialise_variable($infostr);
-	if (ref($info) eq 'HASH' && keys(%$info) > 0) {
-		return $info;
+if ($get_collected_info_cache) {
+	# Already in RAM
+	return $get_collected_info_cache;
+	}
+my @st = stat($collected_info_file);
+my $i = $config{'collect_interval'} || 'none';
+if ($i ne 'none' && @st && $st[9] > time() - $i * 60 * 2) {
+	my $infostr = &read_file_contents($collected_info_file);
+	if ($infostr) {
+		my $info = &unserialise_variable($infostr);
+		if (ref($info) eq 'HASH' && keys(%$info) > 0) {
+			$get_collected_info_cache = $info;
+			}
 		}
 	}
-return &collect_system_info();
+$get_collected_info_cache ||= &collect_system_info();
+return $get_collected_info_cache;
 }
 
 # save_collected_info(&info)
@@ -100,9 +118,10 @@ return &collect_system_info();
 sub save_collected_info
 {
 my ($info) = @_;
-&open_tempfile(INFO, ">$collected_info_file");
-&print_tempfile(INFO, &serialise_variable($info));
-&close_tempfile(INFO);
+my $fh = "INFO";
+&open_tempfile($fh, ">$collected_info_file");
+&print_tempfile($fh, &serialise_variable($info));
+&close_tempfile($fh);
 }
 
 # refresh_possible_packages(&newpackages)
@@ -114,7 +133,7 @@ my %pkgs = map { $_, 1 } @$pkgs;
 my $info = &get_collected_info();
 if ($info->{'poss'} && &foreign_installed("package-updates")) {
 	&foreign_require("package-updates");
-	my @poss = &package_updates::list_possible_updates(2);
+	my @poss = &package_updates::list_possible_updates(1);
 	$info->{'poss'} = \@poss;
 	}
 &save_collected_info($info);
@@ -155,6 +174,7 @@ if (&foreign_check("net") && $gconfig{'os_type'} =~ /-linux$/) {
 	# Get the current byte count
 	my $rxtotal = 0;
 	my $txtotal = 0;
+	my @ifaces;
 	if ($config{'collect_ifaces'}) {
 		# From module config
 		@ifaces = split(/\s+/, $config{'collect_ifaces'});
@@ -162,12 +182,20 @@ if (&foreign_check("net") && $gconfig{'os_type'} =~ /-linux$/) {
 	else {
 		# Get list from net module
 		&foreign_require("net");
-		foreach my $i (&net::active_interfaces()) {
-			if ($i->{'virtual'} eq '' &&
-			    $i->{'name'} =~ /^(eth|ppp|wlan|ath|wlan)/) {
-				push(@ifaces, $i->{'name'});
+                if (defined(&net::active_interfaces)) {
+			foreach my $i (&net::active_interfaces()) {
+				my $v = defined($i->{'virtual'}) ?
+						$i->{'virtual'} : '';
+				if ($v eq '' &&
+				    $i->{'name'} =~ /^(eth|ppp|wlan|ath|wlan)/) {
+					push(@ifaces, $i->{'name'});
+					}
 				}
 			}
+		else {
+			# Not available on this OS?
+			@ifaces = ( "eth0" );
+                        }
 		}
 	my $ifaces = join(" ", @ifaces);
 	foreach my $iname (@ifaces) {
@@ -183,6 +211,7 @@ if (&foreign_check("net") && $gconfig{'os_type'} =~ /-linux$/) {
 
 	# Work out the diff since the last run, if we have it
 	my %netcounts;
+	my $now = time();
 	if (&read_file("$historic_info_dir/netcounts", \%netcounts) &&
 	    $netcounts{'rx'} && $netcounts{'tx'} &&
 	    $netcounts{'ifaces'} eq $ifaces &&
@@ -221,13 +250,13 @@ if ($temptotal) {
 	}
 
 # Get CPU temperature
-my ($temptotal, $tempcount);
+my ($ctemptotal, $ctempcount);
 foreach my $t (@{$info->{'cputemps'}}) {
-	$temptotal += $t->{'temp'};
-	$tempcount++;
+	$ctemptotal += $t->{'temp'};
+	$ctempcount++;
 	}
-if ($temptotal) {
-	push(@stats, [ "cputemp", $temptotal / $tempcount ]);
+if ($ctemptotal) {
+	push(@stats, [ "cputemp", $ctemptotal / $ctempcount ]);
 	}
 
 # Get IO blocks
@@ -295,6 +324,7 @@ return @rv;
 sub list_all_historic_collected_info
 {
 my ($start, $end) = @_;
+my %all;
 foreach my $f (&list_historic_stats()) {
 	my @rv = &list_historic_collected_info($f, $start, $end);
 	$all{$f} = \@rv;
@@ -322,6 +352,7 @@ my $first = <HISTORY>;
 $first || return (undef, undef);
 chop($first);
 my ($firsttime, $firstvalue) = split(" ", $first);
+my $last;
 seek(HISTORY, 2, -256) || seek(HISTORY, 0, 0);
 while(<HISTORY>) {
 	$last = $_;
@@ -356,20 +387,31 @@ sub setup_collectinfo_job
 &foreign_require("webmincron");
 my $step = $config{'collect_interval'};
 if ($step ne 'none') {
-	# Setup webmin cron (removing old classic cron job)
+	# Setup periodic webmin cron (removing old classic cron job)
 	$step ||= 5;
 	my $cron = { 'module' => $module_name,
 		     'func' => 'scheduled_collect_system_info',
 		     'interval' => $step * 60,
+		     'args' => [],
 		   };
 	&webmincron::create_webmin_cron($cron, $systeminfo_cron_cmd);
+
+	# Setup boot-time webmin cron
+	my $bcron = { 'module' => $module_name,
+		      'func' => 'scheduled_collect_system_info',
+		      'boot' => 1,
+		      'args' => ['boot'],
+		   };
+	&webmincron::create_webmin_cron($bcron);
 	}
 else {
-	# Delete webmin cron
-	my $cron = &webmincron::find_webmin_cron($module_name,
-					 'scheduled_collect_system_info');
-	if ($cron) {
-		&webmincron::delete_webmin_cron($cron);
+	# Delete webmin crons (regular and boot-time)
+	foreach (1..2) {
+		my $cron = &webmincron::find_webmin_cron(
+			$module_name, 'scheduled_collect_system_info');
+		if ($cron) {
+			&webmincron::delete_webmin_cron($cron);
+			}
 		}
 	}
 }
@@ -385,36 +427,17 @@ if (!$config{'collect_notemp'} &&
 	foreach my $d (&smart_status::list_smart_disks_partitions()) {
 		my $st = &smart_status::get_drive_status($d->{'device'}, $d);
 		foreach my $a (@{$st->{'attribs'}}) {
-			if ($a->[0] =~ /^Temperature\s+Celsius$/i &&
+			if (($a->[0] =~ /^Temperature\s+Celsius$/i ||
+			     $a->[0] =~ /^Airflow\s+Temperature\s+Cel/i) &&
 			    $a->[1] > 0) {
 				push(@rv, { 'device' => $d->{'device'},
-					    'temp' => int($a->[1]) });
+					    'temp' => int($a->[1]),
+					    'errors' => $st->{'errors'},
+					    'failed' => !$st->{'check'} });
+				last;
 				}
 			}
 		}
-	}
-return @rv;
-}
-
-# get_current_cpu_temps()
-# Returns a list of hashes containing core and temp keys
-sub get_current_cpu_temps
-{
-my @rv;
-if (!$config{'collect_notemp'} &&
-    $gconfig{'os_type'} =~ /-linux$/ && &has_command("sensors")) {
-	&open_execute_command(SENSORS, "sensors </dev/null 2>/dev/null", 1);
-	while(<SENSORS>) {
-		if (/Core\s+(\d+):\s+([\+\-][0-9\.]+)/) {
-			push(@rv, { 'core' => $1,
-				    'temp' => $2 });
-			}
-		elsif (/CPU:\s+([\+\-][0-9\.]+)/) {
-			push(@rv, { 'core' => 0,
-				    'temp' => $1 });
-			}
-		}
-	close(SENSORS);
 	}
 return @rv;
 }
@@ -439,7 +462,7 @@ $WebminCore::gconfig{'logfullfiles'} = 0;
 $no_log_file_changes = 1;
 &lock_file($collected_info_file);
 
-$info = &collect_system_info();
+my $info = &collect_system_info();
 if ($info) {
 	&save_collected_info($info);
 	&add_historic_collected_info($info, $start);

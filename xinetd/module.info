@@ -3,4 +3,3 @@ risk=low medium high
 desc=Network Services
 name=Xinetd
 longdesc=Edit servers handled by Xinetd, a replacement for inetd.
-desc_de=Netzwerk-Dienste

@@ -1,8 +1,6 @@
 #!/usr/local/bin/perl
 # Handles xml-rpc requests from arbitrary clients. Each is a call to a
 # function in a Webmin module. 
-# XXX special function for file transfer?
-# XXX command-line mode
 
 if (!$ENV{'GATEWAY_INTERFACE'}) {
 	# Command-line mode
@@ -15,14 +13,14 @@ if (!$ENV{'GATEWAY_INTERFACE'}) {
 	chop($pwd = `pwd`);
 	$0 = "$pwd/xmlrpc.pl";
 	$command_line = 1;
-	$< == 0 || die "xmlrpc.pl must be run as root";
+	$> == 0 || die "xmlrpc.cgi must be run as root";
 	}
-BEGIN { push(@INC, ".."); };
+BEGIN { push(@INC, "."); };
 use WebminCore;
 use POSIX;
 use Socket;
 $force_lang = $default_lang;
-$trust_unknown_referers = 1;
+$trust_unknown_referers = 2;	# Only trust if referer was not set
 &init_config();
 $main::error_must_die = 1;
 

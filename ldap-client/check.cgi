@@ -8,8 +8,25 @@ require './switch-lib.pl';
 # Get the user base
 print $text{'check_base'},"<br>\n";
 $conf = &get_config();
-$user_base = &find_svalue("nss_base_passwd", $conf) ||
-	     &find_svalue("base", $conf);
+
+@bases = &find_value("base", $conf);
+@scopes = &find_value("scope", $conf);
+
+if (&get_ldap_client() eq "nss") {
+	# Older LDAP config uses directives like nss_base_passwd, with
+	# the scope and filter separated by ?
+	$user_base = &find_svalue("nss_base_passwd", $conf) ||
+		     &find_svalue("base", $conf);
+	}
+else {
+	# Newer LDAP versions have a base starting with 'user', but fall back
+	# to the one with no DB
+	($user_base) = map { /^\S+\s+(\S+=*)/; $1 }
+		           grep { /^passwd\s/ } @bases;
+	if (!$user_base) {
+		($user_base) = grep { /^\S+=.*$/ } @bases;
+		}
+	}
 if (!$user_base) {
 	&print_problem(&text('check_ebase'));
 	goto END;
@@ -33,7 +50,12 @@ else {
 	}
 
 # Work out the scope
-$scope = &find_svalue("scope", $conf);
+if (&get_ldap_client() eq "nss") {
+	$scope = &find_svalue("scope", $conf);
+	}
+else {
+	($scope) = grep { /^\S+$/ } @scopes;
+	}
 if ($user_base =~ s/\?([^\?]*)(\?([^\?]*))?$//) {
 	$scope = $1;
 	}
@@ -61,7 +83,8 @@ else {
 print $text{'check_nss'},"<br>\n";
 $nss = &get_nsswitch_config();
 ($passwd) = grep { $_->{'name'} eq 'passwd' } @$nss;
-($ldapsrc) = grep { $_->{'src'} eq 'ldap' } @{$passwd->{'srcs'}};
+($ldapsrc) = grep { $_->{'src'} eq 'ldap' ||
+		    $_->{'src'} eq 'sss' } @{$passwd->{'srcs'}};
 if (!$ldapsrc) {
 	&print_problem($text{'check_enss'});
 	goto END;

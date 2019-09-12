@@ -9,6 +9,12 @@ require './webminlog-lib.pl';
 our (%text, %config, %gconfig, $webmin_logfile, %in, $in);
 &foreign_require("acl", "acl-lib.pl");
 &ReadParse();
+if ($in{'search'}) {
+	# Re-parse args from search param
+	$ENV{'QUERY_STRING'} = $in{'search'};
+	%in = ();
+	&ReadParse(\%in, 'GET');
+	}
 &error_setup($text{'search_err'});
 
 # Use sensible defaults
@@ -54,7 +60,7 @@ else {
 	}
 
 if ($in{'csv'}) {
-	print "Content-type: text/csv\n\n";
+	&PrintHeader(undef, "text/csv");
 	}
 else {
 	&ui_print_header(undef, $text{'search_title'}, "");
@@ -68,6 +74,8 @@ open(LOG, $webmin_logfile);
 while(my ($id, $idx) = each %index) {
 	my ($pos, $time, $user, $module, $sid) = split(/\s+/, $idx);
 	$time ||= 0;
+	$module ||= "";
+	$sid ||= "";
 	if (($in{'uall'} == 1 ||
 	     $in{'uall'} == 0 && $in{'user'} eq $user ||
 	     $in{'uall'} == 3 && $in{'ouser'} eq $user ||
@@ -80,6 +88,7 @@ while(my ($id, $idx) = each %index) {
 		seek(LOG, $pos, 0);
 		my $line = <LOG>;
 		my $act = &parse_logline($line);
+		next if (!$act);
 
 		# Check Webmin server
 		next if (!$in{'wall'} && $in{'webmin'} ne $act->{'webmin'});
@@ -103,6 +112,14 @@ while(my ($id, $idx) = each %index) {
 			}
 		next if (!&can_user($act->{'user'}));
 		next if (!&can_mod($act->{'module'}));
+
+		# Check description
+		if (defined($in{'desc'}) && $in{'desc'} =~ /\S/) {
+			my $desc = &get_action_description($act, $in{'long'});
+			$desc =~ s/<[^>]+>//g;
+			next if ($desc !~ /\Q$in{'desc'}\E/i);
+			}
+
 		push(@match, $act);
 		}
 	}
@@ -126,7 +143,9 @@ my $searchmsg = join(" ",
 		 "<tt>".&html_escape($minfo{'desc'})."</tt>"),
 	$in{'tall'} ? '' : 
 	  $fromstr eq $tostr ? &text('search_critt2', $tostr) :
-	    &text('search_critt', $fromstr, $tostr));
+	    &text('search_critt', $fromstr, $tostr),
+	$in{'desc'} ? &text('search_critd', &html_escape($in{'desc'}))
+		    : "");
 
 my %minfo_cache;
 if ($in{'csv'}) {
@@ -191,15 +210,18 @@ elsif (@match) {
 		my @cols;
 		my $desc = &get_action_description($act, $in{'long'});
 		my $anno = &get_annotation($act);
-		push(@cols, "<a href='view.cgi?id=$act->{'id'}".
+		push(@cols, &ui_link("view.cgi?id=$act->{'id'}".
 		      "&return=".&urlize($in{'return'} || "").
 		      "&returndesc=".&urlize($in{'returndesc'} || "").
-		      "&search=".&urlize($in || "").
-		      "'>$desc</a>");
+		      "&file=".($in{'fall'} ? "" : &urlize($in{'file'})).
+		      "&search=".&urlize($in || ""),
+		      &filter_javascript($desc)) );
 		if ($anno) {
 			$cols[$#cols] .= "&nbsp;<img src=images/star.gif>";
 			}
-		push(@cols, $minfo->{'desc'}, $act->{'user'}, $act->{'ip'});
+		push(@cols, $minfo->{'desc'},
+			    &html_escape($act->{'user'}),
+			    &html_escape($act->{'ip'}));
 		if ($config{'host_search'}) {
 			push(@cols, $act->{'webmin'});
 			}
@@ -207,7 +229,8 @@ elsif (@match) {
 		print &ui_columns_row(\@cols);
 		}
 	print &ui_columns_end();
-	print "<a href='search.cgi/webminlog.csv?$in&csv=1'>$text{'search_csv'}</a><p>\n";
+	print &ui_link("search.cgi/webminlog.csv?$in&csv=1", $text{'search_csv'});
+    print "<p>\n";
 	}
 else {
 	# Tell the user that nothing matches
@@ -231,7 +254,7 @@ my $m = $in{"$_[0]_m"};
 my $y = $in{"$_[0]_y"};
 return 0 if (!$d && !$y);
 my $rv;
-eval { $rv = timelocal(0, 0, 0, $d, $m, $y-1900) };
+eval { $rv = timelocal(0, 0, 0, $d, $m-1, $y-1900) };
 &error($text{'search_etime'}) if ($@);
 return $rv;
 }

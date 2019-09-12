@@ -24,16 +24,16 @@ if (@queue) {
 		$e = $in{'start'} + $config{'perpage'} - 1;
 		$e = @queue-1 if ($e >= @queue);
 		if ($s) {
-			printf "<a href='list_queue.cgi?start=%d'>%s</a>\n",
-			    $s - $config{'perpage'},
-			    "<img src=/images/left.gif border=0 align=middle>";
+			print &ui_link("list_queue.cgi?start=".
+				       ($s - $config{'perpage'}),
+			    "<img src=/images/left.gif border=0 align=middle>");
 			}
 		print "<font size=+1>",&text('mail_pos', $s+1, $e+1,
 					     scalar(@queue)),"</font>\n";
 		if ($e < @queue-1) {
-			printf "<a href='list_queue.cgi?start=%d'>%s</a>\n",
-			    $s + $config{'perpage'},
-			    "<img src=/images/right.gif border=0 align=middle>";
+			print &ui_link("list_queue.cgi?start=".
+				       ($s + $config{'perpage'}),
+			   "<img src=/images/right.gif border=0 align=middle>");
 			}
 		print "</center>\n";
 		}
@@ -54,7 +54,8 @@ if (@queue) {
 		$q = $queue[$i];
 		print "<tr $cb>\n";
 		print "<td><input type=checkbox name=file value=$q->{'file'}></td>\n";
-		print "<td><a href='view_queue.cgi?file=$q->{'file'}'>$q->{'id'}</a></td>\n";
+		print "<td>".&ui_link("view_queue.cgi?file=$q->{'file'}",
+				      $q->{'id'})."</td>\n";
 		print "<td>$q->{'date'}</td>\n";
 		print "<td>",&html_escape($q->{'from'}),"</td>\n";
 		print "<td>",&html_escape($q->{'to'}),"</td>\n";

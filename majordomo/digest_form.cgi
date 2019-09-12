@@ -9,7 +9,7 @@ $access{'create'} || &error($text{'cdigest_ecannot'});
 
 $lists = "<select name=list>\n";
 foreach $l (&list_lists(&get_config())) {
-	$lists .= "<option>$l\n";
+	$lists .= "<option>$l</option>\n";
 	}
 $lists .= "</select>\n";
 
@@ -40,7 +40,8 @@ print <<EOF;
 	 <input type=radio name=mode value=1> $lines</td> </tr>
 
 </table></td></tr></table>
-<input type=submit value="$text{'create'}"></form>
+EOF
+print &ui_submit($text{'create'}),"</form>";
 EOF
 &ui_print_footer("", $text{'index_return'});
 

@@ -1,13 +1,4 @@
 desc=SMART Drive Status
 os_support=*-linux freebsd macos
 category=hardware
-longdesc=Check the status of IDE drives to detect problems and potential failures.
-desc_sk=SMART stav diskov
-desc_ca=Estat de les Unitats SMART
-desc_de=SMART Festplatten-Status
-desc_es=Estado de Dispositivos SMART
-desc_cz=SMART stav diskù
-desc_nl=SMART Drive Status
-desc_ru_SU=óÏÓÔÏÑÎÉÅ SMART ÄÉÓËÏ×
-desc_ru.UTF-8=Ğ¡Ğ¾ÑÑ‚Ğ¾ÑĞ½Ğ¸Ğµ SMART Ğ´Ğ¸ÑĞºĞ¾Ğ²
-desc_ru_RU=Ñîñòîÿíèå SMART äèñêîâ
+longdesc=Check the status of IDE and SATA drives to detect problems and potential failures.

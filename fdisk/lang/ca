@@ -1,4 +1,7 @@
 index_title=Administrador de Particions
+index_parted=Utilitzant <tt>parted</tt>
+index_fdisk=Utilitzant <tt>fdisk</tt>
+index_ecmd=Has seleccionat utilitzar l'ordre $1 per a la gestió de particions, però no està instal·lada al sistema.
 index_err=No s'han pogut llistar els discs
 index_disk=Disc
 index_parts=Particions
@@ -22,6 +25,11 @@ index_hdparm=Edita els paràmetres IDE
 index_hdparmdesc=Canvia la configuració d'una unitat IDE, com ara el mode DMA, temps límit d'inactivitat i nombre de sectors llegits.
 index_smart=Mostra l'estat SMART
 index_smartdesc=Mostra l'informe d'estat d'aquesta unitat, incloent-hi la temperatura i les freqüències d'errors.
+index_blink=Identifica la unitat
+index_relabel=Neteja les Particions
+index_relabeldesc=Suprimeix totes les particions existents i crea una nova taula de particions amb un format diferent.
+index_relabel2=Crea una Taula de Particions
+index_relabeldesc2=Crea una nova taula de particions buida en quest disc, de manera que s'hi puguin afegir particions.
 index_use=Utilitzat
 index_free=Lliure
 index_return=a la llista de discs
@@ -58,6 +66,8 @@ select_smart=Compaq Smart Array $1 unitat $2
 select_smartpart=Compaq Smart Array $1 unitat $2 partició $3
 select_promise=Unitat RAID Promise $1
 select_ppart=Unitat RAID Promise $1 partició $2
+select_nvme=Unitat $1 SSD NVME $2
+select_nvmepart=Unitat $1 SSD NVME $2 partició $3
 
 edit_title=Edició de Partició
 create_title=Creació de Partició
@@ -79,10 +89,12 @@ edit_mountvm=Muntat com a memòria virtual
 edit_umountvm=Per muntar com a memòria virtual
 edit_mountraid=Part del dispositiu RAID $1
 edit_mountlvm=Part del grup de volums $1 del LVM
+edit_mountiscsi=Dispositiu compartit iSCSI $1
 edit_notexist=Pendent de creació
 edit_notused=Sense utilitzar
 edit_size=Mida
-edit_label=Etiqueta de la partició
+edit_label=Etiqueta del sistema de fitxers
+edit_name=Nom de la partició
 edit_volid=ID del volum
 edit_blocks=$1 blocs
 edit_inuse=Aquesta partició no es pot canviar, ja que que està en ús o configurada per utilitzar.
@@ -175,7 +187,7 @@ msdos_F_other=Altres...
 msdos_i=ID del volum
 msdos_n=Nom del volum
 msdos_r=Entrades arrel
-msdos_s=Mida del cluster
+msdos_s=Mida del clúster
 msdos_c=Verifica els blocs dolents
 
 minix_n=Llargada dels noms de fitxers
@@ -190,7 +202,11 @@ xfs_force=Força la creació del sistema de fitxers
 xfs_b=Mida del bloc
 
 jfs_s=Mida del registre
-jfs_c=Verifica els blocks dolents
+jfs_c=Verifica els blocs dolents
+
+btrfs_l=Mida de la fulla
+btrfs_n=Mida del node
+btrfs_s=Mida del sector
 
 fatx_none=No hi ha cap opció disponible per als sistemes de fitxers FATX.
 
@@ -228,6 +244,10 @@ hdparm_buf1=Cau del buffer:
 hdparm_buf2=Amb buffer:
 hdparm_speedres=Resultats del test de velocitat
 
+blink_title=Identificació d'Unitat
+blink_desc=Ara el LED d'activitat de la unitat s'encendrà seixanta cops
+blink_back=Torna Enrere
+
 log_modify=S'ha modificat $1
 log_create=S'ha creat $1
 log_delete=S'ha suprimit $1
@@ -245,12 +265,13 @@ fs_ext3=Natiu Linux
 fs_ext4=Natiu Linux Nou
 fs_xfs=SGI
 fs_jfs=Fitxers de diari IBM
+fs_btrfs=BTR
 
 delete_title=Supressió de Partició
 delete_rusure=Segur que vols suprimir $1 ($2)? Les dades d'aquesta partició es perdran per sempre.
 delete_ok=Suprimeix-la Ara
 
-disk_title=Edicio de Particions de Disc
+disk_title=Edició de Particions de Disc
 disk_egone=El disc ja no existeix!
 disk_no=Número
 disk_type=Tipus
@@ -259,10 +280,26 @@ disk_start=Inici
 disk_end=Final
 disk_use=Utilitzada per a
 disk_free=Espai lliure
-disk_vm=Mamòria virtual
+disk_vm=Memòria virtual
+disk_iscsi=Dispositiu compartit iSCSI $1
 disk_none=Aquest disc encara no té cap partició.
 disk_size=Mida
 disk_dsize=<b>Mida del disc:</b> $1
 disk_model=<b>Fabricant i model:</b> $1
 disk_cylinders=<b>Cilindres:</b> $1
+disk_table=<b>Format de la taula de particions:</b> $1
+disk_notable=<b>Format de taula de particions:</b> No n'hi ha cap de creada
+disk_needtable=No es pot crear cap partició sense una taula de particions.
+disk_return=a la llista de particions
+
+relabel_title=Neteja de Particions
+relabel_warn=Segur que vols netejar totes les particions de $1 ($2) reescrivint l'etiqueta del disc? Es perdran totes les dades i tots els sistemes de fitxers!
+relabel_parts=Particions existents
+relabel_noparts=Encara no n'hi ha cap de creada
+relabel_table=Format de la taul de particions
+relabel_ok=Neteja i Reetiqueta
+
+table_msdos=MS-DOS (Format estàndard de particions)
+table_gpt=GPT (Per a discs de 2T o més grans)
+
 __norefs=1

@@ -11,7 +11,7 @@ if (@jobs) {
 	print &ui_form_start("delete_gjobs.cgi", "post");
 	@links = ( &select_all_link("d"),
 		   &select_invert_link("d"),
-		   "<a href='edit_gjob.cgi?new=1'>$text{'gjobs_add'}</a>" );
+		   &ui_link("edit_gjob.cgi?new=1",$text{'gjobs_add'}) );
 	print &ui_links_row(\@links);
 	@tds = ( "width=5", "width=40%", "width=20%", "width=20%",
 		 "width=20%" );
@@ -27,8 +27,7 @@ if (@jobs) {
 		$client = &is_oc_object($client);
 		$fileset = &find_value("FileSet", $f->{'members'});
 		print &ui_checked_columns_row([
-			"<a href='edit_gjob.cgi?name=".&urlize($name)."'>".
-			$name."</a>",
+			&ui_link("edit_gjob.cgi?name=".&urlize($name), $name),
 			$type || "<i>$text{'default'}</i>",
 			$client || "<i>$text{'default'}</i>",
 			$fileset || "<i>$text{'default'}</i>",
@@ -40,7 +39,7 @@ if (@jobs) {
 	}
 else {
 	print "<b>$text{'jobs_none'}</b><p>\n";
-	print "<a href='edit_gjob.cgi?new=1'>$text{'gjobs_add'}</a><br>\n";
+	print &ui_link("edit_gjob.cgi?new=1",$text{'gjobs_add'}),"<br>\n";
 	}
 
 &ui_print_footer("", $text{'index_return'});

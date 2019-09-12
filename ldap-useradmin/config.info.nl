@@ -22,6 +22,8 @@ group_fields=Extra LDAP groeps eigenschappen om bewerken toe te staan<br>van >(I
 multi_fields=Meerdere waardes toestaan voor extra eigenschappen?,1,1-Ja,0-Nee
 noclash=Attributen waar duplicaten niet voor zijn toegestaan,0
 person=Geef alle Unix gebruikers de <tt>person</tt> object class?,1,1-Ja,0-Nee
+user_filter=Extra LDAP filter voor gebruikers,3,Geen,,,,Attribute=waarde
+group_filter=Extra LDAP filter voor groepen,3,Geen,,,,Attribute=waarde
 line5=Home directory opties,11
 homedir_perms=Permissies op nieuwe home directory's,3,Van Gebruikers en Groepen module
 user_files=Kopieer files in nieuwe home directory's van,3,Van Gebruikers en Groepen module
@@ -30,7 +32,8 @@ home_style=Automatische home directory stijl,4,0,home/username,1,home/u/username
 line6=Nieuwe gebruiker opties,11
 base_uid=Laagste UID voor nieuwe gebruikers,3,Van Gebruikers en Groepen module
 base_gid=Laagste GID voor nieuwe groepen,3,Van Gebruikers en Groepen module
-md5=Encryptie methoden voor wachtwoorden,1,3-LDAP MD5,1-Unix MD5,0-crypt,2-Platte tekst,4-LDAP SSHA
+md5=Encryptie methoden voor wachtwoorden,1,3-LDAP MD5,1-Unix MD5,0-crypt,2-Platte tekst,4-LDAP SSHA,5-Unix SHA
+
 shells=Bouw een lijst van shells van,2,vaste ingebouwde lijst,paswd-Systeem gebruikers,shells-/etc/shells
 line7=Nieuwe gebruiker standaarden,11
 default_group=Standaard primaire groep voor nieuwe gebruikers,3,Van Gebruikers en Groepen module

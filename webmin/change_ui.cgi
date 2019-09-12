@@ -16,11 +16,12 @@ for($i=0; $i<@cs_names; $i++) {
 	else { $gconfig{$cd} = $in{$cd}; }
 	}
 
-$gconfig{'texttitles'} = $in{'texttitles'};
 $gconfig{'sysinfo'} = $in{'sysinfo'};
 $gconfig{'showlogin'} = $in{'showlogin'};
 $gconfig{'showhost'} = $in{'showhost'};
 $gconfig{'hostnamemode'} = $in{'hostnamemode'};
+$in{'hostnamemode'} != 3 || $in{'hostnamedisplay'} =~ /^[a-z0-9\.\_\-]+$/i ||
+	&error($text{'ui_ehostnamedisplay'});
 $gconfig{'hostnamedisplay'} = $in{'hostnamedisplay'};
 $gconfig{'feedback_to'} = $in{'feedback_def'} ? undef : $in{'feedback'};
 $gconfig{'nofeedbackcc'} = $in{'nofeedbackcc'};

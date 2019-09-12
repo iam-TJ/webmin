@@ -30,11 +30,11 @@ print &ui_tabs_start(\@tabs, "mode", $in{'mode'} || 'list', 1);
 # Build user list links
 @ulinks = ( );
 if ($access{'ugrace'}) {
-	push(@ulinks, "<a href='user_grace_form.cgi?filesys=".&urlize($f).
-		      "'>$text{'lusers_egrace'}</a>");
+	push(@ulinks, &ui_link("user_grace_form.cgi?filesys=".&urlize($f), $text{'lusers_egrace'}) );
 	}
-push(@ulinks, "<a href='check_quotas.cgi?filesys=".&urlize($f).
-	      "&source=user'>$text{'lusers_check'}</a>");
+if (!defined(&can_quotacheck) || &can_quotacheck($f)) {
+	push(@ulinks, &ui_link("check_quotas.cgi?filesys=".&urlize($f)."&source=user", $text{'lusers_check'}) );
+	}
 
 # Users list, in a tab
 print &ui_tabs_start_tab("mode", "list");
@@ -54,6 +54,21 @@ elsif ($n) {
 		print &ui_hidden('dir', $f),"\n";
 		}
 
+	# Generate summary of blocks and files used
+	($binfo, $finfo) = &filesystem_info($f, \%user, $n, $fsbsize);
+	$show_pc_hblocks = $threshold_pc != 101 &&
+			   $config{'pc_show'} >= 1;
+	$show_pc_sblocks = $threshold_pc != 101 &&
+			   $config{'pc_show'}%2 == 0;
+	print "<b>";
+	print $bsize ? $text{'lusers_space'}
+		     : $text{'lusers_blocks'};
+	print $access{'diskspace'} ? " ($binfo)" : "";
+	print "&nbsp;\n";
+	print $text{'lusers_files'};
+	print $access{'diskspace'} ? " ($finfo)" : "";
+	print "</b><br>\n";
+
 	# Generate select links
 	@links = ( &select_all_link("d", $form),
 		   &select_invert_link("d", $form),
@@ -62,34 +77,7 @@ elsif ($n) {
 		print &ui_links_row(\@links);
 		}
 
-	# Generate first header (with blocks and files)
-	local @hcols;
-	local @tds;
-	if (!$access{'ro'}) {
-		push(@hcols, "");
-		push(@tds, "width=5");
-		}
-	push(@hcols, "");
-	push(@tds, "");
-	($binfo, $finfo) = &filesystem_info($f, \%user, $n, $fsbsize);
-	$show_pc_hblocks = $threshold_pc != 101 &&
-			   $config{'pc_show'} >= 1;
-	$show_pc_sblocks = $threshold_pc != 101 &&
-			   $config{'pc_show'}%2 == 0;
-	$cols1 = 3 + ($show_pc_hblocks ? 1 : 0) +
-		     ($show_pc_sblocks ? 1 : 0) +
-		     ($config{'show_grace'} ? 1 : 0);
-	$cols2 = 3 + ($config{'show_grace'} ? 1 : 0);
-	push(@hcols, ($bsize ? $text{'lusers_space'} :
-			      $text{'lusers_blocks'}).
-		    ($access{'diskspace'} ? " ($binfo)" : ""));
-	push(@tds, "colspan=$cols1 align=center");
-	push(@hcols, $text{'lusers_files'}.
-		    ($access{'diskspace'} ? " ($finfo)" : ""));
-	push(@tds, "colspan=$cols2 align=center");
-	print &ui_columns_start(\@hcols, 100, 0, \@tds);
-
-	# Generate second header (with used/soft/hard)
+	# Generate header (with used/soft/hard)
 	local @hcols;
 	local @tds;
 	if (!$access{'ro'}) {
@@ -109,7 +97,7 @@ elsif ($n) {
 	push(@hcols, $text{'lusers_used'}, $text{'lusers_soft'},
 		    $text{'lusers_hard'},
 		    $config{'show_grace'} ? ( $text{'lusers_grace'} ) : ( ));
-	print &ui_columns_header(\@hcols, \@tds);
+	print &ui_columns_start(\@hcols, \@tds);
 
 	# Sort users
 	@order = (0 .. $n-1);
@@ -153,10 +141,9 @@ elsif ($n) {
 			push(@cols, $user{$i,'user'});
 			}
 		else {
-			push(@cols, "<a href=\"edit_user_quota.cgi?user=".
+			push(@cols, &ui_link("edit_user_quota.cgi?user=".
 				&urlize($user{$i,'user'})."&filesys=".
-				&urlize($f)."&source=0\">$user{$i,'user'}".
-				"</a>");
+				&urlize($f)."&source=0", $user{$i,'user'}) );
 			}
                 my $pc_hblocks=0;
                 my $pc_sblocks=0;
@@ -188,22 +175,22 @@ elsif ($n) {
 				push(@cols, &html_escape($pc_sblocks)."%");
 				}
 			}
-		local $ublocks = $user{$i,'ublocks'}; 
+		local $ublocks = $user{$i,'ublocks'};
 		if ($bsize) {
 			$ublocks = &nice_size($ublocks*$bsize);
 			}
 		if ($user{$i,'hblocks'} &&
 		    $user{$i,'ublocks'} > $user{$i,'hblocks'}) {
 			push(@cols, "<font color=#ff0000>".
-				&html_escape($ublocks)."</font>");
+				$ublocks."</font>");
 			}
 		elsif ($user{$i,'sblocks'} &&
 		       $user{$i,'ublocks'} > $user{$i,'sblocks'}) {
 			push(@cols, "<font color=#ff7700>".
-				&html_escape($ublocks)."</font>");
+				$ublocks."</font>");
 			}
 		else {
-			push(@cols, &html_escape($ublocks));
+			push(@cols, $ublocks);
 			}
 		push(@cols, &nice_limit($user{$i,'sblocks'}, $bsize));
 		push(@cols, &nice_limit($user{$i,'hblocks'}, $bsize));
@@ -228,7 +215,7 @@ elsif ($n) {
 		}
 	}
 else {
-	print "<b>",&text('lusers_noquota', $f),"</b><br>\n";
+	print "<b>",&text('lusers_noquota', $f),"</b><p>\n";
 	print &ui_links_row(\@ulinks);
 	}
 
@@ -321,4 +308,3 @@ if ($access{'email'} && &foreign_check("cron") &&
 print &ui_tabs_end(1);
 
 &ui_print_footer("", $text{'lusers_return'});
-

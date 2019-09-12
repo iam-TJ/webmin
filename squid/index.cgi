@@ -2,7 +2,10 @@
 # index.cgi
 # Display a menu of different kinds of options
 
+use strict;
+use warnings;
 require './squid-lib.pl';
+our (%in, %text, %config, %access, $module_name, $module_config_directory);
 
 # Check for the squid executable
 if (!&has_command($config{'squid_path'})) {
@@ -11,7 +14,7 @@ if (!&has_command($config{'squid_path'})) {
 		$module_name),"<p>\n";
 
 	&foreign_require("software", "software-lib.pl");
-	$lnk = &software::missing_install_link("squid", $text{'index_squid'},
+	my $lnk = &software::missing_install_link("squid", $text{'index_squid'},
 			"../$module_name/", $text{'index_header'});
 	print $lnk,"<p>\n" if ($lnk);
 
@@ -30,12 +33,20 @@ if (!-r $config{'squid_conf'}) {
 	}
 
 # Check the version number
-$fullver = $ver = `$config{'squid_path'} -v 2>&1`;
+my $ver = &backquote_command("$config{'squid_path'} -v 2>&1");
+my $fullver = $ver;
+if ($ver =~ /LUSCA/) {
+	# Special Squid variant, actually equivalent to 2.7
+	$ver = "Squid Cache: Version 2.7.STABLE.LUSCA.2012";
+	}
 if ($ver =~ /version\s+(\S+)/i) {
 	$ver = $1;
 	}
-if ($ver =~ /(1\.1)\.\d+/ || $ver =~ /(1)\.NOVM/ ||
-    $ver =~ /(2\.[01234567])\./ || $ver =~ /(3\.[01])/) {
+my $squid_version;
+if ($ver =~ /Version\s+([2-4]\.[0-9]+)/ ||
+    $ver =~ /^(1\.1)\.\d+/ ||
+    $ver =~ /^(1)\.NOVM/ ||
+    $ver =~ /^([2-4]\.[0-9]+)/) {
 	# Save version number
 	open(VERSION, ">$module_config_directory/version");
 	print VERSION $1,"\n";
@@ -44,7 +55,7 @@ if ($ver =~ /(1\.1)\.\d+/ || $ver =~ /(1)\.NOVM/ ||
 	}
 else {
 	&ui_print_header(undef, $text{'index_header'}, "", undef, 1, 1);
-	print &text('index_msgnosupported2', "<tt>1.1</tt>", "<tt>2.7</tt>"),
+	print &text('index_msgnosupported2', "<tt>1.1</tt>", "<tt>3.4</tt>"),
 	      "<p>\n";
 	print &text('index_squidver', "$config{'squid_path'} -v"),"\n";
 	print "<pre>$fullver</pre>\n";
@@ -53,8 +64,9 @@ else {
 	}
 
 # Check for the cache directory
-$conf = &get_config();
-if (!&check_cache($conf, \@caches)) {
+my $conf = &get_config();
+my @caches;
+if (!&check_cache($conf, \@caches, 1)) {
 	&ui_print_header(undef, $text{'index_header'}, "", undef, 1, 1);
 	print "<center>\n";
 	if (@caches > 1) {
@@ -64,10 +76,11 @@ if (!&check_cache($conf, \@caches)) {
 		print &text('index_msgnodir2', $caches[0]);
 		}
 	print $text{'index_msgnodir3'},"<br>\n";
-	print "<form action=init_cache.cgi>\n";
-	print "<input type=submit value=\"$text{'index_buttinit'}\">\n";
-	local $def = defined(getpwnam("squid")) ? "squid" :
-		     defined(getpwnam("httpd")) ? "httpd" : undef;
+	print &ui_form_start("init_cache.cgi");
+	print &ui_submit($text{'index_buttinit'});
+	my $def = defined(getpwnam("squid")) ? "squid" :
+		  defined(getpwnam("proxy")) ? "proxy" :
+		  defined(getpwnam("httpd")) ? "httpd" : undef;
 	if (!&find_config("cache_effective_user", $conf)) {
 		print $text{'index_asuser'}," ",&unix_user_input("user", $def),
 			"<p>\n";
@@ -75,9 +88,9 @@ if (!&check_cache($conf, \@caches)) {
 	else {
 		print "<input type=hidden name=nouser value=1>\n";
 		}
-	print "<input type=hidden name=caches value=\"",
-		join(" ",@caches),"\">\n";
-	print "</form></center>\n";
+	print &ui_hidden("caches", join(" ",@caches));
+	print &ui_form_end();
+	print "</center>\n";
 	print &ui_hr();
 	}
 else {
@@ -87,44 +100,45 @@ else {
 		undef, undef, &text('index_version', $squid_version));
 	}
 
-if ($squid_version < 2) {
-	$auth = 1;
+# Check if authentication is setup
+my $auth;
+if ($squid_version >= 2) {
+	my $file = &get_auth_file($conf);
+	$auth = 1 if ($file);
 	}
-else {
-	local $file = &get_auth_file($conf);
-	$auth = 2 if ($file);
-	}
-$calamaris = &has_command($config{'calamaris'});
-$delay = $squid_version >= 2.3;
-$authparam = $squid_version >= 2;
-$headeracc = $squid_version >= 2.5;
-$iptables = &foreign_check("firewall");
 
-@otitles = ( 'portsnets', 'othercaches', 'musage', 'logging',
-	     'copts', 'hprogs', 'actrl', 'admopts',
-	     ( $auth ? ( 'proxyauth' ) : ( ) ),
-	     ( $authparam ? ( 'authparam' ) : ( ) ),
-	     ( $delay ? ( 'delay' ) : ( ) ),
-	     ( $headeracc ? ( 'headeracc' ) : ( ) ),
-	     'refresh',
-	     'miscopt',
-	     ( $iptables ? ( 'iptables' ) : ( ) ),
-	     'cms', 'cachemgr', 'rebuild',
-	     ( $calamaris ? ( 'calamaris' ) : ( ) ) );
-@olinks =  ( "edit_ports.cgi", "edit_icp.cgi", "edit_mem.cgi",
-	     "edit_logs.cgi", "edit_cache.cgi", "edit_progs.cgi",
-	     "edit_acl.cgi", "edit_admin.cgi",
-	     ( $auth == 1 ? ( "edit_auth.cgi" ) :
-	       $auth == 2 ? ( "edit_nauth.cgi" ) : ( ) ),
-	     ( $authparam ? ( "edit_authparam.cgi" ) : ( ) ),
-	     ( $delay ? ( 'edit_delay.cgi' ) : ( ) ),
-	     ( $headeracc ? ( 'list_headeracc.cgi' ) : ( ) ),
-	     "list_refresh.cgi",
-	     "edit_misc.cgi",
-	     ( $iptables ? ( "edit_iptables.cgi" ) : ( ) ),
-	     "cachemgr.cgi", "edit_cachemgr.cgi", "clear.cgi",
-	     ( $calamaris ? ( "calamaris.cgi" ) : ( ) ) );
-for($i=0; $i<@otitles; $i++) {
+my $calamaris = &has_command($config{'calamaris'});
+my $delay = $squid_version >= 2.3;
+my $authparam = $squid_version >= 2;
+my $headeracc = $squid_version >= 2.5;
+my $iptables = &foreign_check("firewall");
+
+my @otitles = ( 'portsnets', 'othercaches', 'musage', 'logging',
+	        'copts', 'hprogs', 'actrl', 'admopts',
+	        ( $auth ? ( 'proxyauth' ) : ( ) ),
+	        ( $authparam ? ( 'authparam' ) : ( ) ),
+	        ( $delay ? ( 'delay' ) : ( ) ),
+	        ( $headeracc ? ( 'headeracc' ) : ( ) ),
+	        'refresh',
+	        'miscopt',
+	        ( $iptables ? ( 'iptables' ) : ( ) ),
+	        'cms', 'cachemgr', 'rebuild',
+	        ( $calamaris ? ( 'calamaris' ) : ( ) ),
+		'manual' );
+my @olinks =  ( "edit_ports.cgi", "edit_icp.cgi", "edit_mem.cgi",
+	        "edit_logs.cgi", "edit_cache.cgi", "edit_progs.cgi",
+	        "edit_acl.cgi", "edit_admin.cgi",
+	        ( $auth ? ( "edit_nauth.cgi" ) : ( ) ),
+	        ( $authparam ? ( "edit_authparam.cgi" ) : ( ) ),
+	        ( $delay ? ( 'edit_delay.cgi' ) : ( ) ),
+	        ( $headeracc ? ( 'list_headeracc.cgi' ) : ( ) ),
+	        "list_refresh.cgi",
+	        "edit_misc.cgi",
+	        ( $iptables ? ( "edit_iptables.cgi" ) : ( ) ),
+	        "cachemgr.cgi", "edit_cachemgr.cgi", "clear.cgi",
+	        ( $calamaris ? ( "calamaris.cgi" ) : ( ) ),
+	        "edit_manual.cgi" );
+for(my $i=0; $i<@otitles; $i++) {
 	if (!$access{$otitles[$i]}) {
 		splice(@otitles, $i, 1);
 		splice(@olinks, $i, 1);
@@ -134,24 +148,26 @@ for($i=0; $i<@otitles; $i++) {
 		$otitles[$i] = $text{'index_'.$otitles[$i]};
 		}
 	}
-@oicons =  map { $t=$_; $t=~s/cgi/gif/; $t=~s/edit_// if ($t ne 'edit_cachemgr.gif'); "images/$t" } @olinks;
+my @oicons = map { my $t = $_;
+		   $t =~ s/cgi/gif/;
+		   $t =~ s/edit_// if ($t ne 'edit_cachemgr.gif');
+		   "images/$t" } @olinks;
 &icons_table(\@olinks, \@otitles, \@oicons);
 
 # Show start/stop/apply buttons
 if ($config{'restart_pos'} != 1) {
 	print &ui_hr();
 	print &ui_buttons_start();
-	if ($pid = &is_squid_running()) {
+	if (my $pid = &is_squid_running()) {
 		if ($access{'restart'}) {
-			print &ui_buttons_row("restart.cgi", $text{'index_restart'},
+			print &ui_buttons_row("restart.cgi",
+					      $text{'index_restart'},
 					      $text{'index_restartdesc'},
-					      &ui_hidden("pid", $pid).
 					      &ui_hidden("redir", "index.cgi"));
 			}
 		if ($access{'start'}) {
 			print &ui_buttons_row("stop.cgi", $text{'index_stop'},
 					      $text{'index_stopdesc'},
-					      &ui_hidden("pid", $pid).
 					      &ui_hidden("redir", "index.cgi"));
 			}
 		}
@@ -166,4 +182,3 @@ if ($config{'restart_pos'} != 1) {
 	}
 
 &ui_print_footer("/", $text{'index_return'});
-

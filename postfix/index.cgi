@@ -25,11 +25,6 @@
 
 require './postfix-lib.pl';
 
-if (&has_command($config{'postfix_config_command'}) &&
-    &backquote_command("$config{'postfix_config_command'} mail_version 2>&1", 1) =~ /mail_version\s*=\s*(.*)/) {
-	# Got the version
-	$postfix_version = $1;
-	}
 &ui_print_header(undef, $text{'index_title'}, "", "intro", 1, 1, 0,
 	&help_search_link("postfix", "man", "doc", "google"),
 	undef, undef, $postfix_version ?
@@ -41,7 +36,7 @@ if (&has_command($config{'postfix_config_command'}) &&
 &close_tempfile(VERSION);
 
 # Verify the postfix control command
-if (!-x $config{'postfix_control_command'}) {
+if (!&valid_postfix_command($config{'postfix_control_command'})) {
 	print &text('index_epath',
 		"<tt>$config{'postfix_control_command'}</tt>",
 		"../config.cgi?$module_name"),"<p>\n";
@@ -57,7 +52,7 @@ if (!-x $config{'postfix_control_command'}) {
 	}
 
 # Verify the postfix config command
-if (!-x $config{'postfix_config_command'}) {
+if (!&valid_postfix_command($config{'postfix_config_command'})) {
 	print &text('index_econfig',
 		"<tt>$config{'postfix_config_command'}</tt>",
 		"../config.cgi?$module_name"),"<p>\n";
@@ -66,7 +61,7 @@ if (!-x $config{'postfix_config_command'}) {
 	}
 
 # Verify the postsuper command
-if (!-x $config{'postfix_super_command'}) {
+if (!&valid_postfix_command($config{'postfix_super_command'})) {
 	print &text('index_esuper',
 		"<tt>$config{'postfix_super_command'}</tt>",
 		"../config.cgi?$module_name"),"<p>\n";
@@ -85,7 +80,10 @@ if ($config{'index_check'} && ($err = &check_postfix())) {
 	exit;
 	}
 
-@onames =  ( "general", "address_rewriting", "aliases", "canonical", "virtual", "transport", "relocated", "header", "body", "bcc",
+@onames =  ( "general", "address_rewriting", "aliases", "canonical",
+	     "virtual", "transport", "relocated", "header", "body", "bcc",
+	     &compare_version_numbers($postfix_version, 2.7) > 0 ?
+	     	( "dependent" ) : ( ),
 	     "local_delivery", "resource",
 	     "smtpd", "smtp", "sasl", "client",
 	     "rate", "debug", $postfix_version > 2 ? ( ) : ( "ldap" ),
@@ -112,27 +110,23 @@ foreach $oitem (@onames)
 
 &icons_table(\@olinks, \@otitles, \@oicons);
 
+# Show start / stop / reload buttons
+if ($access{'startstop'}) {
+	print &ui_hr();
+	print &ui_buttons_start();
 
-if ($access{'startstop'})
-{
-    print &ui_hr();
-
-    if (&is_postfix_running())
-    {
-	print "<table cellpadding=5 width=100%><tr><td>\n";
-	print "<form action=stop.cgi>\n";
-	print "<input type=submit value=\"$text{'index_stop'}\">\n";
-	print "</td> <td>$text{'index_stopmsg'}\n";
-    }
-    else
-    {
-	print "<table cellpadding=5 width=100%><tr><td>\n";
-	print "<form action=start.cgi>\n";
-	print "<input type=submit value=\"$text{'index_start'}\">\n";
-	print "</td> <td>$text{'index_startmsg'}\n";
-    }
-    print "</td></tr></table></form>\n";
-}
+	if (&is_postfix_running()) {
+		print &ui_buttons_row("stop.cgi", $text{'index_stop'},
+                                      $text{'index_stopmsg'});
+		print &ui_buttons_row("reload.cgi", $text{'index_reload'},
+                                      $text{'index_reloadmsg'});
+		}
+	else {
+		print &ui_buttons_row("start.cgi", $text{'index_start'},
+                                      $text{'index_startmsg'});
+		}
+	print &ui_buttons_end();
+	}
 
 &ui_print_footer("/", $text{'index'});
 

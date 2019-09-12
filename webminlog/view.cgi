@@ -26,7 +26,7 @@ print &ui_hidden_table_start(&text('view_header', $act->{'id'}),
 
 # This "" is needed to make the label show properly!
 print &ui_table_row($text{'view_action'}."",
-		    &get_action_description($act, 1), 3);
+		    &filter_javascript(&get_action_description($act, 1)), 3);
 
 my %minfo = $act->{'module'} eq 'global' ?
 		( 'desc' => $text{'search_global'} ) :
@@ -43,14 +43,16 @@ else {
 	}
 
 print &ui_table_row($text{'view_user'},
-		    $act->{'user'});
+		    &html_escape($act->{'user'}));
 
 print &ui_table_row($text{'view_ip'},
-		    $act->{'ip'});
+		    &html_escape($act->{'ip'}));
 
 if ($act->{'sid'} ne '-') {
 	print &ui_table_row($text{'view_sid'},
-		"<a href='search.cgi?sid=$act->{'sid'}&uall=1&mall=1&tall=1&fall=1&return=".&urlize($in{'return'})."&returndesc=".&urlize($in{'returndesc'})."'>$act->{'sid'}</a>");
+		&ui_link("search.cgi?sid=$act->{'sid'}&uall=1&mall=1&tall=1&fall=1&return=".
+        &urlize($in{'return'})."&returndesc=".
+        &urlize($in{'returndesc'}), $act->{'sid'}) );
 	}
 
 print &ui_table_row($text{'view_time'}, &make_date($act->{'time'}));
@@ -120,20 +122,21 @@ foreach my $d (&list_diffs($act)) {
 	my $cbox = @files ?
 		&ui_checkbox("r", $d->{'object'}, "", $rb, undef, !$rb) : undef;
 	$rbcount++ if ($rb);
+	my $open = !$in{'file'} || $d->{'object'} eq $in{'file'};
 	if ($t =~ /\$2/ || !$d->{'diff'}) {
 		# Diff is just a single line message
 		$fhtml .= &ui_hidden_table_start($cbox.
 		      &text("view_type_".$d->{'type'},
 			    "<tt>$d->{'object'}</tt>",
 			    "<tt>".&html_escape($d->{'diff'})."</tt>"),
-		      "width=100%", 2, "diff$i", 1);
+		      "width=100%", 2, "diff$i", $open);
 		}
 	else {
 		# Show multi-line diff
 		$fhtml .= &ui_hidden_table_start(
 			$cbox.&text("view_type_".$d->{'type'},
 			            "<tt>$d->{'object'}</tt>"),
-			"width=100%", 2, "diff$i", 1);
+			"width=100%", 2, "diff$i", $open);
 		$fhtml .= &ui_table_row(undef,
 			"<pre>".&html_escape($d->{'diff'})."</pre>", 2);
 		if ($d->{'input'}) {
@@ -151,7 +154,7 @@ if ($rbcount) {
 	$fhtml .= &ui_links_row([ &select_all_link("r"),
 			          &select_invert_link("r") ]);
 	}
-print &ui_hidden_table_start($text{'view_files'}, "width=100%", 1, "files", 0);
+print &ui_hidden_table_start($text{'view_files'}, "width=100%", 1, "files", 1);
 $fhtml .= "<b>$text{'view_nofiles'}</b><p>\n" if (!$anydiffs);
 print &ui_table_row(undef, $fhtml, 2);
 print &ui_hidden_table_end("raw");
@@ -164,7 +167,8 @@ else {
 	print &ui_form_end();
 	}
 
-&ui_print_footer("search.cgi?$in{'search'}", $text{'search_return'},
+&ui_print_footer("search.cgi?search=".&urlize($in{'search'}),
+			$text{'search_return'},
 		 "", $text{'index_return'});
 
 

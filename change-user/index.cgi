@@ -23,18 +23,18 @@ print &ui_table_start(undef, undef, 2);
 
 if ($access{'lang'}) {
 	# Show personal language
-	my @langs = &list_languages();
 	my $glang = $gconfig{"lang"} || $default_lang;
+	my @langs = &list_languages($user->{'lang'} || $glang);
 	my ($linfo) = grep { $_->{'lang'} eq $glang } @langs;
 	print &ui_table_row($text{'index_lang'},
 		&ui_radio("lang_def", $user->{'lang'} ? 0 : 1,
-			  [ [ 1, &text('index_langglobal',
-				       $linfo->{'desc'})."<br>" ],
+			  [ [ 1, &text('index_langglobal2', $linfo->{'desc'},
+				       $linfo->{'lang'})."<br>" ],
 			    [ 0, $text{'index_langset'} ] ])." ".
 		&ui_select("lang", $user->{'lang'},
 			   [ map { [ $_->{'lang'},
 				     $_->{'desc'}." (".uc($_->{'lang'}).")" ] }
-			         &list_languages() ]));
+			         &list_languages() ]), undef, [ "valign=top","valign=top" ] );
 	}
 
 if ($access{'theme'}) {
@@ -48,7 +48,7 @@ if ($access{'theme'}) {
 	else {
 		$tname = $text{'index_themedef'};
 		}
-	my @all = &webmin::list_themes();
+	my @all = &webmin::list_visible_themes($user->{'theme'});
 	my @themes = grep { !$_->{'overlay'} } @all;
 	my @overlays = grep { $_->{'overlay'} } @all;
 
@@ -60,7 +60,7 @@ if ($access{'theme'}) {
 		&ui_select("theme", $user->{'theme'},
 			[ [ '', $text{'index_themedef'} ],
 			  map { [ $_->{'dir'}, $_->{'desc'} ] }
-			      @themes ]));
+			      @themes ]), undef, [ "valign=top","valign=top" ]);
 
 	# Overlay, if any
 	if (@overlays) {
@@ -68,7 +68,7 @@ if ($access{'theme'}) {
 			&ui_select("overlay", $user->{'overlay'},
 				[ [ '', $text{'index_overlaydef'} ],
 				  map { [ $_->{'dir'}, $_->{'desc'} ] }
-				      @overlays ]));
+				      @overlays ]), undef, [ "valign=middle","valign=middle" ]);
 		}
 	}
 
@@ -80,7 +80,7 @@ if ($access{'pass'} && &can_change_pass($user)) {
 			    [ 0, $text{'index_passset'} ] ])." ".
 		&ui_password("pass", undef, 20)." ".
 		$text{'index_passagain'}." ".
-		&ui_password("pass2", undef, 20));
+		&ui_password("pass2", undef, 20), undef, [ "valign=top","valign=middle" ]);
 	}
 
 print &ui_table_end();

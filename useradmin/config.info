@@ -4,7 +4,7 @@ user_files=Copy files into new home directories from,9,40,3
 home_base=Automatic home directory base,3,Not set
 real_base=Real home directory base,3,Same as above
 home_style=Automatic home directory style,4,0-home/username,1-home/u/username,2-home/u/us/username,3-home/u/s/username,4-Just base directory,5-home/primary_group/username
-selinux_con=SElinux context for new home directories,3,None
+selinux_con=SElinux context for new home directories,10,-None,*-System default
 
 line2=New user options,11
 base_uid=Lowest UID for new users,0,5
@@ -50,10 +50,13 @@ membox=Edit group members using,1,1-Text box,0-User selector
 line5=Password restrictions,11
 passwd_min=Minimum password length,3,No minimum
 passwd_dict=Prevent dictionary word passwords?,1,1-Yes,0-No
+dict_file=Files containing dictionary words,3,Use system defaults
 passwd_re=Perl regexp to check password against,3,None
+passwd_redesc=Human-readable description of regexp,3,Just use regexp
 passwd_same=Prevent passwords containing username?,1,1-Yes,0-No
 passwd_prog=External password-checking program,3,None
 passwd_progmode=Pass username and password to program,1,1-As input,0-As parameters
+passwd_mindays=Number of days before password change is allowed,3,None
 
 line0=Before and after commands,11
 pre_command=Command to run before making changes,0

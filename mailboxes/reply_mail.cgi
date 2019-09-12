@@ -27,6 +27,7 @@ if ($in{'new'}) {
 		$quote = "\n\n$sig" if ($sig);
 		}
 	$to = $in{'to'};
+	$main::force_charset = &get_charset();
 	&mail_page_header($text{'compose_title'}, undef,
 			  $html_edit ? "onload='xinha_init()'" : "",
 			  &folder_link($in{'user'}, $folder));
@@ -56,7 +57,18 @@ else {
 	# Find the body parts and set the character set
 	($textbody, $htmlbody, $body) =
 		&find_body($mail, $config{'view_html'});
-	$main::force_charset = &get_mail_charset($mail, $body);
+	$mail_charset = &get_mail_charset($mail, $body);
+	if (&get_charset() eq 'UTF-8' &&
+	    &can_convert_to_utf8(undef, $mail_charset)) {
+		# Convert to UTF-8
+		$body->{'data'} = &convert_to_utf8($body->{'data'},
+						   $mail_charset);
+		$main::force_charset = 'UTF-8';
+		}
+	else {
+		# Set the character set for the page to match email
+		$main::force_charset = $mail_charset;
+		}
 
 	if ($in{'delete'}) {
 		# Just delete the email
@@ -73,11 +85,11 @@ else {
 				[ &inputs_to_hiddens(\%in) ],
 				[ [ 'confirm', $text{'confirm_ok'} ] ],
 				);
-			&mail_page_footer("view_mail.cgi?idx=$in{'idx'}&folder=$in{'folder'}&user=$euser",
+			&mail_page_footer("view_mail.cgi?idx=$in{'idx'}&folder=$in{'folder'}&user=$euser&dom=$in{'dom'}",
 				$text{'view_return'},
-				"list_mail.cgi?folder=$in{'folder'}&user=$euser",
+				"list_mail.cgi?folder=$in{'folder'}&user=$euser&dom=$in{'dom'}",
 				$text{'mail_return'},
-				"", $text{'index_return'});
+				&user_list_link(), $text{'index_return'});
 			exit;
 			}
 		&lock_folder($folder);
@@ -86,7 +98,8 @@ else {
 		&webmin_log("delmail", undef, undef,
 			    { 'from' => $folder->{'file'},
 			      'count' => 1 } );
-		&redirect("list_mail.cgi?folder=$in{'folder'}&user=$euser");
+		&redirect("list_mail.cgi?folder=$in{'folder'}&user=$euser".
+			  "&dom=$in{'dom'}");
 		exit;
 		}
 	elsif ($in{'print'}) {
@@ -105,7 +118,8 @@ else {
 		&set_mail_read($folder, $mail, $mode);
 		$perpage = $folder->{'perpage'} || $config{'perpage'};
 		$s = int((@mails - $in{'idx'} - 1) / $perpage) * $perpage;
-		&redirect("list_mail.cgi?start=$s&folder=$in{'folder'}&user=$euser");
+		&redirect("list_mail.cgi?start=$s&folder=$in{'folder'}".
+			  "&user=$euser&dom=$in{'dom'}");
 		exit;
 		}
 	elsif ($in{'detach'}) {
@@ -175,9 +189,9 @@ else {
 					  "<tt>$paths[$i]</tt>", $sz),"<p>\n";
 			}
 
-		&mail_page_footer("view_mail.cgi?idx=$in{'idx'}&folder=$in{'folder'}&user=$euser", $text{'view_return'},
-			"list_mail.cgi?folder=$in{'folder'}&user=$euser", $text{'mail_return'},
-			"", $text{'index_return'});
+		&mail_page_footer("view_mail.cgi?idx=$in{'idx'}&folder=$in{'folder'}&user=$euser&dom=$in{'dom'}", $text{'view_return'},
+			"list_mail.cgi?folder=$in{'folder'}&user=$euser&dom=$in{'dom'}", $text{'mail_return'},
+			&user_list_link(), $text{'index_return'});
 		exit;
 		}
 	elsif ($in{'black'}) {
@@ -203,7 +217,7 @@ else {
 					  "<tt>$spamfrom</tt>"),"</b><p>\n";
 			}
 
-		&mail_page_footer("list_mail.cgi?folder=$in{'folder'}&user=$euser", $text{'mail_return'}, "", $text{'index_return'});
+		&mail_page_footer("list_mail.cgi?folder=$in{'folder'}&user=$euser&dom=$in{'dom'}", $text{'mail_return'}, &user_list_link(), $text{'index_return'});
 		exit;
 		}
 	elsif ($in{'razor'}) {
@@ -240,7 +254,7 @@ else {
 				}
 			}
 
-		&mail_page_footer("list_mail.cgi?folder=$in{'folder'}&user=$euser", $text{'mail_return'}, "", $text{'index_return'});
+		&mail_page_footer("list_mail.cgi?folder=$in{'folder'}&user=$euser&dom=$in{'dom'}", $text{'mail_return'}, &user_list_link(), $text{'index_return'});
 		exit;
 		}
 
@@ -264,7 +278,8 @@ else {
 		&lock_folder($folder);
 		&mailbox_modify_mail($mail, $newmail, $folder);
 		&unlock_folder($folder);
-		&redirect("list_mail.cgi?user=$euser&folder=$in{'folder'}");
+		&redirect("list_mail.cgi?user=$euser&folder=$in{'folder'}".
+			  "&dom=$in{'dom'}");
 		exit;
 		}
 
@@ -334,6 +349,7 @@ print &ui_form_start("send_mail.cgi?id=$upid", "form-data", undef, $onsubmit);
 
 # Output various hidden fields
 print &ui_hidden("user", $in{'user'});
+print &ui_hidden("dom", $in{'dom'});
 print &ui_hidden("ouser", $ouser);
 print &ui_hidden("idx", $in{'idx'});
 print &ui_hidden("folder", $in{'folder'});
@@ -430,10 +446,10 @@ print &ui_table_end();
 @bodylinks = ( );
 if ($in{'new'}) {
 	if ($html_edit) {
-		push(@bodylinks, "<a href='reply_mail.cgi?folder=$in{'folder'}&user=$euser&new=1&html=0'>$text{'reply_html0'}</a>");
+		push(@bodylinks, &ui_link("reply_mail.cgi?folder=$in{'folder'}&user=$euser&new=1&html=0",$text{'reply_html0'}));
 		}
 	else {
-		push(@bodylinks, "<a href='reply_mail.cgi?folder=$in{'folder'}&user=$euser&new=1&html=1'>$text{'reply_html1'}</a>");
+		push(@bodylinks, &ui_link("reply_mail.cgi?folder=$in{'folder'}&user=$euser&new=1&html=1",$text{'reply_html1'}));
 		}
 	}
 
@@ -441,26 +457,31 @@ if ($in{'new'}) {
 print &ui_table_start($text{'reply_body'}, "width=100%", 2, undef,
 		      &ui_links_row(\@bodylinks));
 if ($html_edit) {
-	# Output HTML editor textarea
-	print <<EOF;
-<script type="text/javascript">
-  _editor_url = "$gconfig{'webprefix'}/$module_name/xinha/";
-  _editor_lang = "en";
-</script>
-<script type="text/javascript" src="xinha/XinhaCore.js"></script>
+	if ($current_theme !~ /authentic-theme/) {
+		# Output HTML editor textarea
+		print <<EOF;
+	<script type="text/javascript">
+	  _editor_url = "$gconfig{'webprefix'}/$module_name/xinha/";
+	  _editor_lang = "en";
+	</script>
+	<script type="text/javascript" src="xinha/XinhaCore.js"></script>
 
-<script type="text/javascript">
-xinha_init = function()
-{
-xinha_editors = [ "body" ];
-xinha_plugins = [ ];
-xinha_config = new Xinha.Config();
-xinha_config.hideSomeButtons(" print showhelp about killword toggleborders ");
-xinha_editors = Xinha.makeEditors(xinha_editors, xinha_config, xinha_plugins);
-Xinha.startEditors(xinha_editors);
-}
-</script>
+	<script type="text/javascript">
+	xinha_init = function()
+	{
+	xinha_editors = [ "body" ];
+	xinha_plugins = [ ];
+	xinha_config = new Xinha.Config();
+	xinha_config.hideSomeButtons(" print showhelp about killword toggleborders ");
+	xinha_editors = Xinha.makeEditors(xinha_editors, xinha_config, xinha_plugins);
+	Xinha.startEditors(xinha_editors);
+	}
+	</script>
 EOF
+		}
+	else {
+	print '<script type="text/javascript">xinha_init = function(){}</script>';
+		}
 	print &ui_table_row(undef,
 		&ui_textarea("body", $quote, 40, 80, undef, 0,
 		  	     "style='width:99%' id=body"), 2);
@@ -509,9 +530,9 @@ if (@fwdmail) {
 
 print &ui_form_end([ [ undef, $text{'reply_send'} ] ]);
 
-&mail_page_footer("list_mail.cgi?folder=$in{'folder'}&user=$in{'user'}",
-	$text{'mail_return'},
-	"", $text{'index_return'});
+&mail_page_footer("list_mail.cgi?folder=$in{'folder'}&user=$in{'user'}".
+		  "&dom=$in{'dom'}", $text{'mail_return'},
+		  &user_list_link(), $text{'index_return'});
 
 sub decode_and_sub
 {
@@ -527,4 +548,3 @@ foreach $s (@sub) {
 	$mail = $amail;
 	}
 }
-

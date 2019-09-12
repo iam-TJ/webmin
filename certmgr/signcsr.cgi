@@ -15,7 +15,10 @@ if ($in{'submitted'} eq "sign") {
 	if (!$in{'signfile'}) {
 		$error.=$text{'signcsr_e_nosignfile'}."<br>\n";
 	}
-	if (!$in{'keyfile'} || !$in{'keycertfile'}) {
+	if (!$in{'cakeyfile'}) {
+		$error.=$text{'signcsr_e_nokeyfile'}."<br>\n";
+	}
+	if (!$in{'cacertfile'}) {
 		$error.=$text{'signcsr_e_nokeyfile'}."<br>\n";
 	}
 	if (!$error) {
@@ -27,13 +30,13 @@ if ($in{'submitted'} eq "sign") {
 		$config{'incsr_filename'}; }
 	if (!$in{'signfile'}) { $in{'signfile'}=$config{'ssl_cert_dir'}."/".
 		$config{'sign_filename'}; }
-	if (!$in{'keyfile'}) { $in{'keyfile'}=$config{'cakey_path'}; }
-	if (!$in{'keycertfile'}) { $in{'keycertfile'}=$config{'cacert_path'};}
+	if (!$in{'cacertfile'}) { $in{'cacertfile'}=$config{'cacert_path'}; }
+	if (!$in{'cakeyfile'}) { $in{'cakeyfile'}=$config{'cakey_path'}; }
 	if (!$in{'days'}) { $in{'days'}=$config{'default_days'}; }
 }
 
 if ($error) {
-        print "<hr> <b>$text{'signcsr_error'}</b>\n<ul>\n";
+        print &ui_hr()."<b>$text{'signcsr_error'}</b>\n<ul>\n";
         print "$error</ul>\n$text{'gencert_pleasefix'}\n";
 }
 
@@ -45,10 +48,12 @@ print &ui_hr();
 sub process{
 	&foreign_require("webmin", "webmin-lib.pl");
 	local %miniserv;
+    local ($tempdir, $des, $out, $url);
+    local $error=0;
 	&get_miniserv_config(\%miniserv);
 	if (!$miniserv{'ca'}) {
 		&webmin::setup_ca();
-		}
+	}
 	if ((-e $in{'signfile'})&&($in{'overwrite'} ne "yes")) {
 		&overwriteprompt();
 		print &ui_hr();
@@ -57,49 +62,72 @@ sub process{
 	}
 	$tempdir = &tempname();
 	mkdir($tempdir, 0700);
-	if ($in{'password'}){ $des="-passin pass:".quotemeta($in{'password'}); }
-	$out = `yes | $config{'openssl_cmd'} ca -in $in{'csrfile'} -out $in{'signfile'} -cert $in{'keycertfile'} -keyfile $in{'keyfile'} -outdir $tempdir -days $in{'days'} -config $config_directory/acl/openssl.cnf $des 2>&1`;
+    if (keyfile_is_encrypted($in{'cakeyfile'})) {
+        if ($in{'password'}) { $des="-passin pass:".quotemeta($in{'password'}); }
+        else {
+            print "<b>$text{'signcsr_e_signfailed'}</b>\n<pre>$text{'signcsr_e_nopassword'}</pre>\n";
+            print &ui_hr();
+            &footer("", $text{'index_return'});
+            exit;
+        }
+    }
+	$out = `yes | $config{'openssl_cmd'} ca -in $in{'csrfile'} -out $in{'signfile'} -cert $in{'cacertfile'} -keyfile $in{'cakeyfile'} -outdir $tempdir -days $in{'days'} -config $config{'ssl_cnf_file'} $des 2>&1`;
 
 	system("rm -rf $tempdir");
-	if (!-e $in{'csrfile'}) { 
+    if ($out =~ /^ERROR(.*$)/mi || $out =~ /:error:/mi) {
 		$error=$out;
 	} else{
 		$error=0;
 		chmod(0400,$in{'signfile'});
 	}
 	print &ui_hr();
-	if ($error){ print "<b>$text{'signcsr_e_signfailed'}</b>\n<pre>$error</pre>\n<hr>\n";}
+	if ($error){ print "<b>$text{'signcsr_e_signfailed'}</b>\n<pre>$error</pre>\n";}
 	else {
 		print "<b>$text{'signcsr_worked'}</b>\n<pre>$out</pre>\n";
-		$url="\"view.cgi?certfile=".&my_urlize($in{'signfile'}).'"';
-		print "<b>$text{'signcsr_saved_cert'} <a href=$url>$in{'signfile'}</a></b><br>\n";
-		print &ui_hr();
+		$url="view.cgi?certfile=".&my_urlize($in{'signfile'});
+		print "<b>$text{'signcsr_saved_cert'}: ".&ui_link($url,$in{'signfile'})."</b>";
 	}
+	print &ui_hr();
 	&footer("", $text{'index_return'});
 }
 
 sub overwriteprompt{
 	my($buffer1,$buffer2,$buffer,$key,$temp_pem,$url);
-	
-	print "<table>\n<tr valign=top>";
+    my $rv = "";
+    my $link = "";
+
 	if (-e $in{'signfile'}) {
 		open(OPENSSL,"$config{'openssl_cmd'} x509 -in $in{'signfile'} -text -fingerprint -noout|");
 		while(<OPENSSL>){ $buffer1.=$_; }
 		close(OPENSSL);
-		$url="\"view.cgi?certfile=".&my_urlize($in{'signfile'}).'"';
-		print "<td><table border><tr $tb><td align=center><b><a href=$url>$in{'signfile'}</a></b></td> </tr>\n<tr $cb> <td>\n";
-		if (!$buffer1) { print $text{'e_file'};}
-		else { &print_cert_info(0,$buffer1); }
-		print "</td></tr></table></td>\n";
+		$url="view.cgi?certfile=".&my_urlize($in{'signfile'});
+        $link = &ui_link($url,$in{'signfile'});
+        $rv = &ui_table_start($link, undef, 2);
+        $rv .= &ui_table_row(undef, (!$buffer1 ? $text{'e_file'} : &show_cert_info(0,$buffer1) ) );
 	}
-	print "</tr></table>\n";
-	print "$text{'gencert_moreinfo'}";
-	print "<hr>\n$text{'gencert_overwrite'}\n<p>\n";
-	
-	print "<form action=signcsr.cgi method=post>\n";
+
+    print "<br>";
+    print $rv;
+    print &ui_table_hr();
+    print &ui_table_row(undef,$text{'gencert_moreinfo'});
+    print &ui_table_row(undef,&ui_hr().$text{'gencert_overwrite'});
+    $rv = &ui_form_start("signcsr.cgi", "post");
 	foreach $key (keys %in) {
-		print "<input name=\"$key\" type=hidden value=\"$in{$key}\">\n";
+        $rv .= &ui_hidden($key,$in{$key});
 	}
-	print "<input name=overwrite value=\"yes\" type=hidden>\n";
-	print "<input type=submit value=\"$text{'continue'}\"></form>\n";
+    $rv .= &ui_hidden("overwrite","yes");
+    $rv .= &ui_submit($text{'continue'});
+    $rv .= &ui_form_end();
+    print &ui_table_row(undef,$rv);
+    print &ui_table_end();
+
+}
+
+sub keyfile_is_encrypted{
+    my $key=$_[0];
+    my $encrypted=0;
+    open(KFILE,$key)||return(0);
+    while(<KFILE>){ if (/^Proc.*ENCRYPTED.*$/mi) { $encrypted=1; last; } }
+	close(KFILE);
+    return($encrypted);
 }

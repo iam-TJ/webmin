@@ -6,14 +6,16 @@ require './logrotate-lib.pl';
 &ReadParse();
 $parent = &get_config_parent();
 $conf = $parent->{'members'};
+@files = split(/\s+/, $in{'file'});
 if ($in{'global'}) {
 	# Editing the global options
 	$log = $parent;
 	}
 elsif ($in{'new'}) {
 	# Adding a new section
+	$cfilename = $files[0] =~ /\/([^\/]+)$/ ? $1 : undef;
 	$log = { 'members' => [ ],
-		 'file' => &get_add_file() };
+		 'file' => &get_add_file($cfilename) };
 	$logfile = $in{'file'};
 	}
 else {
@@ -50,10 +52,10 @@ else {
 	&lock_file($log->{'file'});
 	&error_setup($text{'save_err'});
 	if (!$in{'global'}) {
-		@files = split(/\s+/, $in{'file'});
 		foreach $f (@files) {
 			$f =~ /^\/\S+$/ || &error($text{'save_efile'});
 			}
+		@files || &error($text{'save_enofiles'});
 		$in{'file'} =~ s/\r//g;
 		$log->{'name'} = [ split(/\n/, $in{'file'}) ];
 		}
@@ -66,6 +68,11 @@ else {
 	$in{'size_def'} || $in{'size'} =~ /^\d+[kM]?$/ ||
 		&error($text{'save_esize'});
 	&save_directive($log, "size", $in{'size_def'} ? undef : $in{'size'});
+
+	$in{'minsize_def'} || $in{'minsize'} =~ /^\d+[kM]?$/ ||
+		&error($text{'save_eminsize'});
+	&save_directive($log, "minsize",
+			$in{'minsize_def'} ? undef : $in{'minsize'});
 
 	$in{'rotate_def'} || $in{'rotate'} =~ /^\d+$/ ||
 		&error($text{'save_erotate'});
@@ -123,6 +130,8 @@ else {
 	$in{'ext_def'} || $in{'ext'} =~ /^\S+$/ ||
 		&error($text{'save_eext'});
 	&save_directive($log, "extension", $in{'ext_def'} ? undef : $in{'ext'});
+
+	&parse_yesno("dateext", "nodateext", $log);
 
 	if ($in{'mail'} == 2) {
 		$in{'mailto'} =~ /^\S+$/ || &error($text{'save_emailto'});

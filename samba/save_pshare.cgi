@@ -7,9 +7,21 @@ require './samba-lib.pl';
 &lock_file($config{'smb_conf'});
 &get_share($in{old_name}) if $in{old_name};
 
+if ($in{'view'}) {
+	# Redirect to view connections page
+	&redirect("view_users.cgi?share=".&urlize($in{'share'})."&printer=1");
+	exit;
+	}
+elsif ($in{'delete'}) {
+	# Redirect to delete form
+	&redirect("delete_share.cgi?share=".&urlize($in{'share'}).
+		  "&type=pshare");
+	exit;
+	}
+
 # check acls
 
-&error_setup("<blink><font color=red>$text{'eacl_aviol'}</font></blink>");
+&error_setup("$text{'eacl_aviol'}ask_epass.cgi");
 if ($in{old_name}) {
     &error("$text{'eacl_np'} $text{'eacl_pus'}") 
 		unless &can('rw', \%access, $in{old_name});
@@ -47,7 +59,7 @@ if ($name ne "global") {
 	elsif ($in{old_name} ne $name && $exists{$name}) {
 	        &error(&text('savepshare_exist', $name));
 	        }
-	elsif ($name !~ /^[A-Za-z0-9_\$\- ]+$/) {
+	elsif ($name !~ /^[A-Za-z0-9_\$\-\. ]+$/) {
 		&error(&text('savepshare_name', $name));
 		}
 	elsif ($name eq "global") {

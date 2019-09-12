@@ -2,6 +2,7 @@
 # Functions to parsing user mail files
 
 use POSIX;
+use Fcntl;
 if ($userconfig{'date_tz'} || $config{'date_tz'}) {
         # Set the timezone for all date calculations, and force a conversion
         # now as in some cases the first one fails!
@@ -20,6 +21,8 @@ sub list_mails
 {
 local (@rv, $h, $done);
 my %index;
+my $umf = &user_mail_file($_[0]);
+&open_as_mail_user(MAIL, $umf) || &error("Failed to open $umf : $!");
 &build_dbm_index($_[0], \%index);
 local ($start, $end);
 local $isize = $index{'mailcount'};
@@ -36,7 +39,6 @@ else {
 	}
 $rv[$isize-1] = undef if ($isize);	# force array to right size
 local $dash = &dash_mode($_[0]);
-open(MAIL, &user_mail_file($_[0]));
 $start = 0 if ($start < 0);
 for($i=$start; $i<=$end; $i++) {
 	# Seek to mail position
@@ -73,7 +75,7 @@ local $gotindex;
 
 local $umf = &user_mail_file($file);
 local $dash = &dash_mode($umf);
-open(MAIL, $umf);
+&open_as_mail_user(MAIL, $umf) || &error("Failed to open $umf : $!");
 foreach my $i (@$ids) {
 	local ($pos, $idx, $startline, $wantmid) = split(/ /, $i);
 
@@ -147,6 +149,8 @@ local $dash = &dash_mode($_[0]);
 local @possible;		# index positions of possible mails
 local $possible_certain = 0;	# is possible list authoratative?
 local ($min, $max);
+local $umf = &user_mail_file($_[0]);
+&open_as_mail_user(MAIL, $umf) || &error("Failed to open $umf : $!");
 
 # We have a DBM index .. if the search includes the from and subject
 # fields, scan it first to cut down on the total time
@@ -182,7 +186,6 @@ else {
 	}
 
 # Need to scan through possible messages to find those that match
-open(MAIL, &user_mail_file($_[0]));
 local $headersonly = !&matches_needs_body($_[1]);
 foreach $i (@possible) {
 	# Seek to mail position
@@ -214,17 +217,27 @@ return @rv;
 # Returns a list of all IDs
 sub build_dbm_index
 {
-local $ifile = &user_index_file($_[0]);
-local $umf = &user_mail_file($_[0]);
+local ($user, $index, $noperm) = @_;
+local $ifile = &user_index_file($user);
+local $umf = &user_mail_file($user);
 local @st = stat($umf);
-local $index = $_[1];
-dbmopen(%$index, $ifile, 0600);
+if (!defined($noperm)) {
+	# Use global override setting
+	$noperm = $no_permanent_index;
+	}
+if ($noperm && &has_dbm_index($user)) {
+	# Index already exists, so use it
+	$noperm = 0;
+	}
+if (!$noperm) {
+	dbmopen(%$index, $ifile, 0600);
+	}
 
 # Read file of IDs
 local $idsfile = $ifile.".ids";
 local @ids;
 local $idschanged;
-if (open(IDSFILE, $idsfile)) {
+if (!$noperm && open(IDSFILE, "<", $idsfile)) {
 	@ids = <IDSFILE>;
 	chop(@ids);
 	close(IDSFILE);
@@ -232,7 +245,7 @@ if (open(IDSFILE, $idsfile)) {
 
 if (scalar(@ids) != $index->{'mailcount'}) {
 	# Build for first time
-	print DEBUG "need meta-index rebuild for $_[0] ",scalar(@ids)," != ",$index->{'mailcount'},"\n";
+	print DEBUG "need meta-index rebuild for $user ",scalar(@ids)," != ",$index->{'mailcount'},"\n";
 	@ids = ( );
 	while(my ($k, $v) = each %$index) {
 		if ($k eq int($k) && $k < $index->{'mailcount'}) {
@@ -261,10 +274,10 @@ if (!@st ||
 	if ($st[7] < $dbm_index_min ||
 	    $index->{'version'} != $dbm_index_version) {
 		$fromok = 0;	# Always re-index
-		open(MAIL, $umf);
+		&open_as_mail_user(IMAIL, $umf);
 		}
 	else {
-		if (open(MAIL, $umf)) {
+		if (&open_as_mail_user(IMAIL, $umf)) {
 			# Check the last 100 messages (at most), to see if
 			# the mail file has been truncated, had mails deleted,
 			# or re-written.
@@ -272,8 +285,8 @@ if (!@st ||
 			local $i;
 			for($i=($il>100 ? 100 : $il); $i>=0; $i--) {
 				@idx = split(/\0/, $index->{$il-$i});
-				seek(MAIL, $idx[0], 0);
-				$ll = <MAIL>;
+				seek(IMAIL, $idx[0], 0);
+				$ll = <IMAIL>;
 				$fromok = 0 if ($ll !~ /^From\s+(\S+).*\d+\r?\n/ ||
 						($1 eq '-' && !$dash));
 				}
@@ -298,13 +311,13 @@ if (!@st ||
 		$istart = 0;
 		$pos = 0;
 		$lnum = 0;
-		seek(MAIL, 0, 0);
+		seek(IMAIL, 0, 0);
 		@ids = ( );
 		$idschanged = 1;
 		%$index = ( );
 		}
 	local ($doingheaders, @nidx);
-	while(<MAIL>) {
+	while(<IMAIL>) {
 		if (/^From\s+(\S+).*\d+\r?\n/ && ($1 ne '-' || $dash)) {
 			@nidx = ( $pos, $lnum );
 			$idschanged = 1;
@@ -331,7 +344,7 @@ if (!@st ||
 		$pos += length($_);
 		$lnum++;
 		}
-	close(MAIL);
+	close(IMAIL);
 	$index->{'lastchange'} = time();
 	$index->{'lastsize'} = $st[7];
 	$index->{'mailcount'} = $istart;
@@ -339,8 +352,8 @@ if (!@st ||
 	}
 
 # Write out IDs file, if needed
-if ($idschanged) {
-	open(IDSFILE, ">$idsfile");
+if ($idschanged && !$noperm) {
+	open(IDSFILE, ">", $idsfile);
 	foreach my $id (@ids) {
 		print IDSFILE $id,"\n";
 		}
@@ -361,21 +374,34 @@ foreach my $ext (".dir", ".pag", ".db") {
 return 0;
 }
 
+# delete_dbm_index(user|file)
+# Deletes all DBM indexes for a user or file
+sub delete_dbm_index
+{
+local $ifile = &user_index_file($_[0]);
+foreach my $ext (".dir", ".pag", ".db") {
+	&unlink_file($ifile.$ext);
+	}
+}
+
 # empty_mail(user|file)
 # Truncate a mail file to nothing
 sub empty_mail
 {
-local $umf = &user_mail_file($_[0]);
-local $ifile = &user_index_file($_[0]);
-open(TRUNC, ">$umf");
+local ($user) = @_;
+local $umf = &user_mail_file($user);
+local $ifile = &user_index_file($user);
+&open_as_mail_user(TRUNC, ">$umf") || &error("Failed to open $umf : $!");
 close(TRUNC);
 
-# Set index size to 0
-local %index;
-dbmopen(%index, $ifile, 0600);
-$index{'mailcount'} = 0;
-$index{'lastchange'} = time();
-dbmclose(%index);
+# Set index size to 0 (if there is one)
+if (&has_dbm_index($user)) {
+	local %index;
+	dbmopen(%index, $ifile, 0600);
+	$index{'mailcount'} = 0;
+	$index{'lastchange'} = time();
+	dbmclose(%index);
+	}
 }
 
 # count_mail(user|file)
@@ -462,7 +488,7 @@ if ($ct =~ /multipart\/(\S+)/i && ($ct =~ /boundary="([^"]+)"/i ||
 		if (lc($attach->{'header'}->{'content-transfer-encoding'}) eq
 		    'base64') {
 			# Standard base64 encoded attachment
-			$attach->{'data'} = &b64decode($attach->{'data'});
+			$attach->{'data'} = &decode_base64($attach->{'data'});
 			}
 		elsif (lc($attach->{'header'}->{'content-transfer-encoding'}) eq
 		       'x-uue') {
@@ -599,7 +625,7 @@ elsif (lc($_[0]->{'header'}->{'content-transfer-encoding'}) eq 'base64') {
 	$_[0]->{'attach'} = [ { 'type' => lc($ct),
 				'idx' => 0,
 				'parent' => $_[1],
-				'data' => &b64decode($_[0]->{'body'}) } ];
+				'data' => &decode_base64($_[0]->{'body'}) } ];
 	}
 elsif (lc($_[0]->{'header'}->{'content-type'}) eq 'x-sun-attachment') {
 	# Sun attachment format, which can contain several sections
@@ -634,7 +660,7 @@ else {
 	($type = $ct) =~ s/;.*$//;
 	$type = 'text/plain' if (!$type);
 	if (lc($_[0]->{'header'}->{'content-transfer-encoding'}) eq 'base64') {
-		$body = &b64decode($_[0]->{'body'});
+		$body = &decode_base64($_[0]->{'body'});
 		}
 	elsif (lc($_[0]->{'header'}->{'content-transfer-encoding'}) eq 
 	       'quoted-printable') {
@@ -686,8 +712,9 @@ local $tmpf = $< == 0 ? "$f.del" :
 if (-l $f) {
 	$f = &resolve_links($f);
 	}
-open(SOURCE, $f) || &error("Read failed : $!");
-open(DEST, ">$tmpf") || &error("Open of $tmpf failed : $!");
+&open_as_mail_user(SOURCE, $f) || &error("Failed to open $f : $!");
+&create_as_mail_user(DEST, ">$tmpf") ||
+	&error("Failed to open temp file $tmpf : $!");
 while(<SOURCE>) {
 	if ($i >= @m || $lnum < $m[$i]->{'line'}) {
 		# Within a range that we want to preserve
@@ -723,21 +750,29 @@ while(<SOURCE>) {
 close(SOURCE);
 close(DEST) || &error("Write to $tmpf failed : $?");
 local @st = stat($f);
-unlink($f) if ($< == 0);
 
 # Force a total index re-build (XXX lazy!)
 $index{'mailcount'} = $in{'lastchange'} = 0;
 dbmclose(%index);
 
 if ($< == 0) {
+	# Replace the mail file with the copy
+	unlink($f);
 	rename($tmpf, $f);
+	if (!&should_switch_to_mail_user()) {
+		# Since write was done as root, set back permissions on the
+		# mail file to match the original
+		chown($st[4], $st[5], $f);
+		chmod($st[2], $f);
+		}
+	else {
+		&chmod_as_mail_user($st[2], $f);
+		}
 	}
 else {
 	system("cat ".quotemeta($tmpf)." > ".quotemeta($f).
 	       " && rm -f ".quotemeta($tmpf));
 	}
-chown($st[4], $st[5], $f);
-chmod($st[2], $f);
 }
 
 # modify_mail(user|file, old, new, textonly)
@@ -760,8 +795,9 @@ local $tmpf = $< == 0 ? "$f.del" :
 if (-l $f) {
 	$f = &resolve_links($f);
 	}
-open(SOURCE, $f);
-open(DEST, ">$tmpf");
+&open_as_mail_user(SOURCE, $f) || &error("Failed to open $f : $!");
+&create_as_mail_user(DEST, ">$tmpf") ||
+	&error("Failed to open temp file $tmpf : $!");
 while(<SOURCE>) {
 	if ($lnum < $_[1]->{'line'} || $lnum > $_[1]->{'eline'}) {
 		# before or after the message to change
@@ -783,7 +819,7 @@ while(<SOURCE>) {
 		local $newsize = $nst[7] - $ost[7];
 		$sizediff = $newsize - $_[1]->{'size'};
 		$linesdiff = $nlines - ($_[1]->{'eline'} - $_[1]->{'line'} + 1);
-		open(DEST, ">>$tmpf");
+		&open_as_mail_user(DEST, ">>$tmpf");
 		}
 	$lnum++;
 	}
@@ -801,9 +837,18 @@ for($i=0; $i<$index{'mailcount'}; $i++) {
 	}
 $index{'lastchange'} = time();
 local @st = stat($f);
-unlink($f);
 if ($< == 0) {
+	unlink($f);
 	rename($tmpf, $f);
+	if (!&should_switch_to_mail_user()) {
+		# Since write was done as root, set back permissions on the
+		# mail file to match the original
+		chown($st[4], $st[5], $f);
+		chmod($st[2], $f);
+		}
+	else {
+		&chmod_as_mail_user($st[2], $f);
+		}
 	}
 else {
 	system("cat $tmpf >$f && rm -f $tmpf");
@@ -814,25 +859,29 @@ chmod($st[2], $f);
 
 # send_mail(&mail, [file], [textonly], [nocr], [smtp-server],
 #	    [smtp-user], [smtp-pass], [smtp-auth-mode],
-#	    [&notify-flags], [port])
+#	    [&notify-flags], [port], [use-ssl])
 # Send out some email message or append it to a file.
 # Returns the number of lines written.
 sub send_mail
 {
+local ($mail, $file, $textonly, $nocr, $sm, $user, $pass, $auth,
+       $flags, $port, $ssl) = @_;
 return 0 if (&is_readonly_mode());
-local (%header, $h);
 local $lnum = 0;
-local $sm = $_[4] || $config{'send_mode'};
-local $eol = $_[3] || !$sm ? "\n" : "\r\n";
-local $port = $_[9] || $config{'smtp_port'} || 25;
-foreach $h (@{$_[0]->{'headers'}}) {
-	$header{lc($h->[0])} = $h->[1];
+$sm ||= $config{'send_mode'};
+local $eol = $nocr || !$sm ? "\n" : "\r\n";
+$ssl = $config{'smtp_ssl'} if ($ssl eq '');
+local $defport = $ssl ? 465 : 25;
+$port ||= $config{'smtp_port'} || $defport;
+my %header;
+foreach my $head (@{$mail->{'headers'}}) {
+	$header{lc($head->[0])} = $head->[1];
 	}
 
 # Add the date header, always in english
 &clear_time_locale();
 local @tm = localtime(time());
-push(@{$_[0]->{'headers'}},
+push(@{$mail->{'headers'}},
      [ 'Date', strftime("%a, %d %b %Y %H:%M:%S %z (%Z)", @tm) ])
 	if (!$header{'date'});
 &reset_time_locale();
@@ -856,30 +905,50 @@ else {
 	$fromaddr = $uinfo[0] || "nobody";
 	$fromaddr .= '@'.&get_system_hostname();
 	}
-local $esmtp = $_[8] ? 1 : 0;
-if ($_[1]) {
+local $qfromaddr = quotemeta($fromaddr);
+local $esmtp = $flags ? 1 : 0;
+my $h = { 'fh' => 'mailboxes::MAIL' };
+if ($file) {
 	# Just append the email to a file using mbox format
-	open(MAIL, ">>$_[1]") || &error("Write failed : $!");
+	&open_as_mail_user($h->{'fh'}, ">>$file") ||
+		&error("Write failed : $!");
 	$lnum++;
-	print MAIL $_[0]->{'fromline'} ? $_[0]->{'fromline'}.$eol :
-					 &make_from_line($fromaddr).$eol;
+	&write_http_connection($h,
+		$mail->{'fromline'} ? $mail->{'fromline'}.$eol :
+				      &make_from_line($fromaddr).$eol);
 	}
 elsif ($sm) {
 	# Connect to SMTP server
-	&open_socket($sm, $port, MAIL);
-	&smtp_command(MAIL);
+	&open_socket($sm, $port, $h->{'fh'});
+	if ($ssl) {
+		# Switch to SSL mode
+		eval "use Net::SSLeay";
+		$@ && &error($text{'link_essl'});
+		eval "Net::SSLeay::SSLeay_add_ssl_algorithms()";
+		eval "Net::SSLeay::load_error_strings()";
+		$h->{'ssl_ctx'} = Net::SSLeay::CTX_new() ||
+			&error("Failed to create SSL context");
+		$h->{'ssl_con'} = Net::SSLeay::new($h->{'ssl_ctx'}) ||
+			&error("Failed to create SSL connection");
+		Net::SSLeay::set_fd($h->{'ssl_con'}, fileno($h->{'fh'}));
+		Net::SSLeay::connect($h->{'ssl_con'}) ||
+			&error("SSL connect() failed");
+		}
+
+	&smtp_command($h, undef, 0);
+	my $helo = $config{'helo_name'} || &get_system_hostname();
 	if ($esmtp) {
-		&smtp_command(MAIL, "ehlo ".&get_system_hostname()."\r\n");
+		&smtp_command($h, "ehlo $helo\r\n", 0);
 		}
 	else {
-		&smtp_command(MAIL, "helo ".&get_system_hostname()."\r\n");
+		&smtp_command($h, "helo $helo\r\n", 0);
 		}
 
 	# Get username and password from parameters, or from module config
-	local $user = $_[5] || $userconfig{'smtp_user'} || $config{'smtp_user'};
-	local $pass = $_[6] || $userconfig{'smtp_pass'} || $config{'smtp_pass'};
-	local $auth = $_[7] || $userconfig{'smtp_auth'} ||
-		      $config{'smtp_auth'} || "Cram-MD5";
+	$user ||= $userconfig{'smtp_user'} || $config{'smtp_user'};
+	$pass ||= $userconfig{'smtp_pass'} || $config{'smtp_pass'};
+	$auth ||= $userconfig{'smtp_auth'} ||
+		  $config{'smtp_auth'} || "Cram-MD5";
 	if ($user) {
 		# Send authentication commands
 		eval "use Authen::SASL";
@@ -893,7 +962,7 @@ elsif ($sm) {
 						'pass' => $pass } );
 		&error("Failed to create Authen::SASL object") if (!$sasl);
 		local $conn = $sasl->client_new("smtp", &get_system_hostname());
-		local $arv = &smtp_command(MAIL, "auth $auth\r\n", 1);
+		local $arv = &smtp_command($h, "auth $auth\r\n", 1);
 		if ($arv =~ /^(334)\s+(.*)/) {
 			# Server says to go ahead
 			$extra = $2;
@@ -902,7 +971,7 @@ elsif ($sm) {
 			if ($initial) {
 				local $enc = &encode_base64($initial);
 				$enc =~ s/\r|\n//g;
-				$arv = &smtp_command(MAIL, "$enc\r\n", 1);
+				$arv = &smtp_command($h, "$enc\r\n", 1);
 				if ($arv =~ /^(\d+)\s+(.*)/) {
 					if ($1 == 235) {
 						$auth_ok = 1;
@@ -918,7 +987,7 @@ elsif ($sm) {
 				local $return = $conn->client_step($message);
 				local $enc = &encode_base64($return);
 				$enc =~ s/\r|\n//g;
-				$arv = &smtp_command(MAIL, "$enc\r\n", 1);
+				$arv = &smtp_command($h, "$enc\r\n", 1);
 				if ($arv =~ /^(\d+)\s+(.*)/) {
 					if ($1 == 235) {
 						$auth_ok = 1;
@@ -935,68 +1004,69 @@ elsif ($sm) {
 			}
 		}
 
-	&smtp_command(MAIL, "mail from: <$fromaddr>\r\n");
-	local $notify = $_[8] ? " NOTIFY=".join(",", @{$_[8]}) : "";
+	&smtp_command($h, "mail from: <$fromaddr>\r\n", 0);
+	local $notify = $flags ? " NOTIFY=".join(",", @$flags) : "";
 	foreach my $u (@dests) {
-		&smtp_command(MAIL, "rcpt to: <$u>$notify\r\n");
+		&smtp_command($h, "rcpt to: <$u>$notify\r\n", 0);
 		}
-	&smtp_command(MAIL, "data\r\n");
+	&smtp_command($h, "data\r\n", 0);
 	}
 elsif (defined(&send_mail_program)) {
 	# Use specified mail injector
 	local $cmd = &send_mail_program($fromaddr, \@dests);
 	$cmd || &error("No mail program was found on your system!");
-	open(MAIL, "| $cmd >/dev/null 2>&1");
+	open($h->{'fh'}, "| $cmd >/dev/null 2>&1");
 	}
 elsif ($config{'qmail_dir'}) {
 	# Start qmail-inject
-	open(MAIL, "| $config{'qmail_dir'}/bin/qmail-inject");
+	open($h->{'fh'}, "| $config{'qmail_dir'}/bin/qmail-inject");
 	}
 elsif ($config{'postfix_control_command'}) {
 	# Start postfix's sendmail wrapper
 	local $cmd = -x "/usr/lib/sendmail" ? "/usr/lib/sendmail" :
 			&has_command("sendmail");
 	$cmd || &error($text{'send_ewrapper'});
-	open(MAIL, "| $cmd -f$fromaddr $qdests >/dev/null 2>&1");
+	open($h->{'fh'}, "| $cmd -f$qfromaddr $qdests >/dev/null 2>&1");
 	}
 else {
 	# Start sendmail
 	&has_command($config{'sendmail_path'}) ||
 	    &error(&text('send_epath', "<tt>$config{'sendmail_path'}</tt>"));
-	open(MAIL, "| $config{'sendmail_path'} -f$fromaddr $qdests >/dev/null 2>&1");
+	open($h->{'fh'}, "| $config{'sendmail_path'} -f$qfromaddr $qdests >/dev/null 2>&1");
 	}
+
 local $ctype = "multipart/mixed";
 local $msg_id;
-foreach $h (@{$_[0]->{'headers'}}) {
-	if (defined($_[0]->{'body'}) || $_[2]) {
-		print MAIL $h->[0],": ",$h->[1],$eol;
+foreach $head (@{$mail->{'headers'}}) {
+	if (defined($mail->{'body'}) || $textonly) {
+		&write_http_connection($h, $head->[0],": ",$head->[1],$eol);
 		$lnum++;
 		}
 	else {
-		if ($h->[0] !~ /^(MIME-Version|Content-Type)$/i) {
-			print MAIL $h->[0],": ",$h->[1],$eol;
+		if ($head->[0] !~ /^(MIME-Version|Content-Type)$/i) {
+			&write_http_connection($h, $head->[0],": ",$head->[1],$eol);
 			$lnum++;
 			}
-		elsif (lc($h->[0]) eq 'content-type') {
-			$ctype = $h->[1];
+		elsif (lc($head->[0]) eq 'content-type') {
+			$ctype = $head->[1];
 			}
 		}
-	if (lc($h->[0]) eq 'message-id') {
+	if (lc($head->[0]) eq 'message-id') {
 		$msg_id++;
 		}
 	}
 if (!$msg_id) {
 	# Add a message-id header if missing
 	$main::mailboxes_message_id_count++;
-	print MAIL "Message-Id: <",time().".".$$.".".
-				$main::mailboxes_message_id_count."\@".
-				&get_system_hostname(),">",$eol;
+	&write_http_connection($h, "Message-Id: <",time().".".$$.".".
+				   $main::mailboxes_message_id_count."\@".
+				   &get_system_hostname(),">",$eol);
 	}
 
 # Work out first attachment content type
 local ($ftype, $fenc);
-if (@{$_[0]->{'attach'}} >= 1) {
-	local $first = $_[0]->{'attach'}->[0];
+if (@{$mail->{'attach'}} >= 1) {
+	local $first = $mail->{'attach'}->[0];
 	$ftype = "text/plain";
 	foreach my $h (@{$first->{'headers'}}) {
 		if (lc($h->[0]) eq "content-type") {
@@ -1008,96 +1078,97 @@ if (@{$_[0]->{'attach'}} >= 1) {
 		}
 	}
 
-if (defined($_[0]->{'body'})) {
+if (defined($mail->{'body'})) {
 	# Use original mail body
-	print MAIL $eol;
+	&write_http_connection($h, $eol);
 	$lnum++;
-	$_[0]->{'body'} =~ s/\r//g;
-	$_[0]->{'body'} =~ s/\n\.\n/\n\. \n/g;
-	$_[0]->{'body'} =~ s/\n/$eol/g;
-	$_[0]->{'body'} .= $eol if ($_[0]->{'body'} !~ /\n$/);
-	(print MAIL $_[0]->{'body'}) || &error("Write failed : $!");
-	$lnum += ($_[0]->{'body'} =~ tr/\n/\n/);
+	$mail->{'body'} =~ s/\r//g;
+	$mail->{'body'} =~ s/\n\.\n/\n\. \n/g;
+	$mail->{'body'} =~ s/\n/$eol/g;
+	$mail->{'body'} .= $eol if ($mail->{'body'} !~ /\n$/);
+	&write_http_connection($h, $mail->{'body'}) || &error("Write failed : $!");
+	$lnum += ($mail->{'body'} =~ tr/\n/\n/);
 	}
-elsif (!@{$_[0]->{'attach'}}) {
+elsif (!@{$mail->{'attach'}}) {
 	# No content, so just send empty email
-	print MAIL "Content-Type: text/plain",$eol;
-	print MAIL $eol;
+	&write_http_connection($h, "Content-Type: text/plain",$eol);
+	&write_http_connection($h, $eol);
 	$lnum += 2;
 	}
-elsif (!$_[2] || $ftype !~ /text\/plain/i ||
+elsif (!$textonly || $ftype !~ /text\/plain/i ||
        $fenc =~ /quoted-printable|base64/) {
 	# Sending MIME-encoded email
 	if ($ctype !~ /multipart\/report/i) {
 		$ctype =~ s/;.*$//;
 		}
-	print MAIL "MIME-Version: 1.0",$eol;
+	&write_http_connection($h, "MIME-Version: 1.0",$eol);
 	local $bound = "bound".time();
-	print MAIL "Content-Type: $ctype; boundary=\"$bound\"",$eol;
-	print MAIL $eol;
+	&write_http_connection($h, "Content-Type: $ctype; boundary=\"$bound\"",$eol);
+	&write_http_connection($h, $eol);
 	$lnum += 3;
 
 	# Send attachments
-	print MAIL "This is a multi-part message in MIME format.",$eol;
+	&write_http_connection($h, "This is a multi-part message in MIME format.",$eol);
 	$lnum++;
-	foreach $a (@{$_[0]->{'attach'}}) {
-		print MAIL $eol;
-		print MAIL "--",$bound,$eol;
+	foreach $a (@{$mail->{'attach'}}) {
+		&write_http_connection($h, $eol);
+		&write_http_connection($h, "--",$bound,$eol);
 		$lnum += 2;
 		local $enc;
-		foreach $h (@{$a->{'headers'}}) {
-			print MAIL $h->[0],": ",$h->[1],$eol;
-			$enc = $h->[1]
-				if (lc($h->[0]) eq 'content-transfer-encoding');
+		foreach $head (@{$a->{'headers'}}) {
+			&write_http_connection($h, $head->[0],": ",$head->[1],$eol);
+			$enc = $head->[1]
+				if (lc($head->[0]) eq 'content-transfer-encoding');
 			$lnum++;
 			}
-		print MAIL $eol;
+		&write_http_connection($h, $eol);
 		$lnum++;
 		if (lc($enc) eq 'base64') {
 			local $enc = &encode_base64($a->{'data'});
 			$enc =~ s/\r//g;
 			$enc =~ s/\n/$eol/g;
-			print MAIL $enc;
+			&write_http_connection($h, $enc);
 			$lnum += ($enc =~ tr/\n/\n/);
 			}
 		else {
 			$a->{'data'} =~ s/\r//g;
 			$a->{'data'} =~ s/\n\.\n/\n\. \n/g;
 			$a->{'data'} =~ s/\n/$eol/g;
-			print MAIL $a->{'data'};
+			&write_http_connection($h, $a->{'data'});
 			$lnum += ($a->{'data'} =~ tr/\n/\n/);
 			if ($a->{'data'} !~ /\n$/) {
-				print MAIL $eol;
+				&write_http_connection($h, $eol);
 				$lnum++;
 				}
 			}
 		}
-	print MAIL $eol;
-	(print MAIL "--",$bound,"--",$eol) || &error("Write failed : $!");
-	print MAIL $eol;
+	&write_http_connection($h, $eol);
+	&write_http_connection($h, "--",$bound,"--",$eol) ||
+		&error("Write failed : $!");
+	&write_http_connection($h, $eol);
 	$lnum += 3;
 	}
 else {
 	# Sending text-only mail from first attachment
-	local $a = $_[0]->{'attach'}->[0];
-	print MAIL $eol;
+	local $a = $mail->{'attach'}->[0];
+	&write_http_connection($h, $eol);
 	$lnum++;
 	$a->{'data'} =~ s/\r//g;
 	$a->{'data'} =~ s/\n/$eol/g;
-	(print MAIL $a->{'data'}) || &error("Write failed : $!");
+	&write_http_connection($h, $a->{'data'}) || &error("Write failed : $!");
 	$lnum += ($a->{'data'} =~ tr/\n/\n/);
 	if ($a->{'data'} !~ /\n$/) {
-		print MAIL $eol;
+		&write_http_connection($h, $eol);
 		$lnum++;
 		}
 	}
-if ($sm && !$_[1]) {
-	&smtp_command(MAIL, ".$eol");
-	&smtp_command(MAIL, "quit$eol");
+if ($sm && !$file) {
+	&smtp_command($h, ".$eol", 0);
+	&smtp_command($h, "quit$eol", 0);
 	}
-if (!close(MAIL)) {
+if (!&close_http_connection($h)) {
 	# Only bother to report an error on close if writing to a file
-	if ($_[1]) {
+	if ($file) {
 		&error("Write failed : $!");
 		}
 	}
@@ -1152,22 +1223,6 @@ local $temp = &transname();
 local @st = stat($temp);
 unlink($temp);
 return $st[7];
-}
-
-# b64decode(string)
-# Converts a string from base64 format to normal
-sub b64decode
-{
-    local($str) = $_[0];
-    local($res);
-    $str =~ tr|A-Za-z0-9+=/||cd;
-    $str =~ s/=+$//;
-    $str =~ tr|A-Za-z0-9+/| -_|;
-    while ($str =~ /(.{1,60})/gs) {
-        my $len = chr(32 + length($1)*3/4);
-        $res .= unpack("u", $len . $1 );
-    }
-    return $res;
 }
 
 # can_read_mail(user)
@@ -1237,7 +1292,7 @@ $mail->{'lfile'} = $_[0];
 $mail->{'lfile'} =~ s/\/(qf|hf|Qf)/\/xf/;
 local $_;
 local @headers;
-open(QF, $_[0]) || return undef;
+open(QF, "<", $_[0]) || return undef;
 while(<QF>) {
 	s/\r|\n//g;
 	if (/^M(.*)/) {
@@ -1260,7 +1315,7 @@ foreach $h (@headers) {
 
 if ($mail->{'dfile'}) {
 	# Read the mail body
-	open(DF, $mail->{'dfile'});
+	open(DF, "<", $mail->{'dfile'});
 	while(<DF>) {
 		$mail->{'body'} .= $_;
 		}
@@ -1298,13 +1353,16 @@ foreach $rest (split(/\n/, $_[0])) {
 return @rv;
 }
 
-# smtp_command(handle, command, no-error)
+# smtp_command(&handle, command, no-error)
+# Send a single SMTP command to some file handle, and read back the response
 sub smtp_command
 {
-local ($m, $c) = @_;
-print $m $c;
-local $r = <$m>;
-if ($r !~ /^[23]\d+/ && !$_[2]) {
+my ($h, $c, $noerr) = @_;
+if ($c) {
+	&write_http_connection($h, $c);
+	}
+my $r = &read_http_connection($h);
+if ($r !~ /^[23]\d+/ && !$noerr) {
 	&error(&text('send_esmtp', "<tt>".&html_escape($c)."</tt>",
 				   "<tt>".&html_escape($r)."</tt>"));
 	}
@@ -1312,7 +1370,7 @@ $r =~ s/\r|\n//g;
 if ($r =~ /^(\d+)\-/) {
 	# multi-line ESMTP response!
 	while(1) {
-		local $nr = <$m>;
+		my $nr = &read_http_connection($h);
 		$nr =~ s/\r|\n//g;
 		if ($nr =~ /^(\d+)\-(.*)/) {
 			$r .= "\n".$2;
@@ -1339,7 +1397,7 @@ return wantarray ? @rv : $rv[0];
 sub link_urls
 {
 local $r = $_[0];
-local $tar = $_[1] ? "target=link".int(rand()*100000) : "";
+local $tar = $_[1] ? "target=_blank" : "";
 $r =~ s/((http|ftp|https|mailto):[^><"'\s]+[^><"'\s\.\)])/<a href="$1" $tar>$1<\/a>/g;
 return $r;
 }
@@ -1350,7 +1408,7 @@ sub link_urls_and_escape
 {
 local $l = $_[0];
 local $rv;
-local $tar = $_[1] ? " target=link".int(rand()*100000) : "";
+local $tar = $_[1] ? " target=_blank" : "";
 while($l =~ /^(.*?)((http|ftp|https|mailto):[^><"'\s]+[^><"'\s\.\)])(.*)/) {
 	local ($before, $url, $after) = ($1, $2, $4);
 	$rv .= &eucconv_and_escape($before)."<a href='$url' $tar>".
@@ -1370,7 +1428,7 @@ local $rv;
 while($l =~ s/^([\0-\377]*?)<\s*a\s+([^>]*href[^>]*)>//i) {
 	local ($before, $a) = ($1, $2);
 	if ($a !~ /target\s*=/i) {
-		$a .= " target=link".int(rand()*100000);
+		$a .= " target=_blank";
 		}
 	$rv .= $before."<a ".$a.">";
 	}
@@ -1417,7 +1475,7 @@ return $date;
 # address is returned.
 sub simplify_from
 {
-local $rv = &eucconv(&decode_mimewords($_[0]));
+local $rv = &convert_header_for_display($_[0], 0, 1);
 local @sp = &split_addresses($rv);
 if (!@sp) {
 	return $text{'mail_nonefrom'};
@@ -1433,13 +1491,26 @@ else {
 	}
 }
 
+# convert_header_for_display(string, [max-non-html-length], [no-escape])
+# Given a string from an email header, perform all mime-decoding, charset
+# changes and HTML escaping needed to render it in a browser
+sub convert_header_for_display
+{
+local ($str, $max, $noescape) = @_;
+local ($mw, $cs) = &decode_mimewords($str);
+if (&get_charset() eq 'UTF-8' && &can_convert_to_utf8($mw, $cs)) {
+	$mw = &convert_to_utf8($mw, $cs);
+	}
+local $rv = &eucconv($mw);
+$rv = substr($rv, 0, $max)." .." if ($max && length($rv) > $max);
+return $noescape ? $rv : &html_escape($rv);
+}
+
 # simplify_subject(subject)
-# Simplifies and truncates a subject for display in the mail list
+# Simplifies and truncates a subject header for display in the mail list
 sub simplify_subject
 {
-local $rv = &eucconv(&decode_mimewords($_[0]));
-$rv = substr($rv, 0, 80)." .." if (length($rv) > 80);
-return &html_escape($rv);
+return &convert_header_for_display($_[0], 80);
 }
 
 # quoted_decode(text)
@@ -1521,7 +1592,11 @@ sub decode_mimewords {
 	die "MIME::Words: unexpected case:\n($encstr) pos $pos\n\t".
 	    "Please alert developer.\n";
     }
-    return join('',map {$_->[0]} @tokens);
+    if (wantarray) {
+	return (join('',map {$_->[0]} @tokens), $charset);
+    } else {
+	return join('',map {$_->[0]} @tokens);
+    }
 }
 
 # _decode_Q STRING
@@ -1568,6 +1643,33 @@ $rawstr =~ s{([ a-zA-Z0-9\x7F-\xFF]{1,18})}{     ### get next "word"
 }xeg;
 $rawstr =~ s/\?==\?/?= =?/g;
 return $rawstr;
+}
+
+# can_convert_to_utf8(string, string-charset)
+# Check if the appropriate perl modules are available for UTF-8 conversion
+sub can_convert_to_utf8
+{
+my ($str, $cs) = @_;
+return 0 if ($cs eq "UTF-8");
+return 0 if (!$cs);
+eval "use Encode";
+return 0 if ($@);
+eval "use utf8";
+return 0 if ($@);
+return 1;
+}
+
+# convert_to_utf8(string, string-charset)
+# If possible, convert a string to the UTF-8 charset
+sub convert_to_utf8
+{
+my ($str, $cs) = @_;
+&can_convert_to_utf8(@_);	# Load modules
+eval {
+	$str = Encode::decode($cs, $str);
+	utf8::encode($str);
+	};
+return $str;
 }
 
 # encode_mimewords_address(string, %params)
@@ -1649,6 +1751,9 @@ else {
 }
 
 # mail_file_style(user, basedir, style)
+# Given a directory and username, returns the path to that user's mail file
+# under the directory based on the style (which may force use of parts of
+# the username).
 sub mail_file_style
 {
 if ($_[2] == 0) {
@@ -1681,19 +1786,35 @@ if ($_[0] =~ /^\/.*\/([^\/]+)$/) {
 		# Use short name for index file
 		$f = "$user_module_config_directory/$1.findex";
 		}
+	elsif ($user_module_config_directory) {
+		# Under user's .usermin directory
+		$f = "$user_module_config_directory/$us.findex";
+		}
 	else {
-		$f = $user_module_config_directory ?
-			"$user_module_config_directory/$us.findex" :
-			"$module_config_directory/$us.findex";
+		# Under /var/webmin or /etc/webmin
+		$f = "$module_config_directory/$us.findex";
+		if (!glob($f."*")) {
+			$f = "$module_var_directory/$us.findex";
+			}
 		}
 	}
 else {
-	# A username .. the index file is in /etc/webmin/mailboxes
-        $f = $user_module_config_directory ?
-		"$user_module_config_directory/$_[0].index" :
-		"$module_config_directory/$_[0].index";
+	# A username .. the index file is in /var/webmin/modules/mailboxes or
+	# /etc/webmin/mailboxes
+	if ($user_module_config_directory) {
+		$f = "$user_module_config_directory/$_[0].index";
+		}
+	else {
+		$f = "$module_config_directory/$_[0].index";
+		if (!glob($f."*")) {
+			$f = "$module_var_directory/$_[0].index";
+			}
+		}
 	}
-return -r $f && !-r "$f.$hn" ? $f : "$f.$hn";
+# Append hostname if requested, unless an index file without the hostname
+# already exists
+return $config{'noindex_hostname'} ? $f :
+       -r $f && !-r "$f.$hn" ? $f : "$f.$hn";
 }
 
 # extract_mail(data)
@@ -1732,17 +1853,17 @@ sub split_addresses
 local (@rv, $str = $_[0]);
 while(1) {
 	$str =~ s/\\"/\0/g;
-	if ($str =~ /^[\s,]*(([^<>\(\)\s]+)\s+\(([^\(\)]+)\))(.*)$/) {
+	if ($str =~ /^[\s,;]*(([^<>\(\)\s"]+)\s+\(([^\(\)]+)\))(.*)$/) {
 		# An address like  foo@bar.com (Fooey Bar)
 		push(@rv, [ $2, $3, $1 ]);
 		$str = $4;
 		}
-	elsif ($str =~ /^[\s,]*("([^"]+)"\s*<([^\s<>,]+)>)(.*)$/ ||
-	       $str =~ /^[\s,]*(([^<>\@]+)\s+<([^\s<>,]+)>)(.*)$/ ||
-	       $str =~ /^[\s,]*(([^<>\@]+)<([^\s<>,]+)>)(.*)$/ ||
-	       $str =~ /^[\s,]*(([^<>\[\]]+)\s+\[mailto:([^\s\[\]]+)\])(.*)$/||
-	       $str =~ /^[\s,]*(()<([^<>,]+)>)(.*)/ ||
-	       $str =~ /^[\s,]*(()([^\s<>,]+))(.*)/) {
+	elsif ($str =~ /^[\s,;]*("([^"]*)"\s*<([^\s<>,]+)>)(.*)$/ ||
+	       $str =~ /^[\s,;]*(([^<>\@]+)\s+<([^\s<>,]+)>)(.*)$/ ||
+	       $str =~ /^[\s,;]*(([^<>\@]+)<([^\s<>,]+)>)(.*)$/ ||
+	       $str =~ /^[\s,;]*(([^<>\[\]]+)\s+\[mailto:([^\s\[\]]+)\])(.*)$/||
+	       $str =~ /^[\s,;]*(()<([^<>,]+)>)(.*)/ ||
+	       $str =~ /^[\s,;]*(()([^\s<>,;]+))(.*)/) {
 		# Addresses like  "Fooey Bar" <foo@bar.com>
 		#                 Fooey Bar <foo@bar.com>
 		#                 Fooey Bar<foo@bar.com>
@@ -1782,6 +1903,7 @@ sub j2e {
 }
 
 # eucconv_and_escape(string)
+# Convert a string for display
 sub eucconv_and_escape {
 	return &html_escape(&eucconv($_[0]));
 }
@@ -1898,7 +2020,7 @@ else {
 	local @cst = $cachefile ? stat($cachefile) : ( );
 	if ($cst[9] >= $newest) {
 		# Can read the cache
-		open(CACHE, $cachefile);
+		open(CACHE, "<", $cachefile);
 		while(<CACHE>) {
 			chop;
 			push(@files, $_[0]."/".$_);
@@ -1910,7 +2032,7 @@ else {
 		# Really read
 		local @shorts;
 		foreach my $d ("cur", "new") {
-			opendir(DIR, "$_[0]/$d");
+			&opendir_as_mail_user(DIR, "$_[0]/$d") || &error("Failed to open $_[0]/$d : $!");
 			while(my $f = readdir(DIR)) {
 				next if ($f eq "." || $f eq "..");
 				if ($skipt && $f =~ /:2,([A-Za-z]*T[A-Za-z]*)$/) {
@@ -1984,7 +2106,7 @@ foreach my $nf (@files) {
 	if (substr($nf, length($dir)+1, 3) eq "new") {
 		local $cf = $nf;
 		$cf =~ s/\/new\//\/cur\//g;
-		if (rename($nf, $cf)) {
+		if (&rename_as_mail_user($nf, $cf)) {
 			$files[$i] = $cf;
 			$changed = 1;
 			}
@@ -2069,8 +2191,10 @@ unlink($_[0]->{'file'});
 # Adds some message in maildir format to a directory
 sub write_maildir
 {
+my ($mail, $dir, $textonly) = @_;
+
 # Work out last modified time, and don't update cache if too new
-local $cachefile = &get_maildir_cachefile($_[1]);
+local $cachefile = &get_maildir_cachefile($dir);
 local $up2date = 0;
 if ($cachefile) {
 	local @cst = stat($cachefile);
@@ -2086,20 +2210,20 @@ if ($cachefile) {
 
 # Select a unique filename and write to it
 local $now = time();
-$_[0]->{'id'} = &unique_maildir_filename($_[1]);
-$mf = "$_[1]/$_[0]->{'id'}";
-&send_mail($_[0], $mf, $_[2], 1);
-$_[0]->{'file'} = $mf;
+$mail->{'id'} = &unique_maildir_filename($dir);
+$mf = "$dir/$mail->{'id'}";
+&send_mail($mail, $mf, $textonly, 1);
+$mail->{'file'} = $mf;
 
 # Set ownership of the new message file to match the directory
-local @st = stat($_[1]);
+local @st = stat($dir);
 if ($< == 0) {
 	&set_ownership_permissions($st[4], $st[5], undef, $mf);
 	}
 
 # Create tmp and new sub-dirs, if missing
 foreach my $sd ("tmp", "new") {
-	local $sdpath = "$_[1]/$sd";
+	local $sdpath = "$dir/$sd";
 	if (!-d $sdpath) {
 		mkdir($sdpath, 0755);
 		if ($< == 0) {
@@ -2113,7 +2237,7 @@ if ($up2date && $cachefile) {
 	# Bring cache up to date
 	$now--;
 	local $lref = &read_file_lines($cachefile);
-	push(@$lref, $_[0]->{'id'});
+	push(@$lref, $mail->{'id'});
 	&flush_file_lines($cachefile);
 	}
 }
@@ -2142,7 +2266,7 @@ sub empty_maildir
 local $d;
 foreach $d ("$_[0]/cur", "$_[0]/new") {
 	local $f;
-	opendir(DIR, $d);
+	&opendir_as_mail_user(DIR, $d) || &error("Failed to open $d : $!");
 	while($f = readdir(DIR)) {
 		unlink("$d/$f") if ($f ne '.' && $f ne '..');
 		}
@@ -2156,7 +2280,16 @@ foreach $d ("$_[0]/cur", "$_[0]/new") {
 sub get_maildir_cachefile
 {
 local ($dir) = @_;
-local $cd = $user_module_config_directory || $module_config_directory;
+local $cd;
+if ($user_module_config_directory) {
+	$cd = $user_module_config_directory;
+	}
+else {
+	$cd = $module_config_directory;
+	if (!-r "$cd/maildircache") {
+		$cd = $module_var_directory;
+		}
+	}
 local $sd = "$cd/maildircache";
 if (!-d $sd) {
 	&make_dir($sd, 0755) || return undef;
@@ -2189,7 +2322,7 @@ return scalar(@files);
 sub list_mhdir
 {
 local ($start, $end, $f, $i, @rv);
-opendir(DIR, $_[0]);
+&opendir_as_mail_user(DIR, $_[0]) || &error("Failed to open $_[0] : $!");
 local @files = map { "$_[0]/$_" }
 		sort { $a <=> $b }
 		 grep { /^\d+$/ } readdir(DIR);
@@ -2229,7 +2362,7 @@ return @rv;
 sub idlist_mhdir
 {
 local ($dir) = @_;
-opendir(DIR, $dir);
+&opendir_as_mail_user(DIR, $dir) || &error("Failed to open $dir : $!");
 local @files = grep { /^\d+$/ } readdir(DIR);
 closedir(DIR);
 return @files;
@@ -2249,7 +2382,7 @@ sub select_mhdir
 {
 local ($file, $ids, $headersonly) = @_;
 local @rv;
-opendir(DIR, $file);
+&opendir_as_mail_user(DIR, $file) || &error("Failed to open $file : $!");
 local @files = map { "$file/$_" }
 		sort { $a <=> $b }
 		 grep { /^\d+$/ } readdir(DIR);
@@ -2312,8 +2445,8 @@ unlink($_[0]->{'file'});
 sub max_mhdir
 {
 local $max = 1;
-opendir(DIR, $_[0]);
-foreach $f (readdir(DIR)) {
+&opendir_as_mail_user(DIR, $_[0]) || &error("Failed to open $_[0] : $!");
+foreach my $f (readdir(DIR)) {
 	$max = $f if ($f =~ /^\d+$/ && $f > $max);
 	}
 closedir(DIR);
@@ -2324,9 +2457,8 @@ return $max;
 # Delete all messages in an MH format directory
 sub empty_mhdir
 {
-local $f;
-opendir(DIR, $_[0]);
-foreach $f (readdir(DIR)) {
+&opendir_as_mail_user(DIR, $_[0]) || &error("Failed to open $_[0] : $!");
+foreach my $f (readdir(DIR)) {
 	unlink("$_[0]/$f") if ($f =~ /^\d+$/);
 	}
 closedir(DIR);
@@ -2336,10 +2468,41 @@ closedir(DIR);
 # Returns the number of messages in an MH directory
 sub count_mhdir
 {
-opendir(DIR, $_[0]);
+&opendir_as_mail_user(DIR, $_[0]) || &error("Failed to open $_[0] : $!");
 local @files = grep { /^\d+$/ } readdir(DIR);
 closedir(DIR);
 return scalar(@files);
+}
+
+# list_mbxfile(file, start, end)
+# Return messages from an MBX format file
+sub list_mbxfile
+{
+local @rv;
+&open_as_mail_user(MBX, $_[0]) || &error("Failed to open $_[0] : $!");
+seek(MBX, 2048, 0);
+while(my $line = <MBX>) {
+	if ($line =~ m/( \d|\d\d)-(\w\w\w)-(\d\d\d\d) (\d\d):(\d\d):(\d\d) ([+-])(\d\d)(\d\d),(\d+);([[:xdigit:]]{8})([[:xdigit:]]{4})-([[:xdigit:]]{8})\r\n$/) {
+		my $size = $10;
+		my $mail = &read_mail_fh(MBX, $size, 0);
+		push(@rv, $mail);
+		}
+	}
+close(MBX);
+return @rv;
+}
+
+# select_mbxfile(file, &ids, headersonly)
+# Returns a list of messages with the given indexes, from a MBX file
+sub select_mbxfile
+{
+local ($file, $ids, $headersonly) = @_;
+local @all = &list_mbxfile($file);
+local @rv;
+foreach my $i (@$ids) {
+	push(@rv, $all[$i]);
+	}
+return @rv;
 }
 
 # read_mail_file(file, [headersonly])
@@ -2349,7 +2512,7 @@ sub read_mail_file
 local (@headers, $mail);
 
 # Open and read the mail file
-open(MAIL, $_[0]) || return undef;
+&open_as_mail_user(MAIL, $_[0]) || return undef;
 $mail = &read_mail_fh(MAIL, 0, $_[1]);
 $mail->{'file'} = $_[0];
 close(MAIL);
@@ -2372,7 +2535,8 @@ return $mail;
 # read_mail_fh(handle, [end-mode], [headersonly])
 # Reads an email message from the given file handle, either up to end of
 # the file, or a From line. End mode 0 = EOF, 1 = From without -,
-#				     2 = From possibly with -
+#				     2 = From possibly with -,
+#				     higher = number of bytes
 sub read_mail_fh
 {
 local ($fh, $endmode, $headeronly) = @_;
@@ -2416,8 +2580,17 @@ if (!$headersonly) {
 			}
 		close(MAIL);
 		}
+	elsif ($endmode > 2) {
+		# Till we have enough bytes
+		while($mail->{'size'} < $endmode) {
+			$line = <$fh>;
+			$lnum++;
+			$mail->{'size'} += length($line);
+			$mail->{'body'} .= $line;
+			}
+		}
 	else {
-		# Tell next From line
+		# Till next From line
 		while(1) {
 			$line = <$fh>;
 			last if (!$line || $line =~ /^From\s+(\S+).*\d+\r?\n/ &&
@@ -2449,7 +2622,7 @@ return $mail;
 # From - instead of the usual From foo@bar.com
 sub dash_mode
 {
-open(DASH, &user_mail_file($_[0])) || return 0;	# assume no
+&open_as_mail_user(DASH, &user_mail_file($_[0])) || return 0;	# assume no
 local $line = <DASH>;
 close(DASH);
 return $line =~ /^From\s+(\S+).*\d/ && $1 eq '-';
@@ -2465,10 +2638,11 @@ foreach $f (@{$_[0]}) {
 	local $field = $f->[0];
 	local $what = $f->[1];
 	local $neg = ($field =~ s/^\!//);
+	local $re = $f->[2] ? $what : "\Q$what\E";
 	if ($field eq 'body') {
 		$count++
-		    if (!$neg && $_[2]->{'body'} =~ /\Q$what\E/i ||
-		         $neg && $_[2]->{'body'} !~ /\Q$what\E/i);
+		    if (!$neg && $_[2]->{'body'} =~ /$re/i ||
+		         $neg && $_[2]->{'body'} !~ /$re/i);
 		}
 	elsif ($field eq 'size') {
 		$count++
@@ -2480,28 +2654,28 @@ foreach $f (@{$_[0]}) {
 			join("", map { $_->[0].": ".$_->[1]."\n" }
 				     @{$_[2]->{'headers'}});
 		$count++
-		    if (!$neg && $headers =~ /\Q$what\E/i ||
-			 $neg && $headers !~ /\Q$what\E/i);
+		    if (!$neg && $headers =~ /$re/i ||
+			 $neg && $headers !~ /$re/i);
 		}
 	elsif ($field eq 'all') {
 		local $headers = $_[2]->{'rawheaders'} ||
 			join("", map { $_->[0].": ".$_->[1]."\n" }
 				     @{$_[2]->{'headers'}});
 		$count++
-		    if (!$neg && ($_[2]->{'body'} =~ /\Q$what\E/i ||
-				  $headers =~ /\Q$what\E/i) ||
-		         $neg && ($_[2]->{'body'} !~ /\Q$what\E/i &&
-				  $headers !~ /\Q$what\E/i));
+		    if (!$neg && ($_[2]->{'body'} =~ /$re/i ||
+				  $headers =~ /$re/i) ||
+		         $neg && ($_[2]->{'body'} !~ /$re/i &&
+				  $headers !~ /$re/i));
 		}
 	elsif ($field eq 'status') {
 		$count++
-		    if (!$neg && $_[2]->{$field} =~ /\Q$what\E/i||
-		         $neg && $_[2]->{$field} !~ /\Q$what\E/i);
+		    if (!$neg && $_[2]->{$field} =~ /$re/i||
+		         $neg && $_[2]->{$field} !~ /$re/i);
 		}
 	else {
 		$count++
-		    if (!$neg && $_[2]->{'header'}->{$field} =~ /\Q$what\E/i||
-		         $neg && $_[2]->{'header'}->{$field} !~ /\Q$what\E/i);
+		    if (!$neg && $_[2]->{'header'}->{$field} =~ /$re/i||
+		         $neg && $_[2]->{'header'}->{$field} !~ /$re/i);
 		}
 	return 1 if ($count && !$_[1]);
 	}
@@ -2705,6 +2879,200 @@ if (!$config{'no_mailer'}) {
 	push(@$headers, [ 'X-Mailer', ucfirst(&get_product_name())." ".
 				      &get_webmin_version() ]);
 	}
+}
+
+# set_mail_open_user(user)
+# Sets the Unix user that will be used for all mail file open ops, by functions
+# like list_mail and select_maildir
+sub set_mail_open_user
+{
+my ($user) = @_;
+if ($user eq "root" || $user eq "0") {
+	$main::mail_open_user = undef;
+	}
+elsif (!$<) {
+	$main::mail_open_user = $user;
+	}
+}
+
+# clear_mail_open_user()
+# Resets the user to root
+sub clear_mail_open_user
+{
+my ($user) = @_;
+$main::mail_open_user = undef;
+}
+
+# open_as_mail_user(fh, file)
+# Calls the open function, but as the user set by set_mail_open_user
+sub open_as_mail_user
+{
+my ($fh, $file) = @_;
+my $switched = &switch_to_mail_user();
+my $mode = "<";
+if ($file =~ s/^(<|>>|>|\|)//) {
+	$mode = $1;
+	}
+my $rv = open($fh, $mode, $file);
+if ($switched) {
+	# Now that it is open, switch back to root
+	$) = 0;
+	$> = 0;
+	}
+return $rv;
+}
+
+# create_as_mail_user(fh, file)
+# Creates a new file, but ensures that it does not yet exist first, and then
+# sets the ownership to the mail user
+sub create_as_mail_user
+{
+my ($fh, $file) = @_;
+if (&should_switch_to_mail_user()) {
+	# Open the file as root, but ensure that it doesn't exist yet. Then
+	# make it owned by the user
+	$file =~ s/^>+//;
+	my $rv = sysopen($fh, $file, O_CREAT|O_WRONLY, 0700);
+	return $rv if (!$rv);
+	my @uinfo = &get_switch_user_info();
+	&set_ownership_permissions($uinfo[2], $uinfo[3], undef, $file);
+	return $rv;
+	}
+else {
+	# Operating as root, so no special behaviour needed
+	if ($file =~ /^(<|>)/) {
+		return open($fh, $file);
+		}
+	else {
+		return open($fh, "<", $file);
+		}
+	}
+}
+
+# opendir_as_mail_user(fh, dir)
+# Calls the opendir function, but as the user set by set_mail_open_user
+sub opendir_as_mail_user
+{
+my ($fh, $dir) = @_;
+my $switched = &switch_to_mail_user();
+my $rv = opendir($fh, $dir);
+if ($switched) {
+	$) = 0;
+	$> = 0;
+	}
+return $rv;
+}
+
+# rename_as_mail_user(old, new)
+# Like the rename function, but as the user set by set_mail_open_user
+sub rename_as_mail_user
+{
+my ($oldfile, $newfile) = @_;
+my $switched = &switch_to_mail_user();
+my $rv = &rename_file($oldfile, $newfile);
+if ($switched) {
+	$) = 0;
+	$> = 0;
+	}
+return $rv;
+}
+
+# mkdir_as_mail_user(path, perms)
+# Like the mkdir function, but as the user set by set_mail_open_user
+sub mkdir_as_mail_user
+{
+my ($path, $perms) = @_;
+my $switched = &switch_to_mail_user();
+my $rv = mkdir($path, $perms);
+if ($switched) {
+	$) = 0;
+	$> = 0;
+	}
+return $rv;
+}
+
+# unlink_as_mail_user(path)
+# Like the unlink function, but as the user set by set_mail_open_user
+sub unlink_as_mail_user
+{
+my ($path) = @_;
+my $switched = &switch_to_mail_user();
+my $rv = unlink($path);
+if ($switched) {
+	$) = 0;
+	$> = 0;
+	}
+return $rv;
+}
+
+# copy_source_dest_as_mail_user(source, dest)
+# Copy a file, with perms of the user from set_mail_open_user
+sub copy_source_dest_as_mail_user
+{
+my ($src, $dst) = @_;
+if (&should_switch_to_mail_user()) {
+	&open_as_mail_user(SRC, $src) || return 0;
+	&open_as_mail_user(DST, ">$dst") || return 0;
+	my $buf;
+	while(read(SRC, $buf, 32768) > 0) {
+		print DST $buf;
+		}
+	close(SRC);
+	close(DST);
+	return 1;
+	}
+else {
+	return &copy_source_dest($src, $dst);
+	}
+}
+
+# chmod_as_mail_user(perms, file, ...)
+# Set file permissions, but with perms of the user from set_mail_open_user
+sub chmod_as_mail_user
+{
+my ($perms, @files) = @_;
+my $switched = &switch_to_mail_user();
+my $rv = chmod($perms, @files);
+if ($switched) {
+	$) = 0;
+	$> = 0;
+	}
+return $rv;
+}
+
+# should_switch_to_mail_user()
+# Returns 1 if file IO will be done as a mail owner user
+sub should_switch_to_mail_user
+{
+return defined($main::mail_open_user) && !$< && !$>;
+}
+
+# switch_to_mail_user()
+# Sets the permissions used for reading files
+sub switch_to_mail_user
+{
+if (&should_switch_to_mail_user()) {
+	# Switch file permissions to the correct user
+	my @uinfo = &get_switch_user_info();
+	@uinfo || &error("Mail open user $main::mail_open_user ".
+			 "does not exist");
+	$) = $uinfo[3]." ".join(" ", $uinfo[3], &other_groups($uinfo[0]));
+	$> = $uinfo[2];
+	return 1;
+	}
+return 0;
+}
+
+# get_switch_user_info()
+# Returns the getpw* function array for the user to switch to
+sub get_switch_user_info
+{
+if ($main::mail_open_user =~ /^\d+$/) {
+	# Could be by UID .. but fall back to by name if there is no such UID
+	my @rv = getpwuid($main::mail_open_user);
+	return @rv if (@rv > 0);
+	}
+return getpwnam($main::mail_open_user);
 }
 
 1;

@@ -3,7 +3,7 @@
 # List all active leases
 
 require './dhcpd-lib.pl';
-require 'timelocal.pl';
+use Time::Local;
 &ReadParse();
 $timenow = time();
 
@@ -34,6 +34,8 @@ foreach $subnet (@subnets) {
 			}
 		}
 	$subnet->{'ips'} = 0;
+	local @nw = split(/\./, $subnet->{'values'}->[0]);
+	local @nm = split(/\./, $subnet->{'values'}->[2]);
 	@ranges = &find("range", $subnet->{'members'});
 	foreach $pool (&find("pool", $subnet->{'members'})) {
 		push(@ranges, &find("range", $pool->{'members'}));
@@ -80,14 +82,27 @@ else {
 		push(@leases, $lease);
 		}
 
+	# Find leases which have been obsoleted by a more recent one, even if
+	# they are still valid
+	my %already;
+	foreach my $l (reverse(@leases)) {
+		my $client = &find('client-hostname', $l->{'members'});
+		my $ch = $client ? $client->{'values'}->[0] : undef;
+		if ($already{$l->{'values'}->[0],$ch}++) {
+			$l->{'obsolete'} = 1;
+			}
+		}
+	if (!$in{'all'}) {
+		@leases = grep { !$_->{'obsolete'} } @leases;
+		}
+
 	# Show links to select mode, if not showing a single subnet
 	if (!$in{'network'}) {
 		@links = ( );
 		foreach $m (0, 1) {
 			$msg = $text{'listl_mode_'.$m};
 			if ($m != $in{'bysubnet'}) {
-				$msg = "<a href='list_leases.cgi?bysubnet=$m'>".
-				       "$msg</a>";
+				$msg = &ui_link("list_leases.cgi?bysubnet=$m",$msg);
 				}
 			push(@links, $msg);
 			}
@@ -173,8 +188,7 @@ else {
 		$links = "<table width=100%><tr><td>".
 			 &ui_links_row(\@links).
 			 "</td><td align=right>".
-			 &ui_links_row([ "<a href='list_leases.cgi?$in'>".
-					 "$text{'listl_refresh'}</a>" ]).
+			 &ui_links_row([ &ui_link("list_leases.cgi?$in",$text{'listl_refresh'}) ]).
 			 "</td></tr></table>\n";
 		print $links;
 		print &ui_columns_start([
@@ -191,7 +205,8 @@ else {
 			local $mems = $lease->{'members'};
 			local $starts = &find('starts', $mems);
 			local $ends = &find('ends', $mems);
-			local $ht = $lease->{'expired'} ? "i" : "tt";
+			local $ht = $lease->{'expired'} ||
+				    $lease->{'obsolete'} ? "i" : "tt";
 			push(@cols, "<$ht>$lease->{'values'}->[0]</$ht>");
 			local $hard = &find('hardware', $mems);
 			push(@cols,$hard->{'values'}->[1] ?
@@ -201,7 +216,8 @@ else {
 			push(@cols, $client ? "<tt>".&html_escape(
 					      $client->{'values'}->[0])."</tt>"
 					    : undef);
-			if ($config{'lease_tz'}) {
+			if ($config{'lease_tz'} ||
+			    $starts->{'values'}->[0] eq 'epoch') {
 				$s = &make_date($lease->{'stime'});
 				$e = &make_date($lease->{'etime'});
 				}
@@ -239,11 +255,17 @@ else {
 
 sub lease_time
 {
-local @d = split(/\//, $_[0]->{'values'}->[1]);
-local @t = split(/:/, $_[0]->{'values'}->[2]);
-local $t;
-eval { $t = timegm($t[2], $t[1], $t[0], $d[2], $d[1]-1, $d[0]-1900) };
-return $@ ? undef : $t;
+local ($l) = @_;
+if ($l->{'values'}->[0] eq 'epoch') {
+	return $l->{'values'}->[1];
+	}
+else {
+	local @d = split(/\//, $l->{'values'}->[1]);
+	local @t = split(/:/, $l->{'values'}->[2]);
+	local $t;
+	eval { $t = timegm($t[2], $t[1], $t[0], $d[2], $d[1]-1, $d[0]-1900) };
+	return $@ ? undef : $t;
+	}
 }
 
 sub ip_compare
@@ -282,7 +304,7 @@ if ($in{'sort'} eq $c) {
 	return $text{'listl_'.$c};
 	}
 else {
-	return "<a href='list_leases.cgi?all=$in{'all'}&network=$in{'network'}&netmask=$in{'netmask'}&sort=$c'>".$text{'listl_'.$c}."</a>";
+    return &ui_link("list_leases.cgi?all=$in{'all'}&network=$in{'network'}&netmask=$in{'netmask'}&sort=$c",$text{'listl_'.$c});
 	}
 }
 

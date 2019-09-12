@@ -63,10 +63,14 @@ elsif ($action eq 'degrant') {
 	return &text('log_degrant', $object);
 	}
 elsif ($action eq 'backup') {
+	$object = "" if ($object eq "-");
 	return &text($object ? ($long ? 'log_backup_l' : 'log_backup')
 			     : ($long ? 'log_backup_all_l' : 'log_backup_all'),
 		     "<tt>$object</tt>",
 		     "<tt>".&html_escape($p->{'file'})."</tt>");
+	}
+elsif ($action eq 'manual') {
+	return $text{'log_manual'};
 	}
 else {
 	return undef;

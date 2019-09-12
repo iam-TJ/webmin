@@ -23,6 +23,12 @@ print &ui_table_row($text{'status_pkgs'},
 print &ui_table_row($text{'status_temp'},
 	&ui_yesno_radio("temp", !$system_status::config{'collect_notemp'}));
 
+# Units for temps
+print &ui_table_row($text{'status_units'},
+	&ui_radio("units", $system_status::config{'collect_units'} || 0,
+		  [ [ 0, $text{'status_celsius'} ],
+		    [ 1, $text{'status_fahrenheit'} ] ]));
+
 print &ui_table_end();
 print &ui_form_end([ [ "save", $text{'save'} ] ]);
 

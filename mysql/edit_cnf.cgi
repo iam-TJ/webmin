@@ -29,9 +29,6 @@ $bind = &find_value("bind-address", $mems);
 print &ui_table_row($text{'cnf_bind'},
 		    &ui_opt_textbox("bind", $bind, 20, $text{'cnf_all'}));
 
-print &ui_table_row($text{'cnf_skip-locking'},
-    &ui_yesno_radio("skip-locking", &find("skip-locking", $mems) ? 1 : 0));
-
 print &ui_table_row($text{'cnf_big-tables'},
     &ui_yesno_radio("big-tables", &find("big-tables", $mems) ? 1 : 0));
 
@@ -57,6 +54,10 @@ $fpt = &find_value("innodb_file_per_table", $mems);
 print &ui_table_row($text{'cnf_fpt'},
 		    &ui_yesno_radio("fpt", $fpt));
 
+$ilt = &find_value("innodb_lock_wait_timeout", $mems);
+print &ui_table_row($text{'cnf_ilt'},
+		    &ui_opt_textbox("ilt", $ilt, 10, $text{'default'}));
+
 # Show set variables
 print &ui_table_hr();
 
@@ -68,10 +69,18 @@ foreach $v (@mysql_set_variables) {
 		&mysql_size_input($v, $vars{$v}), 3);
 	}
 foreach $v (@mysql_number_variables) {
+	$n = &find_value($v, $mems);
 	print &ui_table_row($text{'cnf_'.$v},
-		&ui_radio($v."_def", defined($vars{$v}) ? 0 : 1,
+		&ui_radio($v."_def", defined($n) ? 0 : 1,
 			  [ [ 1, $text{'default'} ], [ 0, " " ] ])."\n".
-		&ui_textbox($v, $vars{$v}, 8), 3);
+		&ui_textbox($v, $n, 8), 3);
+	}
+foreach $v (@mysql_byte_variables) {
+	$n = &find_value($v, $mems);
+	print &ui_table_row($text{'cnf_'.$v},
+		&ui_radio($v."_def", defined($n) ? 0 : 1,
+			  [ [ 1, $text{'default'} ], [ 0, " " ] ])."\n".
+		&mysql_size_input($v, $n), 3);
 	}
 
 print &ui_table_end();

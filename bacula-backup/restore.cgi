@@ -10,7 +10,7 @@ $dbh = &connect_to_database();
 @files = split(/\r?\n/, $in{'files'});
 @files || &error($text{'restore_efiles'});
 $in{'where'} =~ s/\\/\//g;
-$in{'where_def'} || $in{'where'} =~ /^([a-z]:)?\// ||
+$in{'where_def'} || $in{'where'} =~ /^([a-zA-Z]:)?\// ||
 	&error($text{'restore_ewhere'});
 $in{'client'} || &error($text{'restore_eclient'});
 if ($in{'job'} =~ /^nj_(.*)_(\d+)_(\d+)$/) {
@@ -90,6 +90,8 @@ foreach $clientjob (@clients) {
 		}
 
 	# Select the files
+	&wait_for($h->{'outfh'}, "\\\$");	# Wait for first prompt
+	print $wait_for_input;
 	foreach $f (@files) {
 		$f = &unix_to_dos($f);
 		if ($f eq "/") {
@@ -114,13 +116,19 @@ foreach $clientjob (@clients) {
 			}
 		}
 	&sysprint($h->{'infh'}, "done\n");
-	$rv = &wait_for($h->{'outfh'}, 'OK to run.*:', 'no files selected');
+	$rv = &wait_for($h->{'outfh'}, 'OK to run.*:', 'no files selected',
+				       'Select Restore Job.*:');
 	print $wait_for_input;
 	if ($rv == 0) {
 		&sysprint($h->{'infh'}, "yes\n");
 		}
 	elsif ($rv == 1) {
 		&job_error($text{'restore_enofiles'});
+		}
+	elsif ($rv == 2) {
+		&sysprint($h->{'infh'}, "1\n");
+		&wait_for($h->{'outfh'}, 'OK to run.*:');
+		&sysprint($h->{'infh'}, "yes\n");
 		}
 	else {
 		&job_error($text{'backup_eok'});

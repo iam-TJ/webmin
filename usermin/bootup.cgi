@@ -4,12 +4,22 @@
 
 require './usermin-lib.pl';
 $access{'bootup'} || &error($text{'bootup_ecannot'});
-&foreign_require("init", "init-lib.pl");
+&foreign_require("init");
 &ReadParse();
+my %miniserv;
+&get_usermin_miniserv_config(\%miniserv);
 
 if ($in{'boot'}) {
 	# Enable starting at boot
 	$start = "$config{'usermin_dir'}/start";
+	if ($init::init_mode eq "launchd") {
+		# Launchd forks automatically
+		$start .= " --nofork";
+		$fork = 0;
+		}
+	else {
+		$fork = 1;
+		}
 	$stop = "$config{'usermin_dir'}/stop";
 	$status = <<EOF;
 pidfile=`grep "^pidfile=" $config{'usermin_dir'}/miniserv.conf | sed -e 's/pidfile=//g'`
@@ -29,7 +39,9 @@ else
 fi
 EOF
 	&init::enable_at_boot("usermin", "Start or stop Usermin",
-			      $start, $stop, $status);
+			      $start, $stop, $status,
+			      { 'fork' => $fork,
+				'pidfile' => $miniserv{'pidfile'} });
 	}
 else {
 	# Disable starting at boot

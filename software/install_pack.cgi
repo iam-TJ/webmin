@@ -13,7 +13,17 @@ else {
 	}
 &error_setup($text{'install_err'});
 
-if ($in{source} >= 2) {
+if ($in{'source'} == 3 && &foreign_installed("package-updates")) {
+	# Use the package updates module instead, as it has a nicer UI
+	&redirect("/package-updates/update.cgi?redir=/$module_name/".
+		  "&redirdesc=".&urlize($module_info{'desc'}).
+		  "&mode=new".
+		  "&".join("&", map { "u=".&urlize($_) }
+				    split(/\s+/, $in{'update'})));
+	return;
+	}
+
+if ($in{'source'} >= 2) {
 	&ui_print_unbuffered_header(undef, $text{'install_title'}, "", "install");
 	}
 else {
@@ -79,14 +89,14 @@ elsif ($in{'source'} == 3) {
 
 	print &ui_hr() if (@packs);
 	foreach $p (@packs) {
-		local @pinfo = &show_package_info($p);
+		&show_package_info($p);
 		}
 	&webmin_log($config{'update_system'}, "install", undef,
 		    { 'packages' => \@packs } ) if (@packs);
 
 	if ($in{'caller'} && &foreign_check("webmin")) {
 		# Software installed - refresh installed flag cache
-		&foreign_require("webmin", "webmin-lib.pl");
+		&foreign_require("webmin");
 		($inst, $changed) =
 			&webmin::build_installed_modules(0, $in{'caller'});
 		if (@$changed && defined(&theme_post_change_modules)) {

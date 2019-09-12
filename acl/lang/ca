@@ -4,7 +4,8 @@ index_modules=Mòduls
 index_create=Crea un nou usuari Webmin.
 index_rcreate=Crea un nou usuari de nivell de risc.
 index_convert=Converteix els Usuaris Unix a Usuaris Webmin
-index_cert=Demana un certificat SSL
+index_cert=Demana un Certificat SSL
+index_twofactor=Autenticació de Dos Factors
 index_certmsg=Fes clic en aquest botó per demanar un certificat SSL que et permetrà de connectar a Webmin de forma segura sense haver d'introduir un nom d'usuari i una contrasenya.
 index_return=a la llista d'usuaris
 index_none=Cap
@@ -18,17 +19,18 @@ index_nogroups=No hi ha cap grup Webmin definit.
 index_gcreate=Crea un nou grup Webmin.
 index_members=Membres
 index_modgroups=Mòduls del grup $1
-index_sync=Configura la Sincronització d'usuaris Unix
-index_unix=Configura l'Autenticació d'usuaris Unix
+index_sync=Configura la Sincronització d'Usuaris Unix
+index_unix=Configura l'Autenticació d'Usuaris Unix
 index_sessions=Visualitza les Sessions d'Entrada
 index_rbac=Configura RBAC
 index_delete=Suprimeix els Seleccionats
+index_joingroup=Afegeix al Grup:
 index_eulist=No s'han pogut llistar els usuaris: $1
 index_eglist=No s'han pogut llistar els grups: $1
 
 edit_title=Edició d'Usuari Webmin
 edit_title2=Creació d'Usuari Webmin
-edit_readonly=Aquest usuari Webmin no s'hauria d'editar, per tal com es troba gestionat pel mòdul $1. <a href='$2'>Fés clic aquí</a> per ignorar aquest avís i editar l'usuari - però tingues en compte que els canvis manuals poden ser reescrits!
+edit_readonly=Aquest usuari Webmin no s'hauria d'editar, per tal com es troba gestionat pel mòdul $1. <a href='$2'>Fes clic aquí</a> per ignorar aquest avís i editar l'usuari - però tingues en compte que els canvis manuals poden ser reescrits!
 edit_rights=Drets d'accés de l'usuari Webmin
 edit_user=Usuari
 edit_cloneof=Clonació de l'usuari Webmin
@@ -48,8 +50,13 @@ edit_passold=La contrasenya es va canviar per darrer cop fa $1 dies
 edit_passtoday=La contrasenya es va canviar fa menys d'un dia
 edit_modules=Mòduls
 edit_clone=Clona
+edit_twofactor=Tipus d'autenticació de dos factors
+edit_twofactorprov=S'està utilitzant el proveïdor $1 amb ID $2
+edit_twofactorcancel=Elimina el requeriment d'autenticació de dos factors
+edit_twofactornone=Encara no n'hi ha cap de configurada
+edit_twofactoradd=Activa Dos Factors Per a l'Usuari
 edit_lang=Idioma
-edit_notabs=Categorització de mòduls
+edit_notabs=Categoritza els mòduls
 edit_logout=Temps d'expulsió per inactivitat
 edit_mins=minuts
 edit_chars=lletres
@@ -139,11 +146,12 @@ delete_err=No s'ha pogut suprimir l'usuari
 delete_eself=No et pots esborrar a tu mateix
 delete_ecannot=No tens permís per suprimir usuaris
 delete_euser=No tens permís per suprimir aquest usuari
+delete_eanonuser=Aquest usuari s'està utilitzant per a l'accés del mòdul anònim
 
 cert_title=Petició de Certificat
 cert_issue=Emissió de Certificat
 cert_header=Detalls del nou certificat
-cert_msg=Aquest formulari permet demanar un cerfificat client SSL que s'utilitzarà en el futur per concedir-te l'accés a Webmin, en lloc del teu nom d'usuari i contrasenya. Això és més segur, però com que l'autenticació és automàtica, no podràs canviar a un usuari diferent utilitzant el certificat.
+cert_msg=Aquest formulari permet demanar un certificat client SSL que s'utilitzarà en el futur per concedir-te l'accés a Webmin, en lloc del teu nom d'usuari i contrasenya. Això és més segur, però com que l'autenticació és automàtica, no podràs canviar a un usuari diferent utilitzant el certificat.
 cert_ebrowser=Webmin no sap com generar certificats client per al teu navegador ($1)
 cert_cn=El teu nom
 cert_email=La teva adreça e-mail
@@ -158,6 +166,7 @@ cert_install=Instal·la el certificat al navegador
 cert_ekey=No s'ha tramès la nova clau SSL al teu navegador - pot ser que no suporti certificats client SSL.
 cert_eca=No s'ha pogut establir l'autoritat certificadora: $1
 cert_already=Atenció - ja estàs utilitzant el certificat $1.
+cert_etempdir=El fitxer de certificat és invàlid
 
 acl_title=Control d'Accés al Mòdul
 acl_title2=Per a $1 de $2
@@ -179,7 +188,7 @@ acl_own=Només els seus propis mòduls
 acl_sel=Mòduls seleccionats...
 acl_create=Pot crear usuaris nous
 acl_delete=Pot suprimir usuaris
-acl_rename=Pot renomenar usuaris
+acl_rename=Pot reanomenar usuaris
 acl_acl=Pot editar el control d'accés al mòdul
 acl_lang=Pot canviar l'idioma
 acl_chcert=Pot canviar el nom del certificat SSL
@@ -223,10 +232,13 @@ log_delete_g=S'ha suprimit el grup Webmin $1
 log_switch=S'ha canviat a l'usuari Webmin $1
 log_delete_users=S'han suprimit $1 grups Webmin
 log_delete_groups=S'han suprimit $1 grups Webmin
+log_joingroup=S'han afegit $1 usuaris Webmin al grup $2
 log_pass=S'han canviat les restriccions de contrasenyes
 log_unix=S'ha canviat l'autenticació d'usuari Unix
 log_sync=S'ha canviat la sincronització d'usuari Unix
 log_sql=S'ha canviat la base de dades d'usuaris i grups
+log_twofactor=S'ha assignat l'usuari $1 amb el proveïdor de dos factors $2
+log_onefactor=S'ha desassignat l'usuari $1 de l'autenticació de dos factors
 
 gedit_ecannot=No tens permís per editar grups
 gedit_title=Edició de Grups Webmin
@@ -262,7 +274,7 @@ convert_2=Tots excepte els usuaris
 convert_3=Usuaris amb grup
 convert_4=Usuaris amb UID en el rang
 convert_group=Assigna els nous usuaris al grup Webmin
-convert_sync=Utilitza la mateixa contrasenya com a usuari Unix en un futur
+convert_sync2=En el futur, sincronitza la contrasenya amb l'usuari Unix
 convert_ok=Converteix-los Ja
 convert_err=No s'han pogut convertir els usuaris
 convert_eusers=No s'ha introduït cap usuari per convertir
@@ -276,10 +288,15 @@ convert_exists=$1 ja existeix
 convert_invalid=$1 no és un nom d'usuari Webmin vàlid
 convert_added=S'està afegint $1
 convert_msg=S'estan convertint els usuaris Unix...
+convert_user=Usuari Unix
+convert_action=Acció presa
+convert_done=S'han convertit $1 usuaris, se n'han trobat $2 d'invàlids, $3 ja existeixen, $4 s'han exclòs.
+convert_users=Usuaris a convertir
 
 sync_title=Sincronització d'Usuari Unix
 sync_desc=Aquest formulari permet configurar la sincronització automàtica dels usuaris Unix creats a través de Webmin i els usuaris d'aquest mòdul.
 sync_nogroups=No hi ha cap grup Webmin definit al sistema. Hi ha d'haver almenys un grup creat per establir l'accés dels usuaris creats.
+sync_when=Quan cal sincronitzar
 sync_create=Crea un usuari Webmin quan es creï un usuari Unix.
 sync_update=Quan s'actualitza un usuari Unix, actualitza l'usuari Webmin que hi coincideixi.
 sync_delete=Quan se suprimeixi un usuari Unix, suprimeix l'usuari Webmin que hi coincideixi.
@@ -308,7 +325,7 @@ unix_euser='$1' no és un usuari a vàlid
 unix_egroup='$1' no és un grup vàlid
 unix_shells=Denega els usuaris Unix  les shells dels quals no són al fitxer
 unix_eshells=Hi falta el fitxer de shells o bé no existeix
-unix_restrict=Les següents restriccions addicionals s'apliquen als usuaris Unix seleccionats a sobre.
+unix_restrict2=Restriccions addicionals
 unix_ewhogroup=Hi falta el grup permès a la fila $1
 unix_ewhouser=Hi falta l'usuari permès a la fila $1
 unix_enone=No has introduït cap usuari ni grup Unix permès
@@ -317,14 +334,24 @@ unix_sudo=Permet que els usuaris que poden executar totes les ordres via <tt>sud
 unix_pamany=Tracta les entrades que només passen la validació PAM com a $1
 unix_esudo=L'ordre $1 no està instal·lada
 unix_esudomod=El mòdul Perl $1 necessari per a l'autenticació <tt>sudo</tt> no està instal·lat
+unix_header=Paràmetres d'autenticació d'usuari Unix
+unix_utable=Usuaris Unix permesos
 
 sessions_title=Sessions d'Entrada Actuals
-sessions_desc=Les sessions d'entrada actuals de Webmin es llisten a sota. Per cancel·lar una sessió existent i forçar l'usuari a tornar a entrar, fes clic sobre l'ID de la sessió.
 sessions_id=ID de sessió
 sessions_user=Usuari Webmin
-sessions_login=Ha entrat a
+sessions_login=Darrera activitat a
 sessions_host=Adreça IP
 sessions_lview=Visualitza els registres...
+sessions_actions=Accions...
+sessions_logouts=Mostra també les sessions desconnectades...
+sessions_state=Estat
+sessions_this=Aquesta entrada
+sessions_in=Connectat
+sessions_out=Desconnectat
+sessions_kill=Desconnecta...
+
+logins_title=Entrades recents a Webmin
 
 hide_title=Amaga els Mòduls No Utilitzats
 hide_desc=Els mòduls següents es trauran de la llista d'accés de mòduls de $1, ja que els seus corresponents servidors no estan instal·lats al sistema...
@@ -339,11 +366,12 @@ switch_eold=No s'ha trobat la sessió existent!
 rbac_title=Configuració de RBAC
 rbac_desc=La integració de Webmin amb RBAC proporciona una forma de determinar els permisos d'ACL i mòduls d'usuari des d'una base de dades RBAC (Role Based Access Control), en lloc d'utilitzar els fitxers propis de configuració de Webmin. Un cop s'ha activat el suport RBAC, tot usuari per al qual s'hagi seleccionat l'opció <b>RBAC controla totes les ACLs i mòduls</b> tindrà les seves capacitats determinades per RBAC en lloc de la configuració de control d'accés de Webmin.
 rbac_esolaris=De moment, RBAC només està suportat per Solaris, així que no es pot utilitzar en aquest sistema $1.
-rbac_eperl=El mòdul Perl $1 necessari per a la integració amb RBAC no està instal·lat. Fés clic <a href='$2'>aquí</a> per instal·lar-lo ara.
-rbac_ok=La integració amb RBAC està disponible en aquest sistema, i es pot activar en base a cada usuari a la pàgina d'Edició d'Usuaris Webmin.
+rbac_eperl=El mòdul Perl $1 necessari per a la integració amb RBAC no està instal·lat. Fes clic <a href='$2'>aquí</a> per instal·lar-lo ara.
 rbac_ecpan=No tens accés a la pàgina de Mòduls Perl de Webmin per tal d'instal·lar el mòdul $1 necessari per a la integració amb RBAC.
+rbac_ok=La integració amb RBAC està disponible en aquest sistema, i es pot activar en base a cada usuari a la pàgina d'Edició d'Usuaris Webmin.
 
 udeletes_err=No s'han pogut suprimir els usuaris
+udeletes_jerr=No s'han pogut afegir els usuaris al grup
 udeletes_enone=No n'has seleccionat cap
 udeletes_title=Supressió d'Usuaris
 udeletes_rusure=Segur que vols suprimir els $1 usuaris seleccionats? Es perdran tots els seus detalls i totes les seves configuracions de control d'accés.
@@ -380,7 +408,7 @@ pass_emaxdays=Hi falta el nombre de dies abans del canvi de contrasenya o bé és 
 pass_elockdays=Hi falta el nombre de dies abans del bloqueig de compte o bé és invàlid
 pass_eoldblock=Hi falta el nombre de contrasenyes antigues a rebutjar o bé és invàlid
 
-cpass_minsize=Ha de ternir almenys $1 lletres de llarg
+cpass_minsize=Ha de tenir almenys $1 lletres de llarg
 cpass_notre=Coincideix amb un patró rebutjat
 cpass_re=No coincideix amb el patró demanat
 cpass_name=Conté el nom d'usuari
@@ -423,7 +451,7 @@ sql_eprefix=Hi falta el DN base o bé és invàlid (no es permeten espais)
 sql_eprefix2=El DN base sembla invàlid - ha de ser una cosa com ara <tt>dc=elmeudomini,dc=com</tt>
 sql_title2=Creació de les Taules que Falten
 sql_tableerr=Els paràmetres de la base de dades d'usuaris i grups són vàlids, però hi falten algunes taules que Webmin necessita: $1
-sql_tableerr2=Fes clic al botó <b>Crea les Taules</b> de sota per fer que es creïn automàticamebnt, o bé executa manualment el SQL d'aquí sota.
+sql_tableerr2=Fes clic al botó <b>Crea les Taules</b> de sota per fer que es creïn automàticament, o bé executa manualment el SQL d'aquí sota.
 sql_make=Crea les Taules
 sql_title3=Creació del DN que Falta
 sql_dnerr=Els paràmetres de la base de dades d'usuaris i grups són vàlids, però hi falta el DN LDAP que Webmin necessita: $1
@@ -448,4 +476,21 @@ makedn_still=S'han trobat alguns problemes, tot i que s'ha creat el DN: $1
 schema_title=Descàrrega de l'Esquema LDAP
 schema_desc=Abans que Webmin pugui utilitzar un servidor LDAP per a emmagatzemar usuaris i grups, cal configurar-lo per a utilitzar l'esquema de sota. Habitualment, això es pot fer desant la definició de l'esquema a <tt>/etc/ldap/schema</tt> o <tt>/etc/openldap/schema</tt> com a <tt>webmin.schema</tt>, i configurant llavors el servidor per a utilitzar aquest fitxer d'esquema.
 schema_download=Descarrega el fitxer d'esquema: <a href=$1>$1</a>
+
+twofactor_err=La configuració de l'autenticació de dos factors ha fallat
+twofactor_euser=No s'ha trobat el teu usuari Webmin!
+twofactor_title=Autenticació de Dos Factors
+twofactor_disable=Desactiva l'Autenticació de Dos Factors
+twofactor_already=El teu usuari Webmin ja té activada l'autenticació de dos factors amb el proveïdor $1 i l'ID de compte $2.
+twofactor_already2=L'usuari Webmin $3 ja té activada l'autenticació de dos factors amb el proveïdor $1 i l'ID de compte $2.
+twofactor_desc=Aquesta pàgina et permet d'activar l'autenticació de dos factors per al teu usuari Webmin utilitzant <a href='$2' target=_blank>$1</a>. Un cop activa, es demanarà un testimoni d'autenticació addicional en entrar a Webmin.
+twofactor_desc2=Aquesta pàgina et permet d'activar l'autenticació de dos factors per a l'usuari Webmin $3 utilitzant <a href='$2' target=_blank>$1</a>. Un cop activa, es demanarà un testimoni d'autenticació addicional en entrar a Webmin.
+twofactor_enable=Assigna Autenticació de Dos Factors
+twofactor_header=Detalls de l'assignació de l'autenticació de dos factors
+twofactor_enrolling=S'està assignant l'autenticació de dos factors amb el proveïdor ...
+twofactor_failed=...l'assignació ha fallat: $1
+twofactor_done=...completa. El teu ID amb aquest proveïdor és <tt>$1</tt>.
+twofactor_setup=L'autenticació de dos factors encara no s'ha activat al sistema, però es pot activar utilitzant el mòdul de <a href='$1'>Configuració de Webmin</a>.
+twofactor_ebutton=No has fet clic a cap botó!
+
 __norefs=1

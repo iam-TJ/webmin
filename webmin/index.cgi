@@ -16,37 +16,37 @@ my (@wlinks, @wtitles, @wicons);
 @wlinks = ( "edit_access.cgi", "edit_bind.cgi", "edit_log.cgi",
 	    "edit_proxy.cgi", "edit_ui.cgi", "edit_mods.cgi",
 	    "edit_os.cgi", "edit_lang.cgi", "edit_startpage.cgi",
-	    "edit_upgrade.cgi", "edit_session.cgi", "edit_assignment.cgi",
+	    "edit_upgrade.cgi", "edit_session.cgi", "edit_twofactor.cgi",
+	    "edit_assignment.cgi",
 	    "edit_categories.cgi", "edit_descs.cgi", "edit_themes.cgi",
 	    "edit_referers.cgi", "edit_anon.cgi", "edit_lock.cgi",
 	    "edit_mobile.cgi", "edit_blocked.cgi", "edit_status.cgi",
-            "edit_advanced.cgi", "edit_debug.cgi", "edit_web.cgi", );
+            "edit_advanced.cgi", "edit_debug.cgi", "edit_web.cgi",
+	    "edit_webmincron.cgi", );
 @wtitles = ( $text{'access_title'}, $text{'bind_title'},
 	     $text{'log_title'}, $text{'proxy_title'},
 	     $text{'ui_title'}, $text{'mods_title'},
 	     $text{'os_title'}, $text{'lang_title'},
 	     $text{'startpage_title'}, $text{'upgrade_title'},
-	     $text{'session_title'}, $text{'assignment_title'},
+	     $text{'session_title'}, $text{'twofactor_title'},
+             $text{'assignment_title'},
 	     $text{'categories_title'}, $text{'descs_title'},
 	     $text{'themes_title'}, $text{'referers_title'},
 	     $text{'anon_title'}, $text{'lock_title'},
 	     $text{'mobile_title'}, $text{'blocked_title'},
 	     $text{'status_title'}, $text{'advanced_title'},
-	     $text{'debug_title'}, $text{'web_title'}, );
+	     $text{'debug_title'}, $text{'web_title'},
+	     $text{'webmincron_title'}, );
 @wicons = ( "images/access.gif", "images/bind.gif", "images/log.gif",
 	    "images/proxy.gif", "images/ui.gif", "images/mods.gif",
 	    "images/os.gif", "images/lang.gif", "images/startpage.gif",
-            "images/upgrade.gif", "images/session.gif",
+            "images/upgrade.gif", "images/session.gif", "images/twofactor.gif",
 	    "images/assignment.gif", "images/categories.gif",
 	    "images/descs.gif", "images/themes.gif", "images/referers.gif",
 	    "images/anon.gif", "images/lock.gif", "images/mobile.gif",
 	    "images/blocked.gif", "images/status.gif",
-	    "images/advanced.gif", "images/debug.gif", "images/web.gif", );
-if ($gconfig{'eazel'}) {
-	push(@wlinks, "edit_syslet.cgi");
-	push(@wtitles, $text{'syslet_title'});
-	push(@wicons, "images/syslet.gif");
-	}
+	    "images/advanced.gif", "images/debug.gif", "images/web.gif",
+	    "images/webmincron.gif", );
 if (&foreign_check("mailboxes")) {
 	push(@wlinks, "edit_sendmail.cgi");
 	push(@wtitles, $text{'sendmail_title'});
@@ -80,7 +80,7 @@ my %miniserv;
 &get_miniserv_config(\%miniserv);
 
 if (&foreign_check("init")) {
-	&foreign_require("init", "init-lib.pl");
+	&foreign_require("init");
 	my $starting = &init::action_status("webmin");
 	print &ui_buttons_row("bootup.cgi",
 	      $text{'index_boot'},
@@ -97,12 +97,6 @@ if (&foreign_check("init")) {
 if (!$miniserv{'inetd'} && $ENV{'MINISERV_CONFIG'}) {
 	print &ui_buttons_row("restart.cgi",
 		      $text{'index_restart'}, $text{'index_restartmsg'});
-	}
-
-# Submit OS info
-if (!$config{'submitted'}) {
-	print &ui_buttons_row("submit.cgi",
-		      $text{'index_submit'}, $text{'index_submitmsg'});
 	}
 
 # Refresh modules

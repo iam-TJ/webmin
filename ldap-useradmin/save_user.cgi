@@ -172,6 +172,8 @@ else {
 	$in{'user'} =~ /^[^:\t]+$/ ||
 		&error(&text('usave_ebadname', $in{'user'}));
 	$in{'user'} =~ s/\r//g;
+	$err = &useradmin::check_username_restrictions($in{'user'});
+	&error($err) if ($err);
 	$in{'real'} || &error($text{'usave_ereal'});
 	@users = split(/\n/, $in{'user'});
 	$user = $users[0];
@@ -238,12 +240,13 @@ else {
 
 	local $pfx = $config{'md5'} == 1 || $config{'md5'} == 3 ? "{md5}" :
 	       	     $config{'md5'} == 4 ? "{ssha}" :
+	       	     $config{'md5'} == 5 ? "{sha}" :
 	       	     $config{'md5'} == 0 ? "{crypt}" : "";
 	if ($in{'passmode'} == 0) {
 		# Password is blank
 		if (!$mconfig{'empty_mode'}) {
 			local $err = &useradmin::check_password_restrictions(
-					"", $user);
+				"", $user, $in{'new'} ? 'none' : \%ouser);
 			&error($err) if ($err);
 			}
 		$pass = "";
@@ -260,7 +263,8 @@ else {
 	elsif ($in{'passmode'} == 3) {
 		# Normal password entered - check restrictions
 		local $err = &useradmin::check_password_restrictions(
-				$in{'pass'}, $user);
+				$in{'pass'}, $user,
+				$in{'new'} ? 'none' : \%ouser);
 		&error($err) if ($err);
 		$pass = $pfx.&encrypt_password($in{'pass'});
 		$plainpass = $in{'pass'};
@@ -347,7 +351,7 @@ else {
 		push(@classes, split(' ',$cyrus_class)) if ($in{'cyrus'});
 		@classes = grep { /\S/ } @classes;	# Remove empty
 		&name_fields();
-		@classes = &unique(@classes);
+		@classes = &uniquelc(@classes);
 		$base = &get_user_base();
 		$newdn = "uid=$user,$base";
 		@allprops = ( "cn" => $real,
@@ -356,7 +360,7 @@ else {
                               "loginShell" => $shell,
                               "homeDirectory" => $home,
                               "gidNumber" => $gid,
-                              "userPassword" => $pass,
+                              $pass ? ( "userPassword" => $pass ) : ( ),
                               "objectClass" => \@classes,
 			      @props );
 		if (&indexoflc("person", @classes) >= 0 &&
@@ -519,7 +523,7 @@ else {
 			}
 		push(@classes, "shadowAccount") if ($shadow);
 		&name_fields();
-		@classes = &unique(@classes);
+		@classes = &uniquelc(@classes);
 		@classes = grep { /\S/ } @classes;	# Remove empty
 		@rprops = grep { defined($uinfo->get_value($_)) } @rprops;
 
@@ -544,13 +548,16 @@ else {
 			      "loginShell" => $shell,
 			      "homeDirectory" => $home,
 			      "gidNumber" => $gid,
-			      "userPassword" => $pass,
+			      $pass ? ( "userPassword" => $pass ) : ( ),
 			      "objectClass" => \@classes,
 			      @props );
 		if (&indexoflc("person", @classes) >= 0 &&
 		    !$allprops{'sn'}) {
 			# Person needs 'sn'
 			$allprops{'sn'} = $real;
+			}
+		if (!$pass) {
+			push(@rprops, "userPassword");
 			}
 		$rv = $ldap->modify($newdn, 'replace' => \%allprops,
 					    'delete' => \@rprops);
@@ -810,7 +817,7 @@ if ($config{'given'}) {
 		push(@classes, $config{'given_class'});
 		}
 	}
-if (&in_schema($schema, "gecos")) {
+if (&in_schema($schema, "gecos") && $config{'gecos'}) {
 	push(@props, "gecos", &remove_accents($in{'real'}));
 	}
 }

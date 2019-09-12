@@ -10,9 +10,24 @@ if ($in{'new'}) {
 	}
 else {
 	&ui_print_header(undef, $text{'user_edit'}, "");
-	$s = &execute_sql_safe($config{'basedb'}, "select * from pg_shadow ".
-					     "where usename = '$in{'user'}'");
+	($pg_table, $pg_cols) = &get_pg_shadow_table();
+	$s = &execute_sql_safe($config{'basedb'},
+		"select $pg_cols from $pg_table ".
+		"where usename = '$in{'user'}'");
 	@user = @{$s->{'data'}->[0]};
+	}
+
+# Check if this is a Virtualmin-managed user
+if (!$in{'new'} && &foreign_check("virtual-server")) {
+	&foreign_require("virtual-server");
+	my $d = &virtual_server::get_domain_by("postgres_user", $user[0],
+					       "parent", "");
+	$d ||= &virtual_server::get_domain_by("user", $user[0],
+                                              "parent", "");
+	if ($d) {
+		print "<b>",&text('user_vwarning',
+			&virtual_server::show_domain_name($d)),"</b><p>\n";
+		}
 	}
 
 # Start of the form
@@ -49,9 +64,11 @@ else {
 print &ui_table_row($text{'user_db'},
 	&ui_yesno_radio("db", $user[2] =~ /t|1/));
 
-# Create create other users?
-print &ui_table_row($text{'user_other'},
-	&ui_yesno_radio("other", $user[4] =~ /t|1/));
+if (&get_postgresql_version() < 9.5) {
+	# Create create other users?
+	print &ui_table_row($text{'user_other'},
+		&ui_yesno_radio("other", $user[4] =~ /t|1/));
+	}
 
 # Valid until
 $user[6] = '' if ($user[6] !~ /\S/);

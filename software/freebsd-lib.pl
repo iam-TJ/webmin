@@ -3,11 +3,33 @@
 
 use POSIX;
 chop($system_arch = `uname -m`);
+
+if (&use_pkg_ng()) {
+	# check whether the new pkg manager is available and use that.
+	$pkg_info    = "pkg info";
+	$pkg_add     = "pkg add";
+	$pkg_delete  = "pkg delete";
+	}
+else {
+	# If not, default to the previous pkg manager tools
+	$pkg_info    = "pkg_info";
+	$pkg_add     = "pkg_add";
+	$pkg_delete  = "pkg_delete";
+	}
+
 $package_dir = "/var/db/pkg";
+
+sub use_pkg_ng
+{
+return 0 if (!-x "/usr/sbin/pkg");
+local @lines = split(/\n/, &backquote_command(
+			"/usr/sbin/pkg info 2>/dev/null </dev/null"));
+return @lines > 1 ? 1 : 0;
+}
 
 sub list_package_system_commands
 {
-return ("pkg_info", "pkg_add");
+return ($pkg_info, $pkg_add);
 }
 
 # list_packages([package]*)
@@ -17,12 +39,13 @@ sub list_packages
 local $i = 0;
 local $arg = @_ ? join(" ", map { quotemeta($_) } @_) : "-a";
 %packages = ( );
-&open_execute_command(PKGINFO, "pkg_info -I $arg", 1, 1);
+&open_execute_command(PKGINFO, "$pkg_info -I $arg", 1, 1);
 while(<PKGINFO>) {
-	if (/^(\S+)\s+(.*)/) {
+	if (/^(\S+)\-(\d\S+)\s+(.*)/) {
 		$packages{$i,'name'} = $1;
+		$packages{$i,'version'} = $2;
 		$packages{$i,'class'} = "";
-		$packages{$i,'desc'} = $2;
+		$packages{$i,'desc'} = $3;
 		$i++;
 		}
 	}
@@ -30,34 +53,36 @@ close(PKGINFO);
 return $i;
 }
 
-# package_info(package)
+# package_info(package, [version])
 # Returns an array of package information in the order
 #  name, class, description, arch, version, vendor, installtime
 sub package_info
 {
-local $qm = quotemeta($_[0]);
-local $out = &backquote_command("pkg_info $qm 2>&1", 1);
+local ($name, $ver) = @_;
+local $qm = quotemeta($name.($ver ? '='.$ver : '>=0'));
+local $out = &backquote_command("$pkg_info $qm 2>&1", 1);
 return () if ($?);
-local @rv = ( $_[0] );
+local @rv = ( $name );
 push(@rv, "");
 push(@rv, $out =~ /Description:\n([\0-\177]*\S)/i ? $1 : $text{'bsd_unknown'});
 push(@rv, $system_arch);
-push(@rv, $_[0] =~ /-([^\-]+)$/ ? $1 : $text{'bsd_unknown'});
+push(@rv, $out =~ /Information\s+for\s+(\S+)\-(\d\S+)/ ? $2 : $ver);
 push(@rv, "FreeBSD");
-local @st = stat(&translate_filename("$package_dir/$_[0]"));
+local @st = stat(&translate_filename("$package_dir/$name-$ver"));
 push(@rv, @st ? ctime($st[9]) : $text{'bsd_unknown'});
 return @rv;
 }
 
-# check_files(package)
+# check_files(package, version)
 # Fills in the %files array with information about the files belonging
 # to some package. Values in %files are  path type user group mode size error
 sub check_files
 {
+local ($name, $ver) = @_;
 local $i = 0;
 local $file;
-local $qm = quotemeta($_[0]);
-&open_execute_command(PKGINFO, "pkg_info -L $qm", 1, 1);
+local $qm = quotemeta($name.($ver ? '='.$ver : '>=0'));
+&open_execute_command(PKGINFO, "$pkg_info -L $qm", 1, 1);
 while($file = <PKGINFO>) {
 	$file =~ s/\r|\n//g;
 	next if ($file !~ /^\//);
@@ -76,14 +101,14 @@ while($file = <PKGINFO>) {
 return $i;
 }
 
-# package_files(package)
+# package_files(package, version)
 # Returns a list of all files in some package
 sub package_files
 {
-local ($pkg) = @_;
-local $qn = quotemeta($pkg);
+local ($pkg, $v) = @_;
+local $qn = quotemeta($pkg.($v ? '='.$v : '>=0'));
 local @rv;
-&open_execute_command(RPM, "pkg_info -L $qn", 1, 1);
+&open_execute_command(RPM, "$pkg_info -L $qn", 1, 1);
 while(<RPM>) {
 	s/\r|\n//g;
 	if (/^\//) {
@@ -103,7 +128,7 @@ sub installed_file
 local (%packages, $file, $i, @pkgin);
 local $n = &list_packages();
 for($i=0; $i<$n; $i++) {
-	&open_execute_command(PKGINFO, "pkg_info -L $packages{$i,'name'}", 1, 1);
+	&open_execute_command(PKGINFO, "$pkg_info -L $packages{$i,'name'}", 1, 1);
 	while($file = <PKGINFO>) {
 		$file =~ s/\r|\n//g;
 		if ($file eq $_[0]) {
@@ -243,7 +268,7 @@ sub install_package
 local $in = $_[2] ? $_[2] : \%in;
 local $args = ($in->{"scripts"} ? " -I" : "").
 	      ($in->{"force"} ? " -f" : "");
-local $out = &backquote_logged("pkg_add $args $_[0] 2>&1");
+local $out = &backquote_logged("$pkg_add $args $_[0] 2>&1");
 if ($?) {
 	return "<pre>$out</pre>";
 	}
@@ -264,18 +289,39 @@ if (-d $_[0]) {
 else {
 	$file = $_[0];
 	}
-local $out = &backquote_logged("pkg_add $args $file 2>&1");
+local $out = &backquote_logged("$pkg_add $args $file 2>&1");
 if ($?) {
 	return "<pre>$out</pre>";
 	}
 return undef;
 }
 
-# delete_package(package)
+# delete_package(package, &in, version)
 # Totally remove some package
 sub delete_package
 {
-local $out = &backquote_logged("pkg_delete $_[0] 2>&1");
+local ($name, $in, $ver) = @_;
+local $qm = quotemeta($name.($ver ? '='.$ver : '>=0'));
+local $out = &backquote_logged("$pkg_delete $qm 2>&1");
+if ($? && $ver) {
+	$qm = quotemeta($name.'-'.$ver);
+	$out = &backquote_logged("$pkg_delete $qm 2>&1");
+	}
+if ($?) { return "<pre>$out</pre>"; }
+return undef;
+}
+
+# delete_packages(&packages, &in, &versions)
+# Totally remove some list of packages
+sub delete_packages
+{
+local ($names, $in, $vers) = @_;
+local @qm;
+for(my $i=0; $i<@$names; $i++) {
+	local $qm = quotemeta($names[$i].($vers[$i] ? '='.$vers[$i] : '>=0'));
+	push(@qm, $qm);
+	}
+local $out = &backquote_logged("$pkg_delete ".join(" ", @qm)." 2>&1");
 if ($?) { return "<pre>$out</pre>"; }
 return undef;
 }
@@ -287,7 +333,7 @@ return &text('bsd_manager', "FreeBSD");
 
 sub package_help
 {
-return "pkg_add pkg_info pkg_delete";
+return "$pkg_add $pkg_info $pkg_delete";
 }
 
 1;

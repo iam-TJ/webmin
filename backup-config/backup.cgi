@@ -11,6 +11,7 @@ our (%in, %text, %config, $module_config_file);
 &error_setup($text{'backup_err'});
 my $dest = &parse_backup_destination("dest", \%in);
 my ($configfile, $nofiles, $others) = &parse_backup_what("what", \%in);
+$others ||= "";
 my @mods = split(/\0/, $in{'mods'});
 @mods || ($nofiles && !$configfile) || &error($text{'backup_emods'});
 
@@ -40,12 +41,13 @@ else {
 	my $temp = &transname();
 	my $size;
 	$err = &execute_backup(\@mods, $temp, \$size, undef,
-			       $configfile, $nofiles);
+			       $configfile, $nofiles,
+			       [ split(/\t+/, $others) ]);
 	if ($err) {
 		&unlink_file($temp);
 		&error($err);
 		}
-	print "Content-type: application/octet-stream\n\n";
+	print "Content-type: application/x-gzip\n\n";
 	my $buf;
 	open(TEMP, $temp);
 	while(read(TEMP, $buf, 1024)) {

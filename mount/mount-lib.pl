@@ -93,21 +93,20 @@ return @rv ? join(",", @rv) : "-";
 # to a creation program, and then redirected back to the original mount cgi
 sub swap_form
 {
+local ($file) = @_;
 &ui_print_header(undef, "Create Swap File", "");
-print "<form action=create_swap.cgi>\n";
-foreach $k (keys %in) {
-	print "<input type=hidden name=\"$k\" value=\"$in{$k}\">\n";
+print &ui_form_start("create_swap.cgi");
+foreach my $k (keys %in) {
+	print &ui_hidden($k, $in{$k});
 	}
-print "<input type=hidden name=cswap_file value=\"$_[0]\">\n";
-print "The swap file <tt>$_[0]</tt> does not exist.<p>\n";
-print "Create and mount a swap file with size <input name=cswap_size size=6>\n";
-print "<select name=cswap_units>\n";
-print "<option value=k> kB\n";
-print "<option value=m selected> MB\n";
-print "<option value=g> GB\n";
-print "</select>\n";
-print "<input type=submit value=\"Create\"></form>\n";
-&ui_print_footer("", "mount list");
+print &ui_hidden("cswap_file", $file);
+print &text('cswap_file', "<tt>$file</tt>"),"<p>\n";
+print $text{'cswap_size'},"\n";
+print &ui_textbox("cswap_size", undef, 6)," ",
+      &ui_select("cswap_units", "m",
+		 [ [ "m", "MB" ], [ "g", "GB" ], [ "t", "TB" ] ])."\n";
+print &ui_form_end([ [ undef, $text{'create'} ] ]);
+&ui_print_footer("", $text{'index_return'});
 exit;
 }
 
@@ -117,8 +116,9 @@ sub nfs_server_chooser_button
 local($form);
 $form = @_ > 1 ? $_[1] : 0;
 if ($access{'browse'}) {
-	print "<input type=button onClick='ifield = document.forms[$form].$_[0]; nfs_server = window.open(\"../$module_name/nfs_server.cgi\", \"nfs_server\", \"toolbar=no,menubar=no,scrollbars=yes,width=400,height=300\"); nfs_server.ifield = ifield; window.ifield = ifield' value=\"...\">\n";
+	return "<input type=button onClick='ifield = document.forms[$form].$_[0]; nfs_server = window.open(\"../$module_name/nfs_server.cgi\", \"nfs_server\", \"toolbar=no,menubar=no,scrollbars=yes,width=400,height=300\"); nfs_server.ifield = ifield; window.ifield = ifield' value=\"...\">\n";
 	}
+return undef;
 }
 
 # nfs_export_chooser_button(serverinput, exportinput, [form])
@@ -127,8 +127,9 @@ sub nfs_export_chooser_button
 local($form);
 $form = @_ > 2 ? $_[2] : 0;
 if ($access{'browse'}) {
-	print "<input type=button onClick='if (document.forms[$form].$_[0].value != \"\") { ifield = document.forms[$form].$_[1]; nfs_export = window.open(\"../$module_name/nfs_export.cgi?server=\"+document.forms[$form].$_[0].value, \"nfs_export\", \"toolbar=no,menubar=no,scrollbars=yes,width=500,height=200\"); nfs_export.ifield = ifield; window.ifield = ifield }' value=\"...\">\n";
+	return "<input type=button onClick='if (document.forms[$form].$_[0].value != \"\") { ifield = document.forms[$form].$_[1]; nfs_export = window.open(\"../$module_name/nfs_export.cgi?server=\"+document.forms[$form].$_[0].value, \"nfs_export\", \"toolbar=no,menubar=no,scrollbars=yes,width=500,height=200\"); nfs_export.ifield = ifield; window.ifield = ifield }' value=\"...\">\n";
 	}
+return undef;
 }
 
 # smb_server_chooser_button(serverinput, [form])
@@ -137,8 +138,9 @@ sub smb_server_chooser_button
 local($form);
 $form = @_ > 1 ? $_[1] : 0;
 if (&has_command($config{'smbclient_path'}) && $access{'browse'}) {
-	print "<input type=button onClick='ifield = document.forms[$form].$_[0]; smb_server = window.open(\"../$module_name/smb_server.cgi\", \"smb_server\", \"toolbar=no,menubar=no,scrollbars=yes,width=400,height=300\"); smb_server.ifield = ifield; window.ifield = ifield' value=\"...\">\n";
+	return "<input type=button onClick='ifield = document.forms[$form].$_[0]; smb_server = window.open(\"../$module_name/smb_server.cgi\", \"smb_server\", \"toolbar=no,menubar=no,scrollbars=yes,width=400,height=300\"); smb_server.ifield = ifield; window.ifield = ifield' value=\"...\">\n";
 	}
+return undef;
 }
 
 # smb_share_chooser_button(serverinput, shareinput, [form])
@@ -147,8 +149,9 @@ sub smb_share_chooser_button
 local($form);
 $form = @_ > 2 ? $_[2] : 0;
 if (&has_command($config{'smbclient_path'}) && $access{'browse'}) {
-	print "<input type=button onClick='if (document.forms[$form].$_[0].value != \"\") { ifield = document.forms[$form].$_[1]; smb_share = window.open(\"../$module_name/smb_share.cgi?server=\"+document.forms[$form].$_[0].value, \"smb_share\", \"toolbar=no,menubar=no,scrollbars=yes,width=400,height=300\"); smb_share.ifield = ifield; window.ifield = ifield }' value=\"...\">\n";
+	return "<input type=button onClick='if (document.forms[$form].$_[0].value != \"\") { ifield = document.forms[$form].$_[1]; smb_share = window.open(\"../$module_name/smb_share.cgi?server=\"+document.forms[$form].$_[0].value, \"smb_share\", \"toolbar=no,menubar=no,scrollbars=yes,width=400,height=300\"); smb_share.ifield = ifield; window.ifield = ifield }' value=\"...\">\n";
 	}
+return undef;
 }
 
 # Include the correct OS-specific functions file
@@ -287,38 +290,106 @@ return ( );
 }
 
 # local_disk_space([&always-count])
-# Returns the total local and free disk space on the system.
+# Returns the total local and free disk space on the system, plus a list of
+# per-filesystem total and free
 sub local_disk_space
 {
 my ($always) = @_;
 my ($total, $free) = (0, 0);
+my @fs;
 my @mounted = &mount::list_mounted();
 my %donezone;
 my %donevzfs;
-foreach $m (@mounted) {
+my %donedevice;
+my %donedevno;
+
+# Get list of zone pools
+my %zpools = ( 'zones' => 1, 'zroot' => 1 );
+if (&has_command("zpool")) {
+	foreach my $flag ("-P", "-p") {
+		my @out = &backquote_command("zpool list $flag 2>/dev/null");
+		foreach my $l (@out) {
+			if (/^(\S+)\s+(\d+)\s+(\d+)\s+(\d+)/) {
+				$zpools{$1} = [ $2 / 1024, $4 / 1024 ];
+				}
+			}
+		}
+	}
+
+# Add up all local filesystems
+foreach my $m (@mounted) {
 	if ($m->[2] =~ /^ext/ ||
 	    $m->[2] eq "reiserfs" || $m->[2] eq "ufs" ||
 	    $m->[2] eq "zfs" || $m->[2] eq "simfs" || $m->[2] eq "vzfs" ||
-	    $m->[2] eq "xfs" || $m->[2] eq "jfs" ||
+	    $m->[2] eq "xfs" || $m->[2] eq "jfs" || $m->[2] eq "btrfs" ||
 	    $m->[1] =~ /^\/dev\// ||
 	    &indexof($m->[1], @$always) >= 0) {
-		if ($m->[1] =~ /^zones\/([^\/]+)/ &&
-                    $m->[2] eq "zfs" && $donezone{$1}++) {
-			# Don't double-count zones
+		my $zp;
+		if ($m->[1] =~ /^([^\/]+)(\/(\S+))?/ &&
+                    $m->[2] eq "zfs" && $zpools{$1}) {
+			# Don't double-count maps from the same zone pool
+			next if ($donezone{$1}++);
+			$zp = $zpools{$1};
+			}
+		if ($donedevice{$m->[0]}++ ||
+		    $donedevice{$m->[1]}++) {
+			# Don't double-count mounts from the same device, or
+			# on the same directory.
 			next;
 			}
-		my ($t, $f) = &mount::disk_space($m->[2], $m->[0]);
+		my @st = stat($m->[0]);
+		if (@st && $donedevno{$st[0]}++) {
+			# Don't double-count same filesystem by device number
+			next;
+			}
+		if ($m->[1] eq "/dev/fuse") {
+			# Skip fuse user-space filesystem mounts
+			next;
+			}
+		if ($m->[2] eq "swap") {
+			# Skip virtual memory
+			next;
+			}
+		if ($m->[2] eq "squashfs") {
+			# Skip /snap mounts
+			next;
+			}
+		if ($m->[1] =~ /^\/dev\/sr/) {
+			# Skip CDs
+			next;
+			}
+		# Get the size - for ZFS mounts, this comes from the underlying
+		# total pool size and free
+		my ($t, $f);
+		if ($zp) {
+			($t, $f) = @$zp;
+			}
+		else {
+			($t, $f) = &disk_space($m->[2], $m->[0]);
+			}
 		if (($m->[2] eq "simfs" || $m->[2] eq "vzfs" ||
-		     $m->[0] eq "/dev/vzfs") &&
+		     $m->[0] eq "/dev/vzfs" ||
+		     $m->[0] eq "/dev/simfs") &&
 		    $donevzfs{$t,$f}++) {
 			# Don't double-count VPS filesystems
 			next;
 			}
 		$total += $t*1024;
 		$free += $f*1024;
+		my ($it, $if);
+		if (defined(&inode_space)) {
+			($it, $if) = &inode_space($m->[2], $m->[0]);
+			}
+		push(@fs, { 'total' => $t*1024,
+			    'free' => $f*1024,
+			    'itotal' => $it,
+			    'ifree' => $if,
+			    'dir' => $m->[0],
+			    'device' => $m->[1],
+			    'type' => $m->[2] });
 		}
 	}
-return ($total, $free);
+return ($total, $free, \@fs);
 }
 
 1;

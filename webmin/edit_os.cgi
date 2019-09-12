@@ -10,21 +10,21 @@ print $text{'os_desc3'},"<br>\n";
 print $text{'os_desc2'},"<p>\n";
 
 print &ui_form_start("change_os.cgi", "post");
-print &ui_table_start($text{'os_header'}, undef, 2, [ "width=30%" ]);
+print &ui_table_start($text{'os_header'}, undef, 2, [ "width=40%" ]);
 
 # OS according to Webmin
 print &ui_table_row($text{'os_webmin'},
    &ui_select("type", $gconfig{'real_os_type'},
 	[ map { [ $_ ] } sort { $a cmp $b } &unique(map { $_->{'realtype'} }
 				 &list_operating_systems()) ])." ".
-   &ui_textbox("version", $gconfig{'real_os_version'}, 10));
+   &ui_textbox("version", $gconfig{'real_os_version'}, 10), undef, [ "valign=middle","valign=middle" ]);
 
 # Internal OS code
 print &ui_table_row($text{'os_iwebmin'},
     &ui_select("itype", $gconfig{'os_type'},
 	[ map { [ $_ ] } sort { $a cmp $b } &unique(map { $_->{'type'} }
 				 &list_operating_systems()) ])." ".
-    &ui_textbox("iversion", $gconfig{'os_version'}, 10));
+    &ui_textbox("iversion", $gconfig{'os_version'}, 10), undef, [ "valign=middle","valign=middle" ]);
 
 # Detected OS
 %osinfo = &detect_operating_system();
@@ -34,7 +34,7 @@ if ($osinfo{'real_os_type'}) {
 		($osinfo{'os_type'} ne $gconfig{'os_type'} ||
 		 $osinfo{'os_version'} ne $gconfig{'os_version'} ?
 			"<br>".&ui_checkbox("update", 1, $text{'os_update'}) :
-			""));
+			""), undef, [ "valign=middle","valign=middle" ]);
 	}
 else {
 	print &ui_table_row($text{'os_detect'},

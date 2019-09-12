@@ -2,7 +2,6 @@
 # Show details of one filter
 
 require './filter-lib.pl';
-&foreign_require("mailbox", "mailbox-lib.pl");
 &ReadParse();
 
 # Show page header and get the filter
@@ -88,6 +87,7 @@ else {
 		$regexp = 1;
 		}
 	}
+$condvalue = &mailbox::decode_mimewords($condvalue);
 print &ui_table_row(
 	&ui_oneradio("cmode", 4, $text{'edit_cmode4'}, $cmode == 4),
 	&text('edit_cheader2',
@@ -105,7 +105,7 @@ print &ui_table_row(
 			   [ 1, $text{'edit_modecont'} ],
 			   [ 2, $text{'edit_modeend'} ] ]),
 	      &ui_textbox("condvalue", $condvalue, 40, 0, undef,
-			  "onFocus='form.cmode[3].checked = true'")." ".
+			  "onFocus='form.cmode[3].checked = true'")."<br>\n".
 	      &ui_checkbox("condregexp", 1, $text{'edit_regexp'}, $regexp)),
 	undef, \@tds);
 
@@ -231,7 +231,8 @@ else {
 $cs = !$in{'new'} ? $r->{'charset'} :
       &get_charset() eq $default_charset ? undef : &get_charset();
 print &ui_table_row(
-	&ui_oneradio("amode", 6, $text{'edit_amode6'}, $amode == 6),
+	&ui_oneradio("amode", 6, $text{'edit_amode6'}, $amode == 6,
+		     "onClick='form.continue.checked = true'"),
 	&ui_textarea("reply", $filter->{'reply'}->{'autotext'}, 5, 60)."<br>".
 	"<table>\n".
 	$replyblock.
@@ -246,6 +247,9 @@ print &ui_table_row(
 	"<tr> <td><b>$text{'index_charset'}</b></td> ".
 	"<td>".&ui_opt_textbox("charset", $cs, 20,
 		       $text{'default'}." ($default_charset)")."</td> </tr>\n".
+	"<tr> <td><b>$text{'index_subject'}</b></td> ".
+	"<td>".&ui_opt_textbox("subject", $in{'new'} ? "" : $r->{'subject'}, 20,
+		       $text{'default'}." (Autoreply to \$SUBJECT)")."</td> </tr>\n".
 	"</table>",
 	undef, \@tds);
 
@@ -258,12 +262,33 @@ print &ui_table_end();
 
 # End of the form, with buttons
 if ($in{'new'}) {
-	print &ui_form_end([ [ "create", $text{'create'} ] ]);
+	@buts = ( [ "create", $text{'create'} ] );
 	}
 else {
-	print &ui_form_end([ [ "save", $text{'save'} ],
-			     [ "delete", $text{'delete'} ] ]);
+	@buts = ( [ "save", $text{'save'} ],
+		  [ "delete", $text{'delete'} ] );
+	($inbox) = grep { $_->{'inbox'} } @folders;
+	if ($cmode == 4 || $cmode == 5 || $cmode == 6) {
+		# Add button to show results of a search for the filter's
+		# conditions
+		push(@buts, undef,
+			    [ "apply", $text{'edit_apply'},
+			      &ui_select("applyfrom",
+				 $inbox ? &mailbox::folder_name($inbox) : "",
+				 [ map { [ &mailbox::folder_name($_),
+					   $_->{'name'} ] } @folders ]) ]);
+		}
+	if (($cmode == 4 || $cmode == 5 || $cmode == 6) && $amode == 0) {
+		# Add button to apply the action to matching emails
+		push(@buts, undef,
+			    [ "move", $text{'edit_move'},
+			      &ui_select("movefrom",
+				 $inbox ? &mailbox::folder_name($inbox) : "",
+				 [ map { [ &mailbox::folder_name($_),
+					   $_->{'name'} ] } @folders ]) ]);
+		}
 	}
+print &ui_form_end(\@buts);
 
 # Show page footer
 &ui_print_footer("", $text{'index_return'});

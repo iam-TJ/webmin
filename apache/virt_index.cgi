@@ -18,6 +18,10 @@ if ($in{'virt'} && $access{'types'} eq '*') {
 		     "name" => $text{'virt_edit'},
 		     "link" => "manual_form.cgi?virt=$in{'virt'}" };
 	}
+if ($v->{'value'} =~ /:80$/ || $v->{'value'} !~ /:/) {
+	# Hide SSL icon for non-SSL sites
+	$access_types{14} = 0;
+	}
 &config_icons("virtual", "edit_virt.cgi?virt=$in{'virt'}&", $sw_icon,
 	      $ed_icon ? $ed_icon : ());
 
@@ -47,7 +51,7 @@ if (@dir) {
 					  $text{'virt_type'} ]);
 		for($i=0; $i<@links; $i++) {
 			print &ui_columns_row([
-			  "<a href='$links[$i]'>$titles[$i]</a>",
+			  &ui_link($links[$i], $titles[$i]),
 			  $text{'virt_'.$types[$i]} ]);
 			}
 		print &ui_columns_end();
@@ -85,7 +89,8 @@ print &ui_table_row($text{'virt_path'},
 print &ui_table_end();
 print &ui_form_end([ [ "", $text{'create'} ] ]);
 
-if ($in{'virt'} && $access{'vaddr'}) {
+$d = &is_virtualmin_domain($v);
+if ($in{'virt'} && $access{'vaddr'} && !$d) {
 	# Show form for changing virtual server
 	print &ui_hr();
 	print &ui_form_start("save_vserv.cgi");
@@ -153,6 +158,9 @@ if ($in{'virt'} && $access{'vaddr'}) {
 	print &ui_table_end();
 	print &ui_form_end([ [ undef, $text{'save'} ],
 			     [ "delete", $text{'delete'} ] ]);
+	}
+elsif ($in{'virt'} && $access{'vaddr'} && $d) {
+	print "<b>",&text('vserv_virtualmin', $d->{'dom'}),"</b><p>\n";
 	}
 
 &ui_print_footer("", $text{'index_return'});

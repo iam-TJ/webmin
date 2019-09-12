@@ -13,6 +13,7 @@ if (!-d $modules_config) {
 	($modules_config) = glob('/etc/modprobe.d/arch/*');
 	}
 $network_interfaces = '/proc/net/dev';
+$sysctl_config = "/etc/sysctl.conf";
 
 do 'linux-lib.pl';
 
@@ -59,29 +60,30 @@ foreach $iface (@ifaces) {
 				$cfg->{'miimon'} = $options{'miimon'};
 				$cfg->{'downdelay'} = $options{'downdelay'};
 				$cfg->{'updelay'} = $options{'updelay'};
+				$cfg->{'primary'} = $options{'primary'};
 				}
-			elsif($param eq 'bond_mode') { 
-				$cfg->{'mode'} = $value;
-				}
-			elsif($param eq 'bond_miimon') { 
-				$cfg->{'miimon'} = $value;
-				}
-			elsif($param eq 'bond_downdelay') { 
-				$cfg->{'downdelay'} = $value;
-				}
-			elsif($param eq 'bond_updelay') { 
-				$cfg->{'updelay'} = $value;
+			elsif($param =~ /^bond[_\-](mode|miimon|downdelay|updelay|primary)$/) {
+				$cfg->{$1} = $value;
 				}
 			elsif($param eq 'slaves') { 
 				$cfg->{'partner'} = $value;
 				}
-			elsif($param eq 'hwaddr') {
+			elsif($param eq 'hwaddress' || $param eq 'hwaddr') {
 				local @v = split(/\s+/, $value);
 				$cfg->{'ether_type'} = $v[0];
 				$cfg->{'ether'} = $v[1];
 				}
 			elsif ($param eq 'bridge_ports') {
 				$cfg->{'bridgeto'} = $value;
+				}
+			elsif ($param eq 'bridge_stp') {
+				$cfg->{'bridgestp'} = $value;
+				}
+			elsif ($param eq 'bridge_fd') {
+				$cfg->{'bridgefd'} = $value;
+				}
+			elsif ($param eq 'bridge_waitport') {
+				$cfg->{'bridgewait'} = $value;
 				}
 			elsif ($param eq 'pre-up' &&
 			       $value =~ /brctl\s+addif\s+br\d+\s+(\S+)/) {
@@ -110,17 +112,37 @@ foreach $iface (@ifaces) {
 		foreach $option (@$options) {
 			my ($param, $value) = @$option;
 			if ($param eq "address") {
-				push(@{$v6cfg->{'address6'}}, $value);
+				$value =~ s/\s+dev\s+(\S+)//;
+				if ($value =~ /^(\S+)\/(\d+)$/) {
+					push(@{$v6cfg->{'address6'}}, $1);
+					push(@{$v6cfg->{'netmask6'}}, $2);
+					}
+				else {
+					push(@{$v6cfg->{'address6'}}, $value);
+					}
 				}
 			elsif ($param eq "netmask") {
 				push(@{$v6cfg->{'netmask6'}}, $value);
 				}
+			elsif ($param eq "gateway") {
+				$v6cfg->{'gateway6'} = $value;
+				}
 			elsif ($param eq "up" &&
 			       $value =~ /ifconfig\s+(\S+)\s+inet6\s+add\s+([a-f0-9:]+)\/(\d+)/ &&
 				$1 eq $name) {
-				# Additional v6 address
+				# Additional v6 address with ifconfig command,
+				# like :
+				# ifconfig eth0 inet6 add 2607:f3:aaab:3::10/64
 				push(@{$v6cfg->{'address6'}}, $2);
 				push(@{$v6cfg->{'netmask6'}}, $3);
+				}
+			elsif ($param eq "up" &&
+			       $value =~ /ip\s+addr\s+add\s+([a-f0-9:]+)\/(\d+)\s+dev\s+(\S+)/ &&
+				$3 eq $name) {
+				# Additional v6 address with ip command, like :
+				# ip addr add 2607:f3:aaab:3::10/64 dev eth0
+				push(@{$v6cfg->{'address6'}}, $1);
+				push(@{$v6cfg->{'netmask6'}}, $2);
 				}
 			}
 		if ($method eq "manual" && !@{$v6cfg->{'address6'}}) {
@@ -173,6 +195,9 @@ elsif ($cfg->{'address'}) {
 					($ip4 & int($nm4))&0xff;
 		push(@options, ['network', $network]);
 		}
+	if ($cfg->{'mtu'}) {
+		push(@options, ['mtu', $cfg->{'mtu'}]);
+		}
 	}
 else {
 	$method = 'manual';
@@ -181,21 +206,37 @@ my @autos = get_auto_defs();
 my $amode = $gconfig{'os_version'} > 3 || scalar(@autos);
 if (!$cfg->{'up'} && !$amode) { push(@options, ['noauto', '']); }
 if ($cfg->{'ether'}) {
-	push(@options, [ 'hwaddr', ($cfg->{'ether_type'} || 'ether').' '.
-				   $cfg->{'ether'} ]);
+	push(@options, [ 'hwaddress',
+			 ($cfg->{'ether_type'} || 'ether').' '.
+			 $cfg->{'ether'} ]);
 	}
 if ($cfg->{'bridge'}) {
 	&has_command("brctl") || &error("Bridges cannot be created unless the ".
 					"brctl command is installed");
-	push(@options, [ 'bridge_ports', $cfg->{'bridgeto'} ]);
+	if ($cfg->{'bridgeto'}) {
+		push(@options, [ 'bridge_ports', $cfg->{'bridgeto'} ]);
+		}
+	else {
+		push(@options, [ 'pre-up', 'brctl addbr '.$name ]);
+		}
+	if ($cfg->{'bridgestp'}) {
+		push(@options, [ 'bridge_stp', $cfg->{'bridgestp'} ]);
+		}
+	if ($cfg->{'bridgefd'}) {
+		push(@options, [ 'bridge_fd', $cfg->{'bridgefd'} ]);
+		}
+	if ($cfg->{'bridgewait'}) {
+		push(@options, [ 'bridge_waitport', $cfg->{'bridgewait'} ]);
+		}
 	}
 
 # Set bonding parameters
 if(($cfg->{'bond'} == 1) && ($gconfig{'os_version'} >= 5)) {
-	push(@options, ['bond_mode '.$cfg->{'mode'}]);
-	push(@options, ['bond_miimon '.$cfg->{'miimon'}]);
-	push(@options, ['bond_updelay '.$cfg->{'updelay'}]);
-	push(@options, ['bond_downdelay '.$cfg->{'downdelay'}]);
+	push(@options, [&bonding_option('mode').' '.$cfg->{'mode'}]);
+	push(@options, [&bonding_option('miimon').' '.$cfg->{'miimon'}]) if ($cfg->{'miimon'});
+	push(@options, [&bonding_option('updelay').' '.$cfg->{'updelay'}]) if ($cfg->{'updelay'});
+	push(@options, [&bonding_option('downdelay').' '.$cfg->{'downdelay'}]) if ($cfg->{'downdelay'});
+	push(@options, [&bonding_option('primary').' '.$cfg->{'primary'}]) if ($cfg->{'primary'});
 	push(@options, ['slaves '.$cfg->{'partner'}]);
 	}
 elsif ($cfg->{'bond'} == 1) {
@@ -206,14 +247,17 @@ elsif ($cfg->{'bond'} == 1) {
 	}
 
 # Set specific lines for vlan tagging
-if(($cfg->{'vlan'} == 1) && ($gconfig{'os_version'} >= 5)) {
-	push(@options, ['vlan_raw_device '.$cfg->{'physical'}]);
-	}
-elsif($cfg->{'vlan'} == 1){
+if(($cfg->{'vlan'} == 1) && ($gconfig{'os_version'} < 5)) {
 	push(@options, ['pre-up', 'vconfig add '.$cfg->{'physical'}.' '.
 				  $cfg->{'vlanid'}]);
 	push(@options, ['post-down', 'vconfig rem '.$cfg->{'physical'}.' '.
 				     $cfg->{'vlanid'}]);
+	if ($gconfig{'os_version'} >= 5) {
+		push(@options, ['vlan-raw-device', $cfg->{'physical'}]);
+		}
+	}
+if(($cfg->{'vlan'} == 1) && ($cfg->{'mtu'})) {
+	push(@options, ['pre-up', '/sbin/ifconfig '.$cfg->{'physical'}.' mtu '.$cfg->{'mtu'}]);
 	}
 
 # Find the existing interface section
@@ -233,7 +277,9 @@ foreach $iface (@ifaces) {
 		$found = 1;
 		foreach my $o (@{$iface->[3]}) {
 			if ($o->[0] eq 'gateway' ||
-			    $o->[0] eq 'pre-up' && $o->[1] =~ /brctl/) {
+			    $o->[0] eq 'pre-up' && $o->[1] =~ /brctl/ ||
+			    $o->[0] =~ /^(pre-)?up$/ && $o->[1] =~ /ip\s+route/ ||
+			    $o->[0] eq 'post-up' && $o->[1] =~ /iptables-restore/) {
 				push(@options, $o);
 				}
 			}
@@ -243,6 +289,10 @@ foreach $iface (@ifaces) {
 		$found6 = 1;
 		}
 	}
+
+# Remove any duplicate options
+my %done;
+@options = grep { !$done{$_->[0],$_->[1]}++ } @options;
 
 if (!$found) {
 	# Add a new interface section
@@ -254,10 +304,7 @@ if (!$found) {
 		&new_interface_def($cfg->{'fullname'},
 				   'inet', $method, \@options);
 		}
-	if ($cfg->{'bond'} == 1 && $gconfig{'os_version'} >= 5) {
-		# Not sure why nothing needs to be done here?
-		}
-	elsif ($cfg->{'bond'} == 1) {
+	if ($cfg->{'bond'} == 1 && $gconfig{'os_version'} < 5) {
 		&new_module_def($cfg->{'fullname'}, $cfg->{'mode'},
 			        $cfg->{'miimon'}, $cfg->{'downdelay'},
 			        $cfg->{'updelay'});
@@ -273,10 +320,7 @@ else {
 		&modify_interface_def($cfg->{'fullname'},
 				      'inet', $method, \@options, 0);
 		}
-	if ($cfg->{'bond'} == 1 && $gconfig{'os_version'} >= 5) {
-		# Not sure why nothing needs to be done here?
-		}
-        elsif ($cfg->{'bond'} == 1) {
+	if ($cfg->{'bond'} == 1 && $gconfig{'os_version'} < 5) {
 		&modify_module_def($cfg->{'fullname'}, 0, $cfg->{'mode'},
 				   $cfg->{'miimon'}, $cfg->{'downdelay'},
 				   $cfg->{'updelay'});
@@ -298,6 +342,9 @@ while(@address6) {
 	my $a = shift(@address6);
 	my $n = shift(@netmask6);
 	push(@options6, [ "up","ifconfig $cfg->{'fullname'} inet6 add $a/$n" ]);
+	}
+if ($cfg->{'gateway6'}) {
+	push(@options6, [ "gateway", $cfg->{'gateway6'} ]);
 	}
 
 # Add, update or delete IPv6 inteface
@@ -491,7 +538,7 @@ if ($gconfig{'os_version'} >= 3 || scalar(@autos)) {
 # Can some boot-time interface parameter be edited?
 sub can_edit
 {
-return $_[0] ne "mtu";
+return $_[0];
 }
 
 # valid_boot_address(address)
@@ -545,7 +592,7 @@ local %conf;
 
 sub routing_config_files
 {
-return ( $network_interfaces_config );
+return ( $network_interfaces_config, $sysctl_config );
 }
 
 sub network_config_files
@@ -582,6 +629,13 @@ if (@ifaces6) {
 				 &ui_select("gatewaydev6", $router6,
 					[ map { $_->[0] } @ifaces6 ]) ] ]));
 	}
+
+# Act as router?
+local %sysctl;
+&read_env_file($sysctl_config, \%sysctl);
+print &ui_table_row($text{'routes_forward'},
+	&ui_yesno_radio("forward",
+			$sysctl{'net.ipv4.ip_forward'} ? 1 : 0));
 
 # Get static routes
 local ($d, @st, @hr);
@@ -699,6 +753,14 @@ foreach $iface (@ifaces) {
 	&modify_interface_def($iface->[0], $iface->[1], $iface->[2],
 			      $iface->[3], 0);
 	}
+
+# Save routing flag
+local %sysctl;
+&lock_file($sysctl_config);
+&read_env_file($sysctl_config, \%sysctl);
+$sysctl{'net.ipv4.ip_forward'} = $in{'forward'};
+&write_env_file($sysctl_config, \%sysctl);
+&unlock_file($sysctl_config);
 }
 
 
@@ -732,7 +794,7 @@ while (defined $line) {
 	if ($line =~ /^\s*auto/) {
 		# skip auto stanzas
 		$line = <CFGFILE>;
-		while(defined($line) && $line !~ /^\s*(iface|mapping|auto)/) {
+		while(defined($line) && $line !~ /^\s*(iface|mapping|auto|source|allow-hotplug)/) {
 			$line = <CFGFILE>;
 			next;
 			}
@@ -740,17 +802,25 @@ while (defined $line) {
 	elsif ($line =~ /^\s*mapping/) {
 		# skip mapping stanzas
 		$line = <CFGFILE>;
-		while(defined($line) && $line !~ /^\s*(iface|mapping|auto)/) {
+		while(defined($line) && $line !~ /^\s*(iface|mapping|auto|source|allow-hotplug)/) {
 			$line = <CFGFILE>;
 			next;
 			}
+		}
+	elsif ($line =~ /^\s*source/) {
+		# Skip includes
+		$line = <CFGFILE>;
+		}
+	elsif ($line =~ /^\s*allow-hotplug/) {
+		# Skip hotplug lines
+		$line = <CFGFILE>;
 		}
 	elsif (my ($name, $addrfam, $method) = ($line =~ /^\s*iface\s+(\S+)\s+(\S+)\s+(\S+)\s*$/) ) {
 		# only lines starting with "iface" are expected here
 		my @iface_options;
 		# now read everything until the next iface definition
 		$line = <CFGFILE>;
-		while (defined $line && ! ($line =~ /^\s*(iface|mapping|auto)/)) {
+		while (defined $line && ! ($line =~ /^\s*(iface|mapping|auto|source|allow-hotplug)/)) {
 			# skip comments and empty lines
 			if ($line =~ /^\s*#/ || $line =~ /^\s*$/) {
 				$line = <CFGFILE>;
@@ -802,6 +872,7 @@ sub modify_auto_defs
 local $lref = &read_file_lines($network_interfaces_config);
 local $i;
 local $found;
+local @ifaces = sort { length($a) <=> length($b) } @_;
 for($i=0; $i<@$lref; $i++) {
 	local $l = $lref->[$i];
 	$l =~ s/\r|\n//g;
@@ -809,7 +880,7 @@ for($i=0; $i<@$lref; $i++) {
 	if ($l =~ /^\s*auto\s*(.*)/) {
 		if (!$found++) {
 			# Replace the auto line
-			$lref->[$i] = "auto ".join(" ", @_);
+			$lref->[$i] = "auto ".join(" ", @ifaces);
 			}
 		else {
 			# Remove another auto line
@@ -818,9 +889,9 @@ for($i=0; $i<@$lref; $i++) {
 		}
 	}
 if (!$found) {
-	splice(@$lref, 0, 0, "auto ".join(" ", @_));
+	splice(@$lref, 0, 0, "auto ".join(" ", @ifaces));
 	}
-&flush_file_lines();
+&flush_file_lines($network_interfaces_config);
 }
 
 # modifies the options of an already stored interface definition
@@ -853,6 +924,8 @@ while (defined ($line=<OLDCFGFILE>)) {
 	elsif ($inside_modify_region == 1 &&
                ($line =~ /^\s*iface\s+\S+\s+\S+\s+\S+\s*$/ ||
 	        $line =~ /^\s*mapping/ ||
+	        $line =~ /^\s*source/ ||
+	        $line =~ /^\s*allow-hotplug/ ||
 		$line =~ /^\s*auto/)) {
 	      	# End of an iface section
 		$inside_modify_region = 0;
@@ -918,17 +991,11 @@ local ($name, $addrfam, $method) = @_;
 &modify_module_def($name, 1);
 }
 
-sub os_feedback_files
-{
-return ( $network_interfaces_config, "/etc/nsswitch.conf", "/etc/resolv.conf",
-	 "/etc/HOSTNAME" );
-}
-
 # apply_network()
 # Apply the interface and routing settings
 sub apply_network
 {
-&system_logged("(cd / ; /etc/init.d/networking stop ; /etc/init.d/networking start) >/dev/null 2>&1");
+&system_logged("(cd / ; /etc/init.d/networking restart) >/dev/null 2>&1");
 }
 
 # get_default_gateway()
@@ -1034,7 +1101,7 @@ return $gconfig{'os_type'} eq 'debian-linux' && &has_command("vconfig");
 
 sub boot_iface_hardware
 {
-return $_[0] =~ /^eth/;
+return $_[0] =~ /^(eth|em)/;
 }
 
 # supports_address6([&iface])
@@ -1056,6 +1123,73 @@ return 1;
 sub supports_bridges
 {
 return 1;
+}
+
+# bonding_option(suffix)
+# Adds bond_ or bond- as appropriate
+sub bonding_option
+{
+my ($sfx) = @_;
+return ($gconfig{'os_version'} >= 7 ? "bond-" : "bond_").$sfx;
+}
+
+# os_save_dns_config(&config)
+# On Debian, DNS resolves can also be stored in the interfaces file. Returns
+# a flag indicating if a network restart is needed, and a flag indicating if
+# /etc/resolv.conf is updated automatically.
+sub os_save_dns_config
+{
+local ($conf) = @_;
+local @ifaces = &get_interface_defs();
+local @dnssearch;
+local $need_apply = 0;
+local $generated_resolv = -l "/etc/resolv.conf" ? 1 : 0;
+if (@{$conf->{'domain'}} > 1) {
+	@dnssearch = ( [ 'dns-domain', join(" ", @{$conf->{'domain'}}) ] );
+	}
+elsif (@{$conf->{'domain'}}) {
+	@dnssearch = ( [ 'dns-domain', $conf->{'domain'}->[0] ] );
+	}
+foreach my $i (@ifaces) {
+	local ($ns) = grep { $_->[0] eq 'dns-nameservers' } @{$i->[3]};
+	if ($ns) {
+		if (@{$conf->{'nameserver'}}) {
+			$ns->[1] = join(' ', @{$conf->{'nameserver'}});
+			}
+		else {
+			$i->[3] = [ grep { $_->[0] ne 'nameservers' }
+					 @{$i->[3]} ];
+			}
+		$i->[3] = [ grep { $_->[0] ne 'dns-domain' &&
+				   $_->[0] ne 'dns-search' }
+				 @{$i->[3]} ];
+		push(@{$i->[3]}, @dnssearch);
+		&modify_interface_def($i->[0], $i->[1], $i->[2],
+				      $i->[3], 0);
+		$need_apply = 1;
+		}
+	}
+if (!$need_apply && $generated_resolv) {
+	# Nameservers have to be defined in the interfaces file, but
+	# no interfaces have them yet. Find the first non-local
+	# interface with an IP, and add them there
+	foreach my $i (@ifaces) {
+		next if ($i->[0] =~ /^lo/);
+		local ($a) = grep { $_->[0] eq 'address' &&
+			    &check_ipaddress($_->[1]) } @{$i->[3]};
+		next if (!$a);
+		if (@{$conf->{'nameserver'}}) {
+			push(@{$i->[3]}, [ 'dns-nameservers',
+				   join(' ', @{$conf->{'nameserver'}}) ]);
+			}
+		push(@{$i->[3]}, @dnssearch);
+		&modify_interface_def($i->[0], $i->[1], $i->[2],
+				      $i->[3], 0);
+		$need_apply = 1;
+		last;
+		}
+	}
+return ($need_apply, $generated_resolv);
 }
 
 1;

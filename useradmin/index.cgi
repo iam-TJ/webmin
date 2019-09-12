@@ -1,8 +1,13 @@
 #!/usr/local/bin/perl
 
 require './user-lib.pl';
-&ui_print_header(undef, $text{'index_title'}, "", "intro", 1, 1, 0,
+
+# Show header with password DB type
+$pft = &passfiles_type();
+$pftmsg = &text('index_pft', $text{'index_pft'.$pft} || $pft);
+&ui_print_header($pftmsg, $text{'index_title'}, "", "intro", 1, 1, 0,
 		 &help_search_link("passwd group shadow gshadow", "man"));
+
 $formno = 0;
 &ReadParse();
 @quarters = ( "width=25%", "width=25%", "width=25%", "width=25%" );
@@ -221,16 +226,15 @@ if ($access{'ucreate'}) {
 		}
 	else { $cancreate = 1; }
 	if ($cancreate) {
-		push(@rv, "<a href=\"edit_user.cgi\">".
-		      	  "$text{'index_createuser'}</a>");
+		push(@rv, &ui_link("edit_user.cgi", $text{'index_createuser'}) );
 		}
 	else {
 		push(@rv, $text{'index_nomoreusers'});
 		}
 	}
-push(@rv, "<a href=\"batch_form.cgi\">$text{'index_batch'}</a>")
+push(@rv, &ui_link("batch_form.cgi", $text{'index_batch'}) )
 	if ($access{'batch'});
-push(@rv, "<a href=\"export_form.cgi\">$text{'index_export'}</a>")
+push(@rv, &ui_link("export_form.cgi", $text{'index_export'}) )
 	if ($access{'export'});
 return @rv;
 }
@@ -259,15 +263,15 @@ if ($access{'gcreate'} == 1) {
 		}
 	else { $cancreate = 1; }
 	if ($cancreate) {
-		push(@rv, "<a href=\"edit_group.cgi\">$text{'index_creategroup'}</a>");
+		push(@rv, &ui_link("edit_group.cgi", $text{'index_creategroup'}) );
 		}
 	else {
 		push(@rv, $text{'index_nomoregroups'});
 		}
 	}
-push(@rv, "<a href=\"gbatch_form.cgi\">$text{'index_batch'}</a>")
+push(@rv, &ui_link("gbatch_form.cgi", $text{'index_batch'}) )
 	if ($access{'batch'});
-push(@rv, "<a href=\"gexport_form.cgi\">$text{'index_export'}</a>")
+push(@rv, &ui_link("gexport_form.cgi", $text{'index_export'}) )
 	if ($access{'export'});
 return @rv;
 }

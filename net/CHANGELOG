@@ -60,3 +60,22 @@ Static IPv6 addresses and default routes on Redhat, CentOS, Fedora, Debian and U
 ---- Changes since 1.550 ----
 The speed, link status and duplex of active ethernet interfaces is now shown on the active interfaces page.
 On Debian, Ubuntu, Redhat, CentOS and Fedora systems boot-time network interfaces with no IP address can now be created. You can also create network bridges that are connected to ethernet interfaces with no address, for use by virtual machines such as KVM.
+---- Changes since 1.570 ----
+If Postfix is installed when the hostname is changed, the mydestination (local hostname) configuration parameter is updated too.
+---- Changes since 1.580 ----
+Allowed the MTU to be set at boot time on Debian Linux, and fixed bugs editing VLANs, thanks to a patch from Caspar Smit.
+---- Changes since 1.590 ----
+Bonding interfaces can now be created on CentOS, Redhat and Fedora Linuxes, thanks to a patch from Caspar Smit.
+VLAN interfaces can now be created on CentOS, Redhat and Fedora Linuxes, thanks to a patch from Caspar Smit.
+---- Changes since 1.600 ----
+Added support for the new ifconfig -a output format, as seen on Fedora 17.
+---- Changes since 1.610 ----
+A bridge that is not connected to any real interface can now be created.
+---- Changes since 1.620 ----
+Added support for IPv6, DHCP and new ethernet device names on FreeBSD.
+---- Changes since 1.690 ----
+Added support for configuring intefaces with the "ip" command, as seen on RHEL 7, CentOS 7 and other new Linux distributions.
+---- Changes since 1.760 ----
+On CentOS, Fedora and Redhat systems, the DNSn lines in ifcfg-* files are now updated in sync with resolv.conf.
+---- Changes since 1.910 ----
+Added an option to disable (comment out) hosts file entries.

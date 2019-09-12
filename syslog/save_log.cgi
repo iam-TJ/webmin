@@ -20,6 +20,20 @@ if ($in{'delete'}) {
 	}
 elsif ($in{'view'}) {
 	# Viewing a log file
+	@extras = &extra_log_files();
+	if ($in{'idx'} =~ /^\//) {
+		# The drop-down selector on this page has chosen a file
+		if (&indexof($in{'idx'}, (map { $_->{'file'} } @extras)) >= 0) {
+			$in{'extra'} = $in{'idx'};
+			delete($in{'file'});
+			}
+		else {
+			$in{'file'} = $in{'idx'};
+			delete($in{'extra'});
+			}
+		delete($in{'idx'});
+		delete($in{'oidx'});
+		}
 	if ($in{'idx'} ne '') {
 		# From syslog
 		$log = $conf->[$in{'idx'}];
@@ -42,7 +56,6 @@ elsif ($in{'view'}) {
 		}
 	elsif ($in{'extra'}) {
 		# Extra log file
-		@extras = &extra_log_files();
 		($extra) = grep { $_->{'file'} eq $in{'extra'} } @extras;
 		$extra || &error($text{'save_ecannot7'});
 		&can_edit_log($extra) || &error($text{'save_ecannot2'});
@@ -90,9 +103,20 @@ elsif ($in{'view'}) {
 			@cats = ( "cat ".quotemeta($file) );
 			}
 		$cat = "(".join(" ; ", @cats).")";
-		$got = &foreign_call("proc", "safe_process_exec",
-			"$cat | grep -i $filter | $tailcmd",
-			0, 0, STDOUT, undef, 1, 0, undef, 1);
+		if ($config{'reverse'}) {
+			$tailcmd .= " | tac";
+			}
+		$eflag = $gconfig{'os_type'} =~ /-linux/ ? "-E" : "";
+		$dashflag = $gconfig{'os_type'} =~ /-linux/ ? "--" : "";
+		if (@cats) {
+			$got = &proc::safe_process_exec(
+				"$cat | grep -i -a $eflag $dashflag $filter ".
+				"| $tailcmd",
+				0, 0, STDOUT, undef, 1, 0, undef, 1);
+			}
+		else {
+			$got = undef;
+			}
 	} else {
 		# Not filtering .. so cat the most recent non-empty file
 		if ($cmd) {
@@ -100,26 +124,42 @@ elsif ($in{'view'}) {
 			$fullcmd = $cmd." | ".$tailcmd;
 			}
 		elsif ($config{'compressed'}) {
-			# Find the first non-empty file, newest first
-			$catter = "cat ".quotemeta($file);
-			if (!-s $file) {
-				foreach $l (reverse(&all_log_files($file))) {
-					next if (!-s $l);
-					$c = &catter_command($l);
-					if ($c) {
-						$catter = $c;
-						last;
-						}
+			# Cat all compressed files
+			local @cats;
+			$total = 0;
+			foreach $l (reverse(&all_log_files($file))) {
+				next if (!-s $l);
+				$c = &catter_command($l);
+				if ($c) {
+					$len = int(&backquote_command(
+							"$c | wc -l"));
+					$total += $len;
+					push(@cats, $c);
+					last if ($total > $in{'lines'});
 					}
 				}
-			$fullcmd = $catter." | ".$tailcmd;
+			if (@cats) {
+				$cat = "(".join(" ; ", reverse(@cats)).")";
+				$fullcmd = $cat." | ".$tailcmd;
+				}
+			else {
+				$fullcmd = undef;
+				}
 			}
 		else {
 			# Just run tail on the file
 			$fullcmd = $tailcmd." ".quotemeta($file);
 			}
-		$got = &foreign_call("proc", "safe_process_exec",
-			$fullcmd, 0, 0, STDOUT, undef, 1, 0, undef, 1);
+		if ($config{'reverse'} && $fullcmd) {
+			$fullcmd .= " | tac";
+			}
+		if ($fullcmd) {
+			$got = &proc::safe_process_exec(
+				$fullcmd, 0, 0, STDOUT, undef, 1, 0, undef, 1);
+			}
+		else {
+			$got = undef;
+			}
 		}
 	print "<i>$text{'view_empty'}</i>\n" if (!$got);
 	print "</pre>\n";
@@ -230,19 +270,54 @@ else {
 
 sub filter_form
 {
-print "<form action=save_log.cgi style='margin-left:1em'>\n";
-print &ui_hidden("idx", $in{'idx'}),"\n";
+print &ui_form_start("save_log.cgi");
 print &ui_hidden("oidx", $in{'oidx'}),"\n";
 print &ui_hidden("omod", $in{'omod'}),"\n";
 print &ui_hidden("file", $in{'file'}),"\n";
 print &ui_hidden("extra", $in{'extra'}),"\n";
 print &ui_hidden("view", 1),"\n";
 
-print &text('view_header', &ui_textbox("lines", $lines, 3),
-	    "<tt>".&html_escape($log->{'file'})."</tt>"),"\n";
+# Create list of logs and selector
+my @logfiles;
+my $found = 0;
+if ($access{'syslog'}) {
+	# Logs from syslog
+	my $conf = &get_config();
+	foreach $c (@$conf) {
+		next if ($c->{'tag'});
+		next if (!&can_edit_log($c));
+		next if (!$c->{'file'} || !-f $c->{'file'});
+		push(@logfiles, [ $c->{'index'}, $c->{'file'} ]);
+		$found++ if ($c->{'file'} eq $file);
+		}
+	}
+if ($config{'others'} && $access{'others'}) {
+	foreach my $o (&get_other_module_logs()) {
+		next if (!&can_edit_log($o));
+		next if (!$o->{'file'});
+		push(@logfiles, [ $o->{'file'} ]);
+		$found++ if ($o->{'file'} eq $file);
+		}
+	}
+foreach $e (&extra_log_files()) {
+	next if (!&can_edit_log($e));
+	push(@logfiles, [ $e->{'file'} ]);
+	$found++ if ($e->{'file'} eq $file);
+	}
+if (@logfiles && $found) {
+	$sel = &ui_select("idx", $in{'idx'} eq '' ? $file : $in{'idx'},
+			  [ @logfiles ]);
+	}
+else {
+	$sel = "<tt>".&html_escape($log->{'file'})."</tt>";
+	print &ui_hidden("idx", $in{'idx'}),"\n";
+	}
+
+print &text('view_header', &ui_textbox("lines", $lines, 3), $sel),"\n";
 print "&nbsp;&nbsp;\n";
 print &text('view_filter', &ui_textbox("filter", $in{'filter'}, 25)),"\n";
 print "&nbsp;&nbsp;\n";
-print "<input type=submit value='$text{'view_refresh'}'></form>\n";
+print &ui_submit($text{'view_refresh'});
+print &ui_form_end(),"<br>\n";
 }
 

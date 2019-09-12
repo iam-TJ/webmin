@@ -28,8 +28,8 @@ print &ui_table_row($text{'pid'}, $pinfo{pid});
 if ($pinfo{ppid}) {
 	local %ppinfo = &process_info($pinfo{ppid});
 	print &ui_table_row($text{'parent'},
-		"<a href=\"edit_proc.cgi?$ppinfo{pid}\">".
-                &cut_string($ppinfo{'args'}, 30)."</a>");
+		&ui_link("edit_proc.cgi?".$ppinfo{pid},
+                &cut_string($ppinfo{'args'}, 30)) );
 	}
 else {
 	print &ui_table_row($text{'parent'}, $text{'edit_none'});
@@ -42,7 +42,8 @@ print &ui_table_row($text{'owner'}, $pinfo{'user'});
 print &ui_table_row($text{'cpu'}, $pinfo{'cpu'});
 
 # Memory size
-print &ui_table_row($text{'size'}, $pinfo{'size'});
+print &ui_table_row($text{'size'}, $pinfo{'bytes'} ? &nice_size($pinfo{'bytes'})
+						   : $pinfo{'size'});
 
 # Run time
 print &ui_table_row($text{'runtime'}, $pinfo{'time'});
@@ -139,7 +140,7 @@ if (@sub) {
 	foreach $s (@sub) {
 		local $p = $s->{'pid'};
 		print &ui_columns_row([
-			"<a href=\"edit_proc.cgi?$p\">$p</a>",
+			&ui_link("edit_proc.cgi?".$p, $p),
 			&cut_string($s->{args}, 80),
 			]);
 		}

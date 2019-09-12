@@ -81,6 +81,48 @@ if ($in{'hosts'} && $in{'hostname'} ne $old_hostname) {
 		}
 	}
 
+if (&foreign_installed("postfix") && $in{'hostname'} ne $old_hostname) {
+	# Update postfix mydestination too
+	&foreign_require("postfix");
+	&postfix::lock_postfix_files();
+	@mydests = split(/[ ,]+/, &postfix::get_current_value("mydestination"));
+	$idx = &indexoflc($old_hostname, @mydests);
+	if ($idx >= 0) {
+		$mydests[$idx] = $in{'hostname'};
+		&postfix::set_current_value("mydestination",
+					    join(", ", @mydests));
+		}
+	$old_shorthostname = $old_hostname;
+	$old_shorthostname =~ s/\..*$//;
+	$shorthostname = $in{'hostname'};
+	$shorthostname =~ s/\..*$//;
+	$idx = &indexoflc($old_shorthostname, @mydests);
+	if ($idx >= 0) {
+		$mydests[$idx] = $shorthostname;
+		&postfix::set_current_value("mydestination",
+					    join(", ", @mydests));
+		}
+
+	# Update postfix myorigin
+	$myorigin = &postfix::get_current_value("myorigin");
+	if ($myorigin eq $old_hostname) {
+		&postfix::set_current_value("myorigin",
+					    $in{'hostname'});
+		}
+
+	# Update postfix myhostname
+	$myhostname = &postfix::get_current_value("myhostname");
+	if ($myhostname eq $old_hostname) {
+		&postfix::set_current_value("myhostname",
+					    $in{'hostname'});
+		}
+
+	&postfix::unlock_postfix_files();
+	if (&postfix::is_postfix_running()) {
+		&postfix::reload_postfix();
+		}
+	}
+
 &webmin_log("dns", undef, undef, \%in);
 &redirect("");
 

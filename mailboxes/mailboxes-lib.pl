@@ -80,7 +80,6 @@ if ($_[0] =~ /^\//) {
 		   'file' => $_[0],
 		   'type' => &folder_type($_[0]),
 		   'mode' => 1,
-		   'user' => $_[0],
 		   'index' => 0 } );
 	}
 else {
@@ -99,10 +98,12 @@ else {
 			    'index' => scalar(@rv) } );
 		}
 
-	# Check for /var/mail/USERNAME file
+	# Check for /var/mail/USERNAME file or directory
 	if ($dir) {
+		$dir =~ s/\/$//;	# Trailing / means maildir format.
+					# Postfix sometimes does this.
 		local $mf = &mail_file_style($uinfo[0], $dir, $style);
-		push(@rv, { 'type' => 0,
+		push(@rv, { 'type' => -d $mf ? 1 : 0,
 			    'name' => $mf,
 			    'file' => $mf,
 			    'user' => $uinfo[0],
@@ -344,10 +345,8 @@ return 0;	# can't happen!
 sub movecopy_user_select
 {
 local $rv;
-$rv .= "<input type=submit name=move$_[0] value=\"$text{'mail_move'}\" ".
-       "onClick='return check_clicks(form)'>";
-$rv .= "<input type=submit name=copy$_[0] value=\"$text{'mail_copy'}\" ".
-       "onClick='return check_clicks(form)'>";
+$rv .= "<input type=submit name=move$_[0] value=\"$text{'mail_move'}\">";
+$rv .= "<input type=submit name=copy$_[0] value=\"$text{'mail_copy'}\">";
 $rv .= &ui_user_textbox("mfolder$_[0]", undef, $_[3]);
 return $rv;
 }
@@ -526,7 +525,7 @@ elsif ($config{'show_size'} == 2) {
 			push(@ccols, int($foldercount{$u->[0]}))
 			}
 		print &ui_columns_row(
-			[ "<a href='list_mail.cgi?user=$u->[0]'>$u->[0]</a>",
+			[ &ui_link("list_mail.cgi?user=$u->[0]","$u->[0]"),
 			  $u->[6], $g,
 			  $size{$u->[0]} == 0 ? $text{'index_empty'} :
 				&nice_size($size{$u->[0]}),
@@ -594,7 +593,7 @@ if (defined($old_uid)) {
 
 sub folder_link
 {
-return "<a href='list_mail.cgi?user=$_[0]&folder=$_[1]->{'index'}'>$text{'mail_return2'}</a>";
+return &ui_link("list_mail.cgi?user=$_[0]&folder=$_[1]->{'index'}",$text{'mail_return2'});
 }
 
 # get_from_address()
@@ -716,7 +715,7 @@ return $_[0] !~ /^\//;
 }
 
 # list_mail_users([max], [filterfunc])
-# Returns getpw* style structures for all users who can recieve mail. Those with
+# Returns getpw* style structures for all users who can receive mail. Those with
 # duplicate info are skipped.
 sub list_mail_users
 {
@@ -962,8 +961,7 @@ local $uuser = &urlize($user);
 local $spacer = "&nbsp;\n";
 if (@$mail) {
 	# Delete
-	print "<input type=submit name=delete value=\"$text{'mail_delete'}\" ",
-	      "onClick='return check_clicks(form)'>";
+	print "<input type=submit name=delete value=\"$text{'mail_delete'}\">";
 	if ($config{'show_delall'} && !$search) {
 		print "<input type=submit name=deleteall value=\"$text{'mail_deleteall'}\">";
 		}
@@ -972,9 +970,9 @@ if (@$mail) {
 	# Mark as
 	print "<input type=submit name=mark$_[0] value=\"$text{'mail_mark'}\">";
 	print "<select name=mode$_[0]>\n";
-	print "<option value=1 checked>$text{'mail_mark1'}\n";
-	print "<option value=0>$text{'mail_mark0'}\n";
-	print "<option value=2>$text{'mail_mark2'}\n";
+	print "<option value=1 checked>$text{'mail_mark1'}</option>\n";
+	print "<option value=0>$text{'mail_mark0'}</option>\n";
+	print "<option value=2>$text{'mail_mark2'}</option>\n";
 	print "</select>";
 	print $spacer;
 
@@ -1072,12 +1070,13 @@ if ($sf !~ /^\//) {
 return $sf;
 }
 
-# view_mail_link(user, &folder, index, from-to-text)
+# view_mail_link(user, &folder, index, from-to-text, [dom])
 sub view_mail_link
 {
-local ($user, $folder, $idx, $txt) = @_;
+local ($user, $folder, $idx, $txt, $dom) = @_;
 local $uuser = &urlize($user);
-local $url = "view_mail.cgi?user=$uuser&idx=$idx&folder=$folder->{'index'}";
+local $url = "view_mail.cgi?user=$uuser&idx=$idx&folder=$folder->{'index'}".
+	     "&dom=$dom";
 if ($config{'open_mode'}) {
         return "<a href='' onClick='window.open(\"$url\", \"viewmail\", \"toolbar=no,menubar=no,scrollbars=yes,width=1024,height=768\"); return false'>".
                &simplify_from($txt)."</a>";
@@ -1141,7 +1140,7 @@ foreach my $folder (&list_user_folders($user)) {
 		}
 	}
 # Remove read file
-local $read = "$module_config_directory/$user.read";
+local $read = &user_read_dbm_file($user);
 if (-r $read) {
 	&unlink_logged($read);
 	}
@@ -1156,7 +1155,7 @@ sub get_mail_read
 {
 local ($folder, $mail) = @_;
 if (!$done_dbmopen_read++) {
-	&open_dbm_db(\%read, "$module_config_directory/$folder->{'user'}.read", 0600);
+	&open_dbm_db(\%read, &user_read_dbm_file($folder->{'user'}), 0600);
 	}
 return $read{$mail->{'header'}->{'message-id'}};
 }
@@ -1167,12 +1166,12 @@ sub set_mail_read
 {
 local ($folder, $mail, $read) = @_;
 if (!$done_dbmopen_read++) {
-	&open_dbm_db(\%read, "$module_config_directory/$folder->{'user'}.read", 0600);
+	&open_dbm_db(\%read, &user_read_dbm_file($folder->{'user'}), 0600);
 	}
 $read{$mail->{'header'}->{'message-id'}} = $read;
 }
 
-# show_mail_table(&mails, &folder, formno)
+# show_mail_table(&mails, &folder, formno, [&read])
 # Output a full table of messages
 sub show_mail_table
 {
@@ -1208,32 +1207,41 @@ foreach my $mail (@mail) {
 	local $idx = $mail->{'idx'};
 	local $cols = 0;
 	local @cols;
+	local @rowtds = @tds;
 
 	# From and To columns, with links
 	local $from = $mail->{'header'}->{$showto ? 'to' : 'from'};
 	$from = $text{'mail_unknown'} if ($from !~ /\S/);
 	local $mfolder = $mail->{'folder'} || $folder;
-	push(@cols, &view_mail_link($in{'user'}, $mfolder, $idx, $from));
+	push(@cols, &view_mail_link($in{'user'}, $mfolder, $idx, $from,
+				    $in{'dom'}));
 	if ($config{'show_to'}) {
 		push(@cols, &simplify_from(
 	   		$mail->{'header'}->{$showto ? 'from' : 'to'}));
 		}
 
 	# Date and size columns
-	push(@cols, &simplify_date($mail->{'header'}->{'date'}, "ymd"));
+	push(@cols, &eucconv_and_escape(&simplify_date($mail->{'header'}->{'date'}, "ymd")));
 	push(@cols, &nice_size($mail->{'size'}, 1024));
+	$rowtds[$#cols] .= " data-sort=".$mail->{'size'};
 
 	# Subject with icons
 	local @icons = &message_icons($mail, $mfolder->{'sent'}, $mfolder);
 	push(@cols, &simplify_subject($mail->{'header'}->{'subject'}).
 		    join("&nbsp;", @icons));
 
+	# Flag unread mails
+	local $hid = $mail->{'header'}->{'message-id'};
+	if ($_[3] && !$_[3]->{$hid}) {
+		@cols = map { "<b>$_</b>" } @cols;
+		}
+
 	# Generate the row
 	if (!$folder) {
-		print &ui_columns_row(\@cols, \@tds);
+		print &ui_columns_row(\@cols, \@rowtds);
 		}
 	elsif (&editable_mail($mail)) {
-		print &ui_checked_columns_row(\@cols, \@tds, "d", $idx);
+		print &ui_checked_columns_row(\@cols, \@rowtds, "d", $idx);
 		}
 	else {
 		print &ui_columns_row([ "", @cols ], \@tds);
@@ -1254,6 +1262,28 @@ print &ui_columns_end();
 if ($folder) {
 	print &ui_links_row(\@links);
 	}
+}
+
+sub user_list_link
+{
+if ($in{'dom'}) {
+	return "../virtual-server/list_users.cgi?dom=$in{'dom'}";
+	}
+else {
+	return "";
+	}
+}
+
+# user_read_dbm_file(user)
+# Returns the DBM base filename to track read status for messages to some user
+sub user_read_dbm_file
+{
+my ($user) = @_;
+my $rv = "$module_config_directory/$user.read";
+if (!glob($rv."*")) {
+	$rv = "$module_var_directory/$user.read";
+	}
+return $rv;
 }
 
 1;

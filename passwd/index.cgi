@@ -29,7 +29,7 @@ elsif ($access{'mode'} == 3) {
 	}
 elsif ($access{'mode'} == 5) {
 	%notusers = map { $_, 1 } split(/\s+/, $access{'notusers'});
-	foreach $g (split(/\s+/, $access{'users'})) {
+	foreach $g (split(/\s+/, $access{'groups'})) {
 		@g = getgrnam($g);
 		$gcan{$g[2]}++;
 		if ($access{'sec'}) {
@@ -44,7 +44,9 @@ elsif ($access{'mode'} == 5) {
 
 # Show all unix users who can be edited
 setpwent();
+my %doneu;
 while(local @u = getpwent()) {
+	next if ($doneu{$u[0]}++);
 	if ($access{'mode'} == 0 ||
 	    $access{'mode'} == 1 && $ucan{$u[0]} ||
 	    $access{'mode'} == 2 && !$ucannot{$u[0]} ||
@@ -84,9 +86,7 @@ elsif (@ulist) {
 	# Show as table of users
 	@grid = ( );
 	for($i=0; $i<@ulist; $i++) {
-		push(@grid, "<a href=\"edit_passwd.cgi?".
-			    "user=$ulist[$i]->[0]\">".
-			    &html_escape($ulist[$i]->[0])."</a>");
+		push(@grid, &ui_link("edit_passwd.cgi?user=".&urlize($ulist[$i]->[0]), &html_escape($ulist[$i]->[0]) ) );
 		}
 	print &ui_grid_table(\@grid, 4, 100, undef, undef,
 			     $text{'index_header'});

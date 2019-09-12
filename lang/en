@@ -62,6 +62,7 @@ modify=Modify
 reset=Reset
 ok=OK
 cancel=Cancel
+fail=Failed
 helpsearch=Search Docs..
 switch_remote_euser=The Unix user $1 does not exist.
 programname=Webmin
@@ -125,17 +126,19 @@ referer_warn=<b>Warning!</b> Webmin has detected that the program $2 was linked 
 referer_warn_unknown=<b>Warning!</b> Webmin has detected that the program $1 was linked to from an unknown URL, which appears to be outside the Webmin server. This may be an attempt to trick your server into executing a dangerous command.
 referer_fix1=If this is a legitimate link, you can allow links from this URL as follows :<ul><li>Login to Webmin normally.<li>Go to the <b>Webmin Configuration</b> module.<li>Click on the Trusted Referrers icon.<li>Enter the hostname $1 into the <b>Trusted websites</b> field, and click <b>Save</b>.</ul>
 referer_fix2=Alternately, you can configure Webmin to allow this link from the command line by :<ul><li>Login as <tt>root</tt>, and edit the <tt>/etc/webmin/config</tt> file.<li>Add the line <tt>referers=$1</tt> at the end, or if a <tt>referers</tt> line already exists add <tt>$1</tt> to it.<li>Save the file.</ul>
-referer_fix1u=If your browser does not send the <tt>Referer</tt> header needed, you can turn off this check as follows :<ul><li>Login to Webmin normally.<li>Go to the <b>Webmin Configuration</b> module.<li>Click on the Trusted Referrers icon.<li>Check the <b>Trust links from unknown referrers</b> box, and click <b>Save</b>.</ul>
-referer_fix2u=Alternately, you can configure Webmin to allow links from unknown referers by :<ul><li>Login as <tt>root</tt>, and edit the <tt>/etc/webmin/config</tt> file.<li>Find the line <tt>referers_none=1</tt> and change it to <tt>referers_none=0</tt>.<li>Save the file.</ul>
+referer_fix3u=Make sure your browser is configured to send referrer information so that it can be verified by Webmin.
+referer_fix2u=Alternately, you can configure Webmin to allow links from unknown referers by :<ul><li>Login as <tt>root</tt>, and edit the <tt>/etc/webmin/config</tt> file.<li>Find the line <tt>referers_none=1</tt> and change it to <tt>referers_none=0</tt>.<li>Save the file.</ul><p>WARNING - this has the side effect of opening your system up to reflected XSS attacks and so is not recommended!!
 
 session_header=Login to Webmin
 session_mesg=You must enter a username and password to login to the Webmin server on $1.
 session_mesg2=You must enter a username and password to login.
 session_user=Username
 session_pass=Password
+session_twofactor=Two-factor token
 session_login=Login
 session_clear=Clear
 session_failed=Login failed. Please try again.
+session_twofailed=Two-factor authentication failed : $1
 session_logout=Logout successful. Use the form below to login again.
 session_timed_out=Session timed out after $1 minutes of inactivity.
 session_save=Remember login permanently?
@@ -223,7 +226,7 @@ sday_6=Sa
 
 emodule=Access denied : User $1 is not allowed to use the $2 module
 emodulecheck=The $1 module is not available on your system
-elock_tries=Failed to lock file $1 after $2 minutes
+elock_tries2=Failed to lock file $1 after $2 minutes. Last error was : $3
 
 skill_high=Expert
 skill_medium=Intermediate
@@ -301,6 +304,7 @@ ui_edate=Invalid date
 ui_etime=Invalid time
 ui_paging=Showing rows $1 to $2 of $3
 ui_rowlabel=$2 in row $1 :
+ui_filterbox=Type to filter..
 
 header_statusmsg=$1 logged into $2 $3 on $4 ($5)
 
@@ -348,5 +352,17 @@ sql_eldapdriver=Failed to load LDAP perl module
 sql_eldapconnect=Failed to connect to LDAP server $1
 sql_eldaptls=Failed to start TLS encryption for LDAP : $1
 sql_eldaplogin=Failed to login to LDAP server as $1 : $2
+
+log_email_subject=Webmin action in $1
+log_email_global=Webmin global action
+log_email_desc=This email was sent by Webmin in response to a user action.
+log_email_mod=Webmin module: $1
+log_email_moddesc=Module title: $1
+log_email_time=Action performed at: $1
+log_email_system=Performed on system: $1
+log_email_user=Performed by user: $1
+log_email_script=Webmin script: $1
+log_email_session=Session ID: $1
+log_email_remote=Client address: $1
 
 __norefs=1

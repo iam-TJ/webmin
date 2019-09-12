@@ -18,8 +18,9 @@ print &ui_table_start($text{'passwd_header'}, undef, 2);
 # Login and real name
 %uconfig = &foreign_config("useradmin");
 $user[6] =~ s/,.*$// if ($uconfig{'extra_real'});
+$user[6] =~ s/,+$//;
 print &ui_table_row($text{'passwd_for'},
-	$user[0].( $user[6] ? " ($user[6])" : "" ));
+	&html_escape($user[0].( $user[6] ? " ($user[6])" : "" )));
 
 # Old password field
 if ($access{'old'} == 1 ||

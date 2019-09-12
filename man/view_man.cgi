@@ -27,6 +27,7 @@ if ($in{'sec'} =~ /^(\d+)[^0-9]+$/) {
 	}
 SECT: foreach $sec (@sects) {
 	foreach $page ($in{'page'}, lc($in{'page'})) {
+		$page =~ /\// && &error($text{'man_epath'});
 		$qpage = quotemeta($page);
 		$qsec = quotemeta($sec);
 		$cmd = $ocmd;
@@ -42,8 +43,8 @@ SECT: foreach $sec (@sects) {
 		}
 	}
 if (!$found) {
-	print "<p><b>",&text('man_noentry', "<tt>$in{'page'}</tt>"),
-	      "</b><p>\n";
+	print "<p><b>",&text('man_noentry',
+		     "<tt>".&html_escape($in{'page'})."</tt>"),"</b><p>\n";
 	}
 else {
 	if (&has_command($config{'man2html_path'})) {
@@ -85,13 +86,19 @@ else {
 			$out =~ s/<A HREF="file:[^"]+">([^<]+)<\/a>/$1/ig;
 			$out =~ s/<A HREF="view_man.cgi">/<A HREF=\"\">/i;
 			}
-		&show_view_table(&text('man_header', $in{'page'}, $in{'sec'}),
-				 $out);
+		&show_view_table(
+			&text('man_header',
+			      &html_escape($in{'page'}),
+			      &html_escape($in{'sec'})),
+			$out);
 	} else {
 		$out =~ s/.\010//g;
 		$out =~ s/^(man:\s*)?(re)?formatting.*//i;
-		&show_view_table(&text('man_header', $in{'page'}, $in{'sec'}),
-				 "<pre>".&html_escape($out)."</pre>");
+		&show_view_table(
+			&text('man_header',
+			      &html_escape($in{'page'}),
+			      &html_escape($in{'sec'})),
+			"<pre>".&html_escape($out)."</pre>");
 		}
 	}
 

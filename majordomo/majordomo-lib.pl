@@ -26,8 +26,8 @@ while(<CONF>) {
 	elsif (/^\s*\$(\S+)\s*=\s*<<\s*'(\S+)';\s*$/) {
 		# multiline config option
 		local $o = { 'name' => $1,
-			     'line' => $2 };
-		local $end = $3;
+			     'line' => $line };
+		local $end = $2;
 		while(<CONF>) {
 			$line++;
 			last if ($_ =~ /^$end[\r\n]+$/);
@@ -57,7 +57,46 @@ close(CONF);
 return \@rv;
 }
 
-# save_directive(&config, name, value)
+# get_list_config(file)
+sub get_list_config
+{
+local(@rv, $line);
+$line = 0;
+open(CONF, $_[0]);
+while(<CONF>) {
+        s/\r|\n//g;
+        s/#.*$//g;
+        if (/^\s*(\S+)\s*=\s*(.*)$/) {
+                # single value
+                push(@rv, { 'name' => $1,
+                            'value' => $2,
+                            'index' => scalar(@rv),
+                            'line' => $line,
+                            'eline' => $line });
+                }
+        elsif (/^\s*(\S+)\s*<<\s*(\S+)/) {
+                # multi-line value
+                local $c = { 'name' => $1,
+                             'index' => scalar(@rv),
+                             'line' => $line };
+                local $end = $2;
+                while(<CONF>) {
+                        $line++;
+                        last if (/^$end[\r\n]+$/);
+                        s/^--/-/;
+                        s/^-\n/\n/;
+                        $c->{'value'} .= $_;
+                        }
+                $c->{'eline'} = $line;
+                push(@rv, $c);
+                }
+        $line++;
+        }
+return \@rv;
+}
+
+
+# save_directive(&config, name, value, multiline)
 # Update some directive in the global config file
 sub save_directive
 {
@@ -65,16 +104,65 @@ local $old = &find($_[1], $_[0]);
 return if (!$old);
 local $lref = &read_file_lines($config{'majordomo_cf'});
 local $olen = $old->{'eline'} - $old->{'line'} + 1;
+local $pos = $old->{'line'};
 local $v = $_[2];
 $v =~ s/\n$//;
-if ($v =~ /\n/) {
-	splice(@$lref, $old->{'line'}, $olen,
-	       ( "\$$_[1] = <<'END';", split(/\n/, $v, -1), "END" ));
+
+if ($_[3]) {
+        local $ov = $old->{'value'};
+        $ov =~ s/\n$//;
+        local $v = $_[2];
+        $v =~ s/\n$//;
+        local @lines = split(/\n/, $v, -1);
+        @lines = map { s/^-/--/; s/^$/-/; $_ } @lines;
+        splice(@$lref, $pos, $olen, ("\$$_[1] = <<'END';", @lines, "END"))
+                if (!$old || $v ne $ov);
+        $nlen = (!$old || $v ne $ov) ? @lines + 2 : $olen;
 	}
 else {
 	$v =~ s/\@/\\@/g;
-	splice(@$lref, $old->{'line'}, $olen, "\$$_[1] = \"$v\";");
+	splice(@$lref, $pos, $olen, "\$$_[1] = \"$v\";");
 	}
+}
+
+# save_list_directive(&config, file, name, value, multiline)
+sub save_list_directive
+{
+local $old = &find($_[2], $_[0]);
+local $lref = &read_file_lines($_[1]);
+local ($pos, $olen, $nlen);
+if ($old) {
+        $olen = $old->{'eline'} - $old->{'line'} + 1;
+        $pos = $old->{'line'};
+        }
+else {
+        $olen = 0;
+        $pos = @$lref;
+        }
+if ($_[4]) {
+        local $ov = $old->{'value'};
+        $ov =~ s/\n$//;
+        local $v = $_[3];
+        $v =~ s/\n$//;
+        local @lines = split(/\n/, $v, -1);
+        @lines = map { s/^-/--/; s/^$/-/; $_ } @lines;
+        splice(@$lref, $pos, $olen, ("$_[2]        <<   END", @lines, "END"))
+                if (!$old || $v ne $ov);
+        $nlen = (!$old || $v ne $ov) ? @lines + 2 : $olen;
+        }
+else {
+        splice(@$lref, $pos, $olen, "$_[2] = $_[3]")
+                if (!$old || $_[3] ne $old->{'value'});
+        $nlen = 1;
+        }
+if ($old && $nlen != $olen) {
+        foreach $c (@{$_[0]}) {
+                if ($c->{'line'} > $old->{'eline'}) {
+                        $c->{'line'} += ($nlen - $olen);
+                        $c->{'eline'} += ($nlen - $olen);
+                        }
+                }
+        }
 }
 
 # find(name, &array)
@@ -129,85 +217,8 @@ $list{'members'} = "$ldir/$_[0]";
 $list{'config'} = "$ldir/$_[0].config";
 $list{'info'} = "$ldir/$_[0].info";
 $list{'intro'} = "$ldir/$_[0].intro";
+$list{'owner'} = "$ldir/$_[0].owner";
 return \%list;
-}
-
-# get_list_config(file)
-sub get_list_config
-{
-local(@rv, $line);
-$lnum = 0;
-open(CONF, $_[0]);
-while(<CONF>) {
-	s/\r|\n//g;
-	s/#.*$//g;
-	if (/^\s*(\S+)\s*=\s*(.*)$/) {
-		# single value
-		push(@rv, { 'name' => $1,
-			    'value' => $2,
-			    'index' => scalar(@rv),
-			    'line' => $lnum,
-			    'eline' => $lnum });
-		}
-	elsif (/^\s*(\S+)\s*<<\s*(\S+)/) {
-		# multi-line value
-		local $c = { 'name' => $1,
-			     'index' => scalar(@rv),
-			     'line' => $lnum };
-		local $end = $2;
-		while(<CONF>) {
-			$lnum++;
-			last if (/^$end[\r\n]+$/);
-			s/^--/-/;
-			s/^-\n/\n/;
-			$c->{'value'} .= $_;
-			}
-		$c->{'eline'} = $lnum;
-		push(@rv, $c);
-		}
-	$lnum++;
-	}
-return \@rv;
-}
-
-# save_list_directive(&config, file, name, value, multiline)
-sub save_list_directive
-{
-local $old = &find($_[2], $_[0]);
-local $lref = &read_file_lines($_[1]);
-local ($pos, $olen, $nlen);
-if ($old) {
-	$olen = $old->{'eline'} - $old->{'line'} + 1;
-	$pos = $old->{'line'};
-	}
-else {
-	$olen = 0;
-	$pos = @$lref;
-	}
-if ($_[4]) {
-	local $ov = $old->{'value'};
-	$ov =~ s/\n$//;
-	local $v = $_[3];
-	$v =~ s/\n$//;
-	local @lines = split(/\n/, $v, -1);
-	@lines = map { s/^-/--/; s/^$/-/; $_ } @lines;
-	splice(@$lref, $pos, $olen, ("$_[2]        <<   END", @lines, "END"))
-		if (!$old || $v ne $ov);
-	$nlen = (!$old || $v ne $ov) ? @lines + 2 : $olen;
-	}
-else {
-	splice(@$lref, $pos, $olen, "$_[2] = $_[3]")
-		if (!$old || $_[3] ne $old->{'value'});
-	$nlen = 1;
-	}
-if ($old && $nlen != $olen) {
-	foreach $c (@{$_[0]}) {
-		if ($c->{'line'} > $old->{'eline'}) {
-			$c->{'line'} += ($nlen - $olen);
-			$c->{'eline'} += ($nlen - $olen);
-			}
-		}
-	}
 }
 
 # get_aliases_file()
@@ -237,6 +248,40 @@ else {
 		}
 	}
 }
+
+
+# set_alias_owner(mail-adress, listdir)
+# return value to write to alias file
+sub set_alias_owner
+{
+# owner is stored in file
+if ($config{'owner_file'} eq "1" && $_[1] ne "" ) {
+	local $lowner=$_[1]."/".$in{'name'}.".owner";
+        &lock_file($lowner);
+        &open_tempfile(OWNER, ">$lowner");
+        &print_tempfile(OWNER, $_[0]);
+        &close_tempfile(OWNER);
+        &set_permissions($lowner);
+        &unlock_file($lowner);
+        # return :include:list.owner file instead of direkt alias
+        return ":include:$lowner";
+   }
+return $_[0];
+}
+
+# get_alias_owner()
+# return owner from given alias
+sub get_alias_owner
+{
+local $a=$_[0];
+if ( $a =~ s/^:include:// ) {
+	open(OWNER, $a);
+	$a=<OWNER>;
+	close(OWNER);
+    } 
+return $a;
+}
+
 
 # perl_unescape(string)
 # Converts a string like "hello\@there\\foo" to "hello@there\foo"
@@ -286,7 +331,7 @@ local $v = &find_value($_[0], $_[2]);
 local $rv = "<td><b>$_[1]</b></td> <td nowrap>";
 for($i=3; $i<@_; $i+=2) {
 	local $ch = $v eq $_[$i] ? "checked" : "";
-	$rv .= "<input name=$_[0] type=radio value='$_[$i]' $ch> ".$_[$i+1];
+	$rv .= "<input name=\"$_[0]\" type=\"radio\" value=\"$_[$i]\" $ch> ".$_[$i+1];
 	}
 $rv .= "</td>\n";
 return $rv;
@@ -303,13 +348,13 @@ sub opt_input
 {
 local $v = &find_value($_[0], $_[2]);
 local $rv = "<td><b>$_[1]</b></td> <td nowrap ".
-	    ($_[4] > 30 ? "colspan=3" : "").">";
-$rv .= sprintf "<input type=radio name=$_[0]_def value=1 %s> $_[3]\n",
+	    ($_[4] > 30 ? "colspan=\"3\"" : "").">";
+$rv .= sprintf "<input type=\"radio\" name=\"$_[0]_def\" value=\"1\" %s> $_[3]\n",
 		$v eq "" ? "checked" : "";
-$rv .= sprintf "<input type=radio name=$_[0]_def value=0 %s>\n",
+$rv .= sprintf "<input type=\"radio\" name=\"$_[0]_def\" value=\"0\" %s>\n",
 		$v eq "" ? "" : "checked";
-local $passwd = $_[0] =~ /passwd/ ? "type=password" : "";
-$rv .= "<input $passwd name=$_[0] size=$_[4] value=\"$v\"> $_[5]</td>\n";
+local $passwd = $_[0] =~ /passwd/ ? "type=\"password\"" : "";
+$rv .= "<input $passwd name=\"$_[0]\" size=\"$_[4]\" value=\"$v\"> $_[5]</td>\n";
 return $rv;
 }
 
@@ -328,7 +373,7 @@ local $v = &find_value($_[0], $_[2]);
 local $rv = "<td><b>$_[1]</b></td> <td nowrap><select name=$_[0]>";
 for($i=3; $i<@_; $i+=2) {
 	local $ch = $v eq $_[$i] ? "selected" : "";
-	$rv .= "<option value='$_[$i]' $ch> ".$_[$i+1];
+	$rv .= "<option value='$_[$i]' $ch>".$_[$i+1]."</option>";
 	}
 $rv .= "</select></td>\n";
 return $rv;
@@ -344,8 +389,11 @@ sub save_select
 sub multi_input
 {
 local $v = &find_value($_[0], $_[2]);
-local $rv = "<td valign=top><b>$_[1]</b></td> <td colspan=3>".
-	    "<textarea rows=4 cols=80 name=$_[0]>\n$v</textarea></td>\n";
+local $l = 1 + $v =~ tr/\n|\r//;
+$l=4  if ($l <= 4);
+$l=15 if ($l >= 14);
+local $rv = "<td valign=\"top\"><b>$_[1]</b></td> <td colspan=\"3\">".
+	    "<textarea rows=\"$l\" cols=\"80\" name=\"$_[0]\">\n$v</textarea></td>\n";
 return $rv;
 }
 
@@ -355,6 +403,15 @@ sub save_multi
 $in{$_[2]} =~ s/\r//g;
 &save_list_directive($_[0], $_[1], $_[2], $in{$_[2]}, 1);
 }
+
+# save_multi_global(&config, name)
+sub save_multi_global
+{
+$in{$_[1]} =~ s/\r//g;
+&save_directive($_[0], $_[1], $in{$_[1]}, 1);
+}
+
+
 
 # can_edit_list(&access, name)
 sub can_edit_list
@@ -379,6 +436,79 @@ if (!-d $homedir) {
 		}
 	}
 return 1;
+}
+
+# mdom_help()
+# returns majordomo help link
+sub mdom_help
+{
+local $rv= &help_search_link("majordomo", "man", "doc", "google");
+return $rv;
+}
+
+# check_mdom_config($conf)
+# moved from index.cgi, can be used from others also
+sub check_mdom_config 
+{
+local $conf=$_[0];
+# Check for the majordomo config file
+if (!-r $config{'majordomo_cf'}) {
+	print &text('index_econfig', "<tt>$config{'majordomo_cf'}</tt>",
+		 "$gconfig{'webprefix'}/config.cgi?$module_name"),"<p>\n";
+	&ui_print_footer("/", $text{'index'});
+	exit;
+	}
+# Check for the programs dir
+if (!-d $config{'program_dir'}) {
+	print &text('index_eprograms', "<tt>$config{'program_dir'}</tt>",
+		  "$gconfig{'webprefix'}/config.cgi?$module_name"),"<p>\n";
+	&ui_print_footer("/", $text{'index'});
+	exit;
+	}
+# Check majordomo version
+if (!-r "$config{'program_dir'}/majordomo_version.pl") {
+	print &text('index_eversion2', "majordomo_version.pl",
+			  $config{'program_dir'},
+		 	  "$gconfig{'webprefix'}/config.cgi?$module_name"),"<p>\n";
+	&ui_print_footer("/", $text{'index'});
+	exit;
+	}
+if ($majordomo_version < 1.94 || $majordomo_version >= 2) {
+	print "$text{'index_eversion'}<p>\n";
+	&ui_print_footer("/", $text{'index'});
+	exit;
+	}
+# Check $homedir in majordomo.cf
+if (!&homedir_valid($conf)) {
+	print &text('index_emdomdir', '$homedir', $homedir),"<p>\n";
+	&ui_print_footer("/", $text{'index'});
+	exit;
+	}
+# Check $listdir in majordomo.cf
+local $listdir = &perl_var_replace(&find_value("listdir", $conf), $conf);
+if (!-d $listdir) {
+	print &text('index_emdomdir', '$listdir', $listdir),"<p>\n";
+	&ui_print_footer("/", $text{'index'});
+	exit 1;
+	}
+# Check if module needed for aliases is OK
+if ($config{'aliases_file'} eq 'postfix') {
+        # Postfix has to be installed
+        &foreign_installed("postfix", 1) ||
+                &ui_print_endpage(&text('index_epostfix', '../postfix/'));
+        }
+elsif ($config{'aliases_file'} eq '') {
+        # Sendmail has to be installed
+        &foreign_installed("sendmail", 1) ||
+                &ui_print_endpage(&text('index_esendmail2', '','../sendmail/'));
+        }
+else {
+        # Only the sendmail module has to be installed
+        &foreign_check("sendmail") ||
+                &ui_print_endpage(&text('index_esendmail3'));
+        }
+
+return 0;
 }
 
 1;

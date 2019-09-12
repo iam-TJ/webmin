@@ -8,7 +8,7 @@ $conf = &get_config();
 @logs = &find("log", $conf);
 @links = ( &select_all_link("d"),
 	   &select_invert_link("d"),
-	   "<a href='edit_log.cgi?new=1'>$text{'logs_add'}</a>" );
+	   &ui_link("edit_log.cgi?new=1",$text{'logs_add'}) );
 if (@logs) {
 	@tds = ( "width=5" );
 	print &ui_form_start("delete_logs.cgi", "post");
@@ -23,7 +23,7 @@ if (@logs) {
 		$filter = join(", ", &find_value("filter", $f->{'members'}));
 		$dest = join(", ", &find_value("destination", $f->{'members'}));
 		print &ui_checked_columns_row([
-			"<a href='edit_log.cgi?idx=$f->{'index'}'>$source</a>",
+			&ui_link("edit_log.cgi?idx=$f->{'index'}",$source),
 			$filter || "<i>$text{'logs_none'}</i>",
 			$dest || "<i>$text{'logs_none'}</i>",
 			], \@tds, "d", $f->{'index'});

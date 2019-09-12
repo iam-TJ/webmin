@@ -75,6 +75,7 @@ if (@titles+@indexes+@views > $max_dbs && !$in{'search'}) {
 		print &ui_submit($text{'index_jumpok'}),"<br>\n";
 		print &ui_form_end();
 		}
+	print "<p>\n";
 	}
 elsif (@titles || @indexes) {
 	@icons = ( ( map { "images/table.gif" } @titles ),
@@ -106,25 +107,32 @@ elsif (@titles || @indexes) {
 		# Show table names, fields and row counts
 		foreach $t (@titles) {
 			local $c = &execute_sql($in{'db'},
+					"show create table ".quotestr($t));
+			push(@types, &text('dbase_typetable',
+				$c->{'data'}->[0]->[1] =~ /ENGINE=(\S+)/i ?
+				  "$1" : "Unknown"));
+			local $c = &execute_sql($in{'db'},
 					"select count(*) from ".quotestr($t));
 			push(@rows, $c->{'data'}->[0]->[0]);
 			local @str = &table_structure($in{'db'}, $t);
 			push(@fields, scalar(@str));
 			}
 		foreach $t (@indexes) {
+			push(@types, $text{'dbase_typeindex'});
 			$str = &index_structure($in{'db'}, $t);
 			push(@rows, "<i>$text{'dbase_index'}</i>");
 			push(@fields, scalar(@{$str->{'cols'}}));
 			}
-		foreach $v (@indexes) {
-			push(@rows, "<i>$text{'dbase_view'}</i>");
+		foreach $v (@views) {
+			push(@types, $text{'dbase_typeview'});
+			push(@rows, undef);
 			push(@fields, undef);
 			}
 		@dtitles = map { &html_escape($_) }
 			       ( @titles, @indexes, @views );
-		&split_table([ "", $text{'dbase_table'}, $text{'dbase_rows'},
-			       $text{'dbase_cols'} ],
-			     \@checks, \@links, \@dtitles,
+		&split_table([ "", $text{'dbase_name'}, $text{'dbase_type'},
+			           $text{'dbase_rows'}, $text{'dbase_cols'} ],
+			     \@checks, \@links, \@dtitles, \@types,
 			     \@rows, \@fields) if (@titles);
 		}
 	elsif ($displayconfig{'style'} == 2) {
@@ -164,34 +172,12 @@ else {
 	}
 &show_buttons();
 
-# Check if the user is from Virtualmin, and if so link back to his DB list
-if (&foreign_check("virtual-server")) {
-	$virtual_server::no_virtualmin_plugins = 1;
-	&foreign_require("virtual-server", "virtual-server-lib.pl");
-	if (!&virtual_server::master_admin() &&
-	    !&virtual_server::reseller_admin()) {
-		# Is a domain owner .. which domain is this DB in?
-		foreach my $d (grep { &virtual_server::can_edit_domain($_) }
-				    &virtual_server::list_domains()) {
-			@dbs = &virtual_server::domain_databases($d);
-			($got) = grep { $_->{'name'} eq $in{'db'} &&
-					$_->{'type'} eq 'mysql' } @dbs;
-			if ($got) {
-				$virtualmin = $d->{'id'};
-				}
-			}
-		}
-	}
-
-if ($virtualmin) {
-	&ui_print_footer("../virtual-server/list_databases.cgi?dom=$virtualmin",
-			 $text{'index_return'});
-	}
-elsif ($single) {
+if ($single) {
 	&ui_print_footer("/", $text{'index'});
 	}
 else {
-	&ui_print_footer("", $text{'index_return'});
+	&ui_print_footer(&get_databases_return_link($in{'db'}),
+			 $text{'index_return'});
 	}
 
 sub show_buttons
@@ -214,6 +200,10 @@ if (!$access{'edonly'}) {
 	# Delete this database
 	if ($access{'delete'}) {
 		print &ui_submit($text{'dbase_drop'}, 'dropdb');
+		print "&nbsp;\n";
+		}
+	elsif (@titles) {
+		print &ui_submit($text{'dbase_empty'}, 'dropdb');
 		print "&nbsp;\n";
 		}
 

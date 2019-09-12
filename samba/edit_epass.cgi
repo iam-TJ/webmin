@@ -5,7 +5,7 @@
 require './samba-lib.pl';
 # check acls
 
-&error_setup("<blink><font color=red>$text{'eacl_aviol'}</font></blink>");
+&error_setup("$text{'eacl_aviol'}ask_epass.cgi");
 &error("$text{'eacl_np'} $text{'eacl_pvusers'}")
         unless $access{'view_users'};
 # display
@@ -20,8 +20,7 @@ if (@ulist) {
 	@grid = ( );
 	for($i=0; $i<@ulist; $i++) {
 		$u = $ulist[$i];
-		push(@grid, "<a href='edit_euser.cgi?idx=$u->{'index'}'>".
-			    &html_escape($u->{'name'})."</a>");
+		push(@grid, &ui_link("edit_euser.cgi?idx=$u->{'index'}",&html_escape($u->{'name'})));
 		}
 	print &ui_grid_table(\@grid, 4, 100,
 		[ "width=25%", "width=25%", "width=25%", "width=25%" ],

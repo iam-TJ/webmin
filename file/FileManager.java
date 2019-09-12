@@ -238,12 +238,14 @@ public class FileManager extends Applet
 		if (can_button("new")) {
 			top2.add(new_b = make_button("new.gif",
 						     text("top_new")));
-			top2.add(hnew_b = make_button("html.gif",
-						     text("top_new")));
+			if (can_button("htmlnew"))
+				top2.add(hnew_b = make_button("html.gif",
+							     text("top_new")));
 			}
 		if (can_button("upload"))
 			top2.add(upload_b = make_button("upload.gif",
 							text("top_upload")));
+		if (can_button("extract"))
 			top2.add(extract_b = make_button("extract.gif",
 							 text("top_extract")));
 		if (can_button("mkdir"))
@@ -1470,6 +1472,7 @@ class EditorWindow extends FixedFrame implements CbButtonCallback
 	FileManager filemgr;
 	GotoWindow goto_window;
 	FindReplaceWindow find_window;
+	String charset;
 
 	// Editing an existing file
 	EditorWindow(RemoteFile f, FileManager p)
@@ -1490,6 +1493,7 @@ class EditorWindow extends FixedFrame implements CbButtonCallback
 		filemgr.set_cookie(uc);
 		int len = uc.getContentLength();
 		InputStream is = uc.getInputStream();
+		charset = filemgr.get_charset(uc.getContentType());
 		byte buf[];
 		if (len >= 0) {
 			// Length is known
@@ -1513,7 +1517,8 @@ class EditorWindow extends FixedFrame implements CbButtonCallback
 			    buf = nbuf;
 			    }
 			}
-		String s = new String(buf, 0);
+		String s = charset == null ? new String(buf, 0)
+					   : new String(buf, charset);
 		if (s.indexOf("\r\n") != -1) {
 			dosmode.setState(true);
 			s = FileManager.replace_str(s, "\r\n", "\n");
@@ -1548,6 +1553,7 @@ class EditorWindow extends FixedFrame implements CbButtonCallback
 		add("North", np);
 		}
 	add("Center", edit = new TextArea(20, 80));
+	edit.setEditable(true);
 	edit.setFont(filemgr.fixed);
 	Panel bot = new Panel();
 	bot.setLayout(new FlowLayout(FlowLayout.RIGHT));
@@ -1619,8 +1625,16 @@ class EditorWindow extends FixedFrame implements CbButtonCallback
 			filemgr.set_cookie(uc);
 			uc.setDoOutput(true);
 			OutputStream os = uc.getOutputStream();
-			byte buf[] = new byte[s.length()];
-			s.getBytes(0, buf.length, buf, 0);
+			byte buf[];
+			if (charset == null) {
+				// Assume ascii
+				buf = new byte[s.length()];
+				s.getBytes(0, buf.length, buf, 0);
+				}
+			else {
+				// Convert back to original charset
+				buf = s.getBytes(charset);
+				}
 			os.write(buf);
 			os.close();
 			BufferedReader is =
@@ -1820,7 +1834,7 @@ class FindReplaceWindow extends FixedFrame implements CbButtonCallback
 	if (findtxt.length() == 0)
 		return;
 	if (b == find_b) {
-		// Find the next occurrance of the text, starting from
+		// Find the next occurrence of the text, starting from
 		// the cursor + 1, and select it
 		int pos = edittxt.indexOf(findtxt,
 					   editor.edit.getSelectionStart()+1);
@@ -1854,7 +1868,7 @@ class FindReplaceWindow extends FixedFrame implements CbButtonCallback
 		click(find_b);
 		}
 	else if (b == all_b) {
-		// Replace all occurrances of the text in the editor
+		// Replace all occurrences of the text in the editor
 		int pos = 0;
 		int len = findtxt.length();
 		int st = editor.edit.getSelectionStart(),
@@ -2024,7 +2038,7 @@ class PropertiesWindow extends FixedFrame implements CbButtonCallback
 		Panel rec = new LinedPanel(filemgr.text("info_apply"));
 		rec.setLayout(new BorderLayout());
 		rec_mode = new Choice();
-		for(int i=1; i<=3; i++)
+		for(int i=1; i<=5; i++)
 			rec_mode.addItem(filemgr.text("info_apply"+i));
 		rec.add("Center", rec_mode);
 		mid = add_panel(mid, rec);
@@ -2074,17 +2088,27 @@ class PropertiesWindow extends FixedFrame implements CbButtonCallback
 			// Update all changed file objects
 			if (linkto != null)
 				file.linkto = linkto.getText();
-			else if (rec == 0)
+			else if (rec == 0) {
+				// This file or directory only
 				update_file(file, perms, false);
+				}
 			else if (rec == 1) {
 				// Update files in this directory
 				update_file(file, perms, false);
-				recurse_files(file, perms, false);
+				recurse_files(file, perms, false, false, true);
 				}
 			else if (rec == 2) {
 				// Update files and subdirs
                                 update_file(file, perms, false);
-				recurse_files(file, perms, true);
+				recurse_files(file, perms, true, true, true);
+				}
+			else if (rec == 3) {
+				// Update files only in dir and subdirs
+				recurse_files(file, perms, true, false, true);
+				}
+			else if (rec == 4) {
+				// Update dir and subdirs but not files
+				recurse_files(file, perms, true, true, false);
 				}
 
 			// Update directory list
@@ -2123,7 +2147,8 @@ class PropertiesWindow extends FixedFrame implements CbButtonCallback
 		f.perms = perms;
 	}
 
-	void recurse_files(RemoteFile f, int perms, boolean do_subs)
+	void recurse_files(RemoteFile f, int perms, boolean do_subs,
+			   boolean do_dirs, boolean do_files)
 	{
 	if (f.list == null) return;
 	for(int i=0; i<f.list.length; i++) {
@@ -2131,11 +2156,17 @@ class PropertiesWindow extends FixedFrame implements CbButtonCallback
 		if (ff.type == 5) continue;
 		else if (ff.type == 0) {
 			if (do_subs) {
-				update_file(ff, perms, false);
-				recurse_files(ff, perms, true);
+				if (do_dirs) {
+					update_file(ff, perms, false);
+					}
+				recurse_files(ff, perms, true, do_dirs, do_files);
 				}
 			}
-		else update_file(ff, perms, true);
+		else {
+			if (do_files) {
+				update_file(ff, perms, true);
+				}
+			}
 		}
 	}
 

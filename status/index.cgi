@@ -39,9 +39,11 @@ if (@serv) {
 		@serv = sort { $oldstatus{$a->{'id'}} <=> $oldstatus{$b->{'id'}} } @serv;
 		}
 	if (!$config{'index_status'} && $oldstatus) {
-		local @st = stat("$module_config_directory/oldstatus");
-		local $t = localtime($st[9]);
-		print &text('index_oldtime', $t),"<br>\n";
+		local @st = stat($oldstatus_file);
+		if (@st) {
+			local $t = &make_date($st[9]);
+			print &text('index_oldtime', $t),"<br>\n";
+			}
 		}
 
 	# Show table of defined monitors
@@ -117,7 +119,7 @@ foreach $s (@_) {
 	local $esc = &html_escape($s->{'desc'});
 	$esc = "<i>$esc</i>" if ($s->{'nosched'} == 1);
 	if ($access{'edit'}) {
-		push(@cols, "<a href='edit_mon.cgi?id=$s->{'id'}'>$esc</a>");
+		push(@cols, &ui_link("edit_mon.cgi?id=$s->{'id'}",$esc));
 		}
 	else {
 		push(@cols, $esc);
@@ -127,8 +129,17 @@ foreach $s (@_) {
 	# Work out and show all the up icons
 	local @ups;
 	if ($config{'index_status'}) {
-		# Showing the current status
+		# Showing the current status .. first check dependency
 		@stats = &service_status($s, 1);
+		if ($s->{'depend'}) {
+			$ds = &get_service($s->{'depend'});
+			if ($ds) {
+				@dstats = &service_status($ds, 1);
+				if ($dstats[0]->{'up'} != 1) {
+					@stats = map { { 'up' => -4 } } @stats;
+					}
+				}
+			}
 		@ups = map { $_->{'up'} } @stats;
 		@remotes = map { $_->{'remote'} } @stats;
 		}
@@ -148,14 +159,8 @@ foreach $s (@_) {
 			$up = $ups[$i];
 			$h = $remotes[$i];
 			$h = $text{'index_local'} if ($h eq '*');
-			push(@icons, "<img src=images/".
-			      ($up == 1 ? "up.gif" :
-			      $up == -1 ? "not.gif" :
-			      $up == -2 ? "webmin.gif" :
-			      $up == -3 ? "timed.gif" :
-			      $up == -4 ? "skip.gif" :
-					  "down.gif").
-			      " title='".&html_escape($h)."'>");
+			push(@icons, "<img src=".&get_status_icon($up).
+				     " title='".&html_escape($h)."'>");
 			}
 		push(@cols, join("", @icons));
 		}
@@ -176,7 +181,7 @@ if ($access{'edit'}) {
 	print "<input type=submit value='$text{'index_add'}'> ",
 	      "<select name=type>\n";
 	foreach $h (sort { $a->[1] cmp $b->[1] } &list_handlers()) {
-		printf "<option value=%s>%s\n",
+		printf "<option value=%s>%s</option>\n",
 			$h->[0], $h->[1] || $h->[0];
 		}
 	print "</select></form>\n";

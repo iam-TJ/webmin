@@ -6,11 +6,12 @@ require './postgresql-lib.pl';
 $access{'users'} || &error($text{'user_ecannot'});
 &ui_print_header(undef, $text{'user_title'}, "", "list_users");
 
-$s = &execute_sql_safe($config{'basedb'}, "select * from pg_shadow");
+($pg_table, $pg_cols) = &get_pg_shadow_table();
+$s = &execute_sql_safe($config{'basedb'}, "select $pg_cols from $pg_table");
 print &ui_form_start("delete_users.cgi", "post");
 @rowlinks = ( &select_all_link("d", 0),
 	      &select_invert_link("d", 0),
-	      "<a href='edit_user.cgi?new=1'>$text{'user_add'}</a>" );
+	      &ui_link("edit_user.cgi?new=1",$text{'user_add'}) );
 print &ui_links_row(\@rowlinks);
 print &ui_columns_start([ "", $text{'user_name'},
 			  $text{'user_pass'},
@@ -19,8 +20,7 @@ print &ui_columns_start([ "", $text{'user_name'},
 			  $text{'user_until'} ], 100);
 foreach $u (sort { $a->[0] cmp $b->[0] } @{$s->{'data'}}) {
 	local @cols;
-	push(@cols, "<a href='edit_user.cgi?user=$u->[0]'>".
-		    &html_escape($u->[0])."</a>");
+	push(@cols, &ui_link("edit_user.cgi?user=$u->[0]",&html_escape($u->[0])));
 	push(@cols, $u->[5] ? $text{'yes'} : $text{'no'});
 	push(@cols, $u->[2] =~ /t|1/ ? $text{'yes'} : $text{'no'});
 	push(@cols, $u->[4] =~ /t|1/ ? $text{'yes'} : $text{'no'});

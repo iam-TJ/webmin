@@ -76,20 +76,27 @@ while(<FILE>) {
 		$rule->{'action'} = shift(@w);
 		if ($rule->{'action'} eq "block") {
 			# Block can have ICMP return type parameter
+			print STDERR $w[0],"\n";
 			if ($w[0] eq "return-rst") {
 				shift(@w);
 				$rule->{'block-return'} = "rst";
 				}
 			elsif ($w[0] eq "return-icmp" ||
 			       $w[0] eq "return-icmp-as-dest") {
-				# XXX is this correct? ie.
-				# return-icmp ( srcfail )
+				# Handle action like return-icmp ( net-unr )
 				$rule->{'block-return-dest'} = 1
 					if ($w[0] eq "return-icmp-as-dest");
 				shift(@w);
 				shift(@w);	# skip (
 				$rule->{'block-return'} = shift(@w);
 				shift(@w);	# skip )
+				}
+			elsif ($w[0] =~ /^(return-icmp|return-icmp-as-dest)\((\S+)\)/) {
+				# Same as above, with no spaces
+				$rule->{'block-return-dest'} = 1
+					if ($1 eq "return-icmp-as-dest");
+				$rule->{'block-return'} = $2;
+				shift(@w);
 				}
 			}
 		elsif ($rule->{'action'} eq "log") {
@@ -173,10 +180,20 @@ while(<FILE>) {
 			$rule->{'ttl'} = shift(@w);
 			}
 
+		# Inet keyword can appear before proto, but does nothing
+		if ($w[0] eq "inet") {
+			shift(@w);
+			}
+
 		# Parse protocol
 		if ($w[0] eq "proto") {
 			shift(@w);
 			$rule->{'proto'} = shift(@w);
+			}
+
+		# Skip inet keyword, which as far as I know does nothing
+		if ($w[0] eq "inet") {
+			shift(@w);
 			}
 
 		# Parse from/to section
@@ -197,7 +214,8 @@ while(<FILE>) {
 				$cmt .= $nocmt;
 				goto nextline;
 				}
-			&error("error parsing IPF line $_ at $w[0] line $lnum");
+			&error("error parsing IPF line $_ at $w[0] line $lnum ".
+			       " : remainder ".join(" ", @w));
 			}
 
 		# Parse ip options
@@ -1194,10 +1212,10 @@ if ($config{'apply_cmd'} && !$config{'smf'}) {
 	$out = &backquote_logged("$config{'apply_cmd'} 2>&1 </dev/null");
 	}
 else {
-	&system_logged("$config{'ipf'} -F a >/dev/null 2>&1");
+	&system_logged("$config{'ipf'} -F a -f $config{'ipf_conf'} >/dev/null 2>&1");
 	$out = &backquote_logged("$config{'ipf'} -f $config{'ipf_conf'} 2>&1 </dev/null");
 	if (-r $config{'ipnat_conf'} && !$?) {
-		&system_logged("$config{'ipnat'} -C -F >/dev/null 2>&1");
+		&system_logged("$config{'ipnat'} -C -F -f $config{'ipnat_conf'} >/dev/null 2>&1");
 		$out = &backquote_logged("$config{'ipnat'} -f $config{'ipnat_conf'} 2>&1 </dev/null");
 		}
 	}
@@ -1216,9 +1234,17 @@ if ($config{'smf'}) {
 	       $state eq 'disabled' || $state eq 'offline' ||
 	        $state eq 'maintenance' ? 1 : 0;
 	}
+elsif ($gconfig{'os_type'} eq 'freebsd') {
+	# Check for built-in rc config
+	&foreign_require("init");
+	local @rc = &init::get_rc_conf();
+	local ($rc) = grep { $_->{'name'} eq 'ipfilter_enable' &&
+			     $_->{'value'} eq 'YES' } @rc;
+	return $rc ? 2 : 1;
+	}
 else {
 	# Look at init script
-	&foreign_require("init", "init-lib.pl");
+	&foreign_require("init");
 	return &init::action_status($init_script);
 	}
 }
@@ -1237,6 +1263,17 @@ if ($config{'smf'}) {
 				    [ $config{'smf'} ]);
 		}
 	}
+elsif ($gconfig{'os_type'} eq 'freebsd') {
+	# Use built-in config
+	&foreign_require("init");
+	&init::save_rc_conf("ipfilter_enable", "YES");
+	&init::save_rc_conf("ipfilter_rules", $config{'ipf_conf'});
+	my $natrules = &get_ipnat_config();
+	if (@$natrules) {
+		&init::save_rc_conf("ipnat_enable", "YES");
+		&init::save_rc_conf("ipnat_rules", $config{'ipnat_conf'});
+		}
+	}
 else {
 	# Create or enable init script
 	local $ipf = &has_command($config{'ipf'});
@@ -1244,7 +1281,7 @@ else {
 	local $start = "$ipf -F a\n".
 		       "$ipf -f $config{'ipf_conf'}";
 	local $stop = "$ipf -F a".
-	&foreign_require("init", "init-lib.pl");
+	&foreign_require("init");
 	&init::enable_at_boot($init_script, "Activate IPfilter firewall",
 			      $start, $stop);
 	}
@@ -1263,6 +1300,12 @@ if ($config{'smf'}) {
 		&smf::svc_state_cmd($smf::text{'state_disable'},
 				    [ $config{'smf'} ]);
 		}
+	}
+elsif ($gconfig{'os_type'} eq 'freebsd') {
+	# Use built-in config
+	&foreign_require("init");
+	&init::save_rc_conf("ipfilter_enable", "NO");
+	&init::save_rc_conf("ipnat_enable", "NO");
 	}
 else {
 	# Disable init script

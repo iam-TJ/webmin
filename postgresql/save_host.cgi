@@ -75,9 +75,19 @@ else {
 		$in{'password'} =~ /^\S+$/ || &error($text{'host_epassword'});
 		$host->{'arg'} = $in{'password'};
 		}
-	elsif ($in{'auth'} eq 'ident' && $in{'identarg'}) {
+	elsif ($in{'auth'} eq 'ident' && $in{'identarg'} == 1) {
 		$in{'ident'} =~ /^\S+$/ || &error($text{'host_eident'});
 		$host->{'arg'} = $in{'ident'};
+		}
+	elsif ($in{'auth'} eq 'ident' && $in{'identarg'} == 2) {
+		$host->{'arg'} = 'sameuser';
+		}
+	elsif ($in{'auth'} eq 'peer' && $in{'peerarg'} == 1) {
+		$in{'peer'} =~ /^\S+$/ || &error($text{'host_eident'});
+		$host->{'arg'} = $in{'peer'};
+		}
+	elsif ($in{'auth'} eq 'peer' && $in{'peerarg'} == 2) {
+		$host->{'arg'} = 'sameuser';
 		}
 	elsif ($in{'auth'} eq 'pam' && $in{'pamarg'}) {
 		$in{'pam'} =~ /^\S+$/ || &error($text{'host_epam'});

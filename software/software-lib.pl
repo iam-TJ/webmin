@@ -8,7 +8,7 @@ $heiropen_file = "$module_config_directory/heiropen";
 
 # Use the appropriate function set for whatever package management system
 # we are using.
-do "$config{package_system}-lib.pl";
+do "$config{'package_system'}-lib.pl";
 
 if ($config{'update_system'} eq '*') {
 	# User specifically doesn't want any
@@ -20,10 +20,22 @@ elsif ($config{'update_system'}) {
 	}
 else {
 	# Guess which update system we are using
-	if (&has_command($config{'apt_mode'} ? "aptitude" : "apt-get")) {
+	if ($gconfig{'os_type'} eq 'freebsd') {
+		if (&use_pkg_ng()) {
+			$update_system = "pkg";
+			}
+		else {
+			$update_system = "ports";
+			}
+		}
+	elsif (&has_command($config{'apt_mode'} ? "aptitude" : "apt-get")) {
 		$update_system = "apt";
 		}
 	elsif (&has_command("yum") && -r "/etc/yum.conf") {
+		$update_system = "yum";
+		}
+	elsif (&has_command("dnf") && -r "/etc/dnf/dnf.conf") {
+		# DNF is basically compatible with YUM
 		$update_system = "yum";
 		}
 	elsif (&has_command("up2date") && &has_command("rhn_check")) {
@@ -39,12 +51,16 @@ else {
 	elsif (&has_command("emerge")) {
 		$update_system = "emerge";
 		}
-	elsif (&has_command("cupdate")) {
-		# not done yet!
+	elsif (&has_command("pkgin") || -x "/usr/pkg/bin/pkgin") {
+		$update_system = "pkgsrc";
 		}
 	}
 if ($update_system) {
-	do $update_system."-lib.pl";
+	# Load the update system specific library, unless it has already been
+	# loaded above
+	if ($update_system ne $config{'package_system'}) {
+		do $update_system."-lib.pl";
+		}
 	$has_update_system = 1;
 	}
 
@@ -93,10 +109,12 @@ return $_[0];
 # show_package_info(package, version, [no-installed-message])
 sub show_package_info
 {
-@pinfo = &package_info($_[0], $_[1]);
+my ($name, $ver, $nomsg) = @_;
+
+my @pinfo = &package_info($name, $ver);
 return () if (!@pinfo);
 
-print &ui_subheading(&text('do_success', $_[0])) if (!$_[2]);
+print &ui_subheading(&text('do_success', $name)) if (!$nomsg);
 print &ui_table_start($text{'edit_details'}, "width=100%", 4,
 		      [ "width=20%", undef, "width=20%", undef ]);
 
@@ -118,17 +136,20 @@ print &ui_table_row($text{'edit_class'},
 print &ui_table_row($text{'edit_ver'},
 	&html_escape($pinfo[4]));
 
-# Vendor
-print &ui_table_row($text{'edit_vend'},
-	&html_escape(&entities_to_ascii($pinfo[5])));
+if ($pinfo[5]) {
+	# Vendor
+	print &ui_table_row($text{'edit_vend'},
+		&html_escape(&entities_to_ascii($pinfo[5])));
+	}
 
 # Architecture
 print &ui_table_row($text{'edit_arch'},
 	&html_escape($pinfo[3]));
 
-# Install date
-print &ui_table_row($text{'edit_inst'},
-	&html_escape($pinfo[6]));
+if ($pinfo[6]) {
+	# Install date
+	print &ui_table_row($text{'edit_inst'}, $pinfo[6]);
+	}
 
 print &ui_table_end();
 
@@ -201,51 +222,16 @@ return undef;
 # Returns -1 if ver1 is older than ver2, 1 if newer, 0 if same
 sub compare_versions
 {
-local @sp1 = split(/[\.\-]/, $_[0]);
-local @sp2 = split(/[\.\-]/, $_[1]);
-for(my $i=0; $i<@sp1 || $i<@sp2; $i++) {
-	local $v1 = $sp1[$i];
-	local $v2 = $sp2[$i];
-	local $comp;
-	if ($v1 =~ /^\d+$/ && $v2 =~ /^\d+$/) {
-		# Full numeric compare
-		$comp = $v1 <=> $v2;
-		}
-	elsif ($v1 =~ /^\d+\S*$/ && $v2 =~ /^\d+\S*$/) {
-		# Numeric followed by string
-		$v1 =~ /^(\d+)(\S*)$/;
-		local ($v1n, $v1s) = ($1, $2);
-		$v2 =~ /^(\d+)(\S*)$/;
-		local ($v2n, $v2s) = ($1, $2);
-		$comp = $v1n <=> $v2n;
-		if (!$comp) {
-			# X.rcN is always older than X
-			if ($v1s =~ /^rc\d+$/i && $v2s =~ /^\d*$/) {
-				$comp = -1;
-				}
-			elsif ($v1s =~ /^\d*$/ && $v2s =~ /^rc\d+$/i) {
-				$comp = 1;
-				}
-			else {
-				$comp = $v1s cmp $v2s;
-				}
-			}
-		}
-	elsif ($v1 =~ /^\d+$/ && $v2 !~ /^\d+$/) {
-		# Numeric compared to non-numeric - numeric is always higher
-		$comp = 1;
-		}
-	elsif ($v1 !~ /^\d+$/ && $v2 =~ /^\d+$/) {
-		# Non-numeric compared to numeric - numeric is always higher
-		$comp = -1;
-		}
-	else {
-		# String compare only
-		$comp = $v1 cmp $v2;
-		}
-	return $comp if ($comp);
+local ($ver1, $rel1) = split(/-/, $_[0], 2);
+local ($ver2, $rel2) = split(/-/, $_[1], 2);
+if ($rel1 ne "" && $rel2 ne "" && $config{'package_system'} eq 'rpm') {
+	# If two RPM packages have releases, then the version part comparison
+	# must be done first and separately so that release number parts don't
+	# override version parts.
+	return &compare_versions($ver1, $ver2) ||
+	       &compare_versions($rel1, $rel2);
 	}
-return 0;
+return &compare_version_numbers($_[0], $_[1]);
 }
 
 # check_package_system()
@@ -259,6 +245,7 @@ if (defined(&validate_package_system)) {
 	}
 if (defined(&list_package_system_commands)) {
 	foreach my $c (&list_package_system_commands()) {
+		$c =~ s/\s+.*$//;	# Strip off args
 		if (!&has_command($c)) {
 			$err ||= &text('index_epackagecmd', &package_system(),
 				       "<tt>$c</tt>");

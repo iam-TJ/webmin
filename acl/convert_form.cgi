@@ -2,13 +2,16 @@
 # convert_form.cgi
 # Display a form for converting unix users to webmin users
 
+use strict;
+use warnings;
 require './acl-lib.pl';
+our (%in, %text, %config, %access);
 $access{'sync'} && $access{'create'} || &error($text{'convert_ecannot'});
 &ui_print_header(undef, $text{'convert_title'}, "");
 
-@glist = &list_groups();
+my @glist = &list_groups();
 if ($access{'gassign'} ne '*') {
-	@gcan = split(/\s+/, $access{'gassign'});
+	my @gcan = split(/\s+/, $access{'gassign'});
 	@glist = grep { &indexof($_->{'name'}, @gcan) >= 0 } @glist;
 	}
 if (!@glist) {
@@ -17,25 +20,33 @@ if (!@glist) {
 	exit;
 	}
 
-print "<form action=convert.cgi>\n";
 print "$text{'convert_desc'}<p>\n";
-print "<input type=radio name=conv value=0 checked> $text{'convert_0'}<br>\n";
-print "<input type=radio name=conv value=1> $text{'convert_1'} ",
-      "<input name=users size=40> ",&user_chooser_button("users",1),"<br>\n";
-print "<input type=radio name=conv value=2> $text{'convert_2'} ",
-      "<input name=nusers size=40> ",&user_chooser_button("nusers",1),"<br>\n";
-print "<input type=radio name=conv value=3> $text{'convert_3'} ",
-      &unix_group_input("group"),"<br>\n";
-print "<input type=radio name=conv value=4> $text{'convert_4'} ",
-      "<input name=min size=6> - <input name=max size=6><p>\n";
+print &ui_form_start("convert.cgi", "post");
+print &ui_table_start(undef, undef, 2);
 
-print "$text{'convert_group'} <select name=wgroup>\n";
-foreach $g (@glist) {
-	print "<option>$g->{'name'}\n";
-	}
-print "</select><br>\n";
-print "<input type=checkbox name=sync value=1> $text{'convert_sync'}<br>\n";
-print "<input type=submit value='$text{'convert_ok'}'></form>\n";
+# Users to convert
+print &ui_table_row($text{'convert_users'},
+   &ui_radio_table("conv", 0,
+	[ [ 0, $text{'convert_0'} ],
+	  [ 1, $text{'convert_1'}, &ui_textbox("users", undef, 60)." ".
+				   &user_chooser_button("users", 1) ],
+	  [ 2, $text{'convert_2'}, &ui_textbox("nusers", undef, 60)." ".
+				   &user_chooser_button("nusers", 1) ],
+	  [ 3, $text{'convert_3'}, &unix_group_input("group") ],
+	  [ 4, $text{'convert_4'}, &ui_textbox("min", undef, 6)." - ".
+				   &ui_textbox("max", undef, 6) ]
+	]));
+
+# Put into group
+print &ui_table_row($text{'convert_group'},
+      &ui_select("wgroup", undef, [ map { $_->{'name'} } @glist ]));
+
+# Keep passwords in sync
+print &ui_table_row($text{'convert_sync2'},
+	&ui_yesno_radio("sync", 1));
+
+print &ui_table_end();
+print &ui_form_end([ [ undef, $text{'convert_ok'} ] ]);
 
 &ui_print_footer("", $text{'index_return'});
 

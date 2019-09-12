@@ -19,7 +19,8 @@ our %access = &get_module_acl();
 our %access_mods = map { $_, 1 } split(/\s+/, $access{'mods'});
 our %access_users = map { $_, 1 } split(/\s+/, $access{'users'});
 our %parser_cache;
-our (%text, $module_config_directory, $root_directory, $webmin_logfile);
+our (%text, $module_config_directory, $root_directory, $webmin_logfile,
+     $module_var_directory);
 
 =head2 list_webmin_log([only-user], [only-module], [start-time, end-time])
 
@@ -92,13 +93,17 @@ a hash ref containing the following keys :
 =cut
 sub parse_logline
 {
-if ($_[0] =~ /^(\d+)\.(\S+)\s+\[.*\]\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+"([^"]+)"\s+"([^"]+)"\s+"([^"]+)"(.*)/ ||
-    $_[0] =~ /^(\d+)\.(\S+)\s+\[.*\]\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)(.*)/) {
+my ($line) = @_;
+if (!$line) {
+	return undef;
+	}
+if ($line =~ /^(\d+)\.(\S+)\s+\[.*\]\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+"([^"]+)"\s+"([^"]+)"\s+"([^"]+)"(.*)/ ||
+    $line =~ /^(\d+)\.(\S+)\s+\[.*\]\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)(.*)/) {
 	my $rv = { 'time' => $1, 'id' => "$1.$2",
-		      'user' => $3, 'sid' => $4,
-		      'ip' => $5, 'module' => $6,
-		      'script' => $7, 'action' => $8,
-		      'type' => $9, 'object' => $10 };
+		   'user' => $3, 'sid' => $4,
+		   'ip' => $5, 'module' => $6,
+		   'script' => $7, 'action' => $8,
+		   'type' => $9, 'object' => $10 };
 	my %param;
 	my $p = $11;
 	while($p =~ /^\s*([^=\s]+)='([^']*)'(.*)$/) {
@@ -352,9 +357,12 @@ sub build_log_index
 {
 my ($index) = @_;
 my $ifile = "$module_config_directory/logindex";
+if (!glob($ifile."*")) {
+	$ifile = "$module_var_directory/logindex";
+	}
 dbmopen(%$index, $ifile, 0600);
 my @st = stat($webmin_logfile);
-if ($st[9] > $index->{'lastchange'}) {
+if (@st && (!$index->{'lastchange'} || $st[9] > $index->{'lastchange'})) {
 	# Log has changed .. perhaps need to rebuild
 	open(LOG, $webmin_logfile);
 	if ($index->{'lastsize'} && $st[7] >= $index->{'lastsize'}) {
@@ -413,7 +421,14 @@ if ($parser_cache{$act->{'module'}}) {
 	}
 elsif ($act->{'module'} eq 'global') {
 	# This module converts global actions
-	$d = $text{'search_global_'.$act->{'action'}};
+	if ($act->{'action'} eq 'failed') {
+		my $r = $text{'search_global_'.$act->{'object'}} ||
+			$act->{'object'};
+		$d = &text('search_global_failed', $r);
+		}
+	else {
+		$d = $text{'search_global_'.$act->{'action'}};
+		}
 	}
 return $d ? $d :
        $act->{'action'} eq '_config_' ? $text{'search_config'} :

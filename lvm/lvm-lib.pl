@@ -58,7 +58,7 @@ else {
 			$pv->{'vg'} = $1;
 			$pv->{'vg'} =~ s/\s+\(.*\)//;
 			}
-		elsif (/PV\s+Size\s+(\S+)\s+(\S+)/i) {
+		elsif (/PV\s+Size\s+<?(\S+)\s+(\S+)/i) {
 			$pv->{'size'} = &mult_units($1, $2);
 			}
 		elsif (/PE\s+Size\s+\(\S+\)\s+(\S+)/i) {
@@ -79,6 +79,7 @@ else {
 		}
 	close(DISPLAY);
 	@rv = grep { $_->{'vg'} eq $_[0] } @rv;
+	@rv = grep { $_->{'name'} ne 'unknown device' } @rv;
 	}
 return @rv;
 }
@@ -186,7 +187,7 @@ else {
 			$vg = { 'name' => $1 };
 			push(@rv, $vg);
 			}
-		elsif (/VG\s+Size\s+(\S+)\s+(\S+)/i) {
+		elsif (/VG\s+Size\s+<?(\S+)\s+(\S+)/i) {
 			$vg->{'size'} = &mult_units($1, $2);
 			}
 		elsif (/PE\s+Size\s+(\S+)\s+(\S+)/i) {
@@ -296,20 +297,35 @@ else {
 	open(DISPLAY, "lvdisplay -m 2>/dev/null |");
 	while(<DISPLAY>) {
 		s/\r|\n//g;
-		if (/LV\s+Name\s+(.*\/(\S+))/i) {
-			$lv = { 'name' => $2,
-				'device' => $1,
+		if (/LV\s+(Name|Path)\s+(.*\/(\S+))/i) {
+			$lv = { 'name' => $3,
+				'device' => $2,
 				'number' => scalar(@rv) };
 			push(@rv, $lv);
+			}
+		elsif (/LV\s+Name\s+([^\/ ]+)/) {
+			# Ignore this, as we got the name from LV Path line.
+			# UNLESS it doesn't match the current LV, in which
+			# case it is the start of a new thinpool LV.
+			if (!@rv || $rv[$#rv]->{'name'} ne $1) {
+				$lv = { 'name' => $1,
+					'device' => $1,
+					'thin' => $1,
+					'number' => scalar(@rv) };
+				push(@rv, $lv);
+				}
 			}
 		elsif (/VG\s+Name\s+(.*)/) {
 			$lv->{'vg'} = $1;
 			}
-		elsif (/LV\s+Size\s+(\S+)\s+(\S+)/i) {
+		elsif (/LV\s+Size\s+<?(\S+)\s+(\S+)/i) {
 			$lv->{'size'} = &mult_units($1, $2);
 			}
 		elsif (/Current\s+LE\s+(\d+)/ && $vg) {
 			$lv->{'size'} = $1 * $vg->{'pe_size'};
+			}
+		elsif (/COW-table\s+LE\s+(\d+)/ && $vg) {
+			$lv->{'cow_size'} = $1 * $vg->{'pe_size'};
 			}
 		elsif (/LV\s+Write\s+Access\s+(\S+)/i) {
 			$lv->{'perm'} = $1 eq 'read/write' ? 'rw' : 'r';
@@ -327,8 +343,19 @@ else {
 			if (/destination\s+for\s+\/dev\/[^\/]+\/(\S+)/) {
 				$lv->{'snap_of'} = $1;
 				}
+			if (/active\s+destination/i) {
+				$lv->{'snap_active'} = 1;
+				}
+			elsif (/INACTIVE\s+destination/i) {
+				$lv->{'snap_active'} = 0;
+				}
 			}
-		 elsif (/Read ahead sectors\s+(\d+)/) {
+		elsif (/LV\s+Thin\s+origin\s+name\s+(\S+)/) {
+			# Snapshot in a thin pool
+			$lv->{'is_snap'} = 1;
+			$lv->{'snap_of'} = $1;
+			}
+		elsif (/Read ahead sectors\s+(\d+|auto)/) {
                         $lv->{'readahead'} = $1;
                         }
 		elsif (/Stripes\s+(\d+)/) {
@@ -339,6 +366,13 @@ else {
 			}
 		elsif (/Allocated\s+to\s+snapshot\s+([0-9\.]+)%/i) {
 			$lv->{'snapusage'} = $1;
+			}
+		elsif (/LV\s+Pool\s+name\s+(\S+)/) {
+			$lv->{'thin_in'} = $1;
+			}
+		elsif (/Allocated\s+pool\s+data\s+(\S+)%/) {
+			$lv->{'thin_percent'} = $1;
+			$lv->{'thin_used'} = $1 / 100.0 * $lv->{'size'};
 			}
 		}
 	close(DISPLAY);
@@ -352,10 +386,11 @@ return @rv;
 # array ref of : device physical-blocks reads writes
 sub get_logical_volume_usage
 {
+local ($lv) = @_;
 local @rv;
 if (&get_lvm_version() >= 2) {
 	# LVdisplay has new format in version 2
-	open(DISPLAY, "lvdisplay -m ".quotemeta($_[0]->{'device'})." 2>/dev/null |");
+	open(DISPLAY, "lvdisplay -m ".quotemeta($lv->{'device'})." 2>/dev/null |");
 	while(<DISPLAY>) {
 		if (/\s+Physical\s+volume\s+\/dev\/(\S+)/) {
 			push(@rv, [ $1, undef ]);
@@ -368,7 +403,7 @@ if (&get_lvm_version() >= 2) {
 	}
 else {
 	# Old version 1 format
-	open(DISPLAY, "lvdisplay -v ".quotemeta($_[0]->{'device'})." 2>/dev/null |");
+	open(DISPLAY, "lvdisplay -v ".quotemeta($lv->{'device'})." 2>/dev/null |");
 	local $started;
 	while(<DISPLAY>) {
 		if (/^\s*PV\s+Name/i) {
@@ -387,33 +422,47 @@ return @rv;
 }
 
 # create_logical_volume(&lv)
+# Creates a new LV, and returns undef on success or an error message on failure
 sub create_logical_volume
 {
-local $cmd = "lvcreate -n".quotemeta($_[0]->{'name'})." ";
+local ($lv) = @_;
+local $cmd = "lvcreate -n".quotemeta($lv->{'name'})." ";
 local $suffix;
-if ($_[0]->{'size_of'} eq 'VG' || $_[0]->{'size_of'} eq 'FREE') {
-	$cmd .= "-l ".quotemeta("$_[0]->{'size'}%$_[0]->{'size_of'}");
+if ($lv->{'size_of'} eq 'VG' || $lv->{'size_of'} eq 'FREE' ||
+    $lv->{'size_of'} eq 'ORIGIN') {
+	$cmd .= "-l ".quotemeta("$lv->{'size'}%$lv->{'size_of'}");
 	}
-elsif ($_[0]->{'size_of'}) {
-	$cmd .= "-l $_[0]->{'size'}%PVS";
-	$suffix = " ".quotemeta("/dev/".$_[0]->{'size_of'});
+elsif ($lv->{'size_of'}) {
+	$cmd .= "-l $lv->{'size'}%PVS";
+	$suffix = " ".quotemeta("/dev/".$lv->{'size_of'});
 	}
-else {
-	$cmd .= "-L$_[0]->{'size'}k";
-	}
-if ($_[0]->{'is_snap'}) {
-	$cmd .= " -s ".quotemeta("/dev/$_[0]->{'vg'}/$_[0]->{'snapof'}");
+elsif ($lv->{'thin_in'} && $lv->{'is_snap'}) {
+	# For a snapshot inside a thin pool, no size is needed
 	}
 else {
-	$cmd .= " -p ".quotemeta($_[0]->{'perm'});
-	$cmd .= " -C ".quotemeta($_[0]->{'alloc'});
-	$cmd .= " -r ".quotemeta($_[0]->{'readahead'})
-		if ($_[0]->{'readahead'});
-	$cmd .= " -i ".quotemeta($_[0]->{'stripe'})
-		if ($_[0]->{'stripe'});
-	$cmd .= " -I ".quotemeta($_[0]->{'stripesize'})
-		if ($_[0]->{'stripesize'} && $_[0]->{'stripe'});
-	$cmd .= " ".quotemeta($_[0]->{'vg'});
+	$cmd .= ($lv->{'thin_in'} ? "-V" : "-L").$lv->{'size'}."k";
+	}
+if ($lv->{'is_snap'}) {
+	$cmd .= " -s ".quotemeta("/dev/$lv->{'vg'}/$lv->{'snapof'}");
+	}
+else {
+	$cmd .= " -p ".quotemeta($lv->{'perm'});
+	if (!$lv->{'thin_in'}) {
+		$cmd .= " -C ".quotemeta($lv->{'alloc'});
+		}
+	$cmd .= " -r ".quotemeta($lv->{'readahead'})
+		if ($lv->{'readahead'} && $lv->{'readahead'} ne "auto");
+	$cmd .= " -i ".quotemeta($lv->{'stripe'})
+		if ($lv->{'stripe'});
+	$cmd .= " -I ".quotemeta($lv->{'stripesize'})
+		if ($lv->{'stripesize'} && $lv->{'stripe'});
+	if ($lv->{'thin_in'}) {
+		$cmd .= " --thinpool ".quotemeta($lv->{'vg'})."/".
+				       quotemeta($lv->{'thin_in'});
+		}
+	else {
+		$cmd .= " ".quotemeta($lv->{'vg'});
+		}
 	}
 $cmd .= $suffix;
 local $out = &backquote_logged("$cmd 2>&1 </dev/null");
@@ -421,43 +470,99 @@ return $? ? $out : undef;
 }
 
 # delete_logical_volume(&lv)
+# Deletes an existing LV, and returns undef on success or an error message
 sub delete_logical_volume
 {
-local $cmd = "lvremove -f ".quotemeta($_[0]->{'device'});
+local ($lv) = @_;
+
+# First delete any /dev/mapper entries for the LV
+my $mapper = $lv->{'vg'}."-".$lv->{'lv'};
+my $dashvg = $lv->{'vg'};
+$dashvg =~ s/\-/\-\-/g;
+my $dashmapper = $dashvg."-".$lv->{'lv'};
+opendir(MAPPER, "/dev/mapper");
+my @files = readdir(MAPPER);
+closedir(MAPPER);
+my @delmaps;
+foreach my $f (@files) {
+	if ($f =~ /^\Q$mapper\Ep?\d+$/ ||
+	    $f =~ /^\Q$dashmapper\Ep?\d+$/) {
+		push(@delmaps, $f);
+		}
+	}
+foreach my $f (@files) {
+	if ($f eq $mapper || $f eq $dashmapper) {
+		push(@delmaps, $f);
+		}
+	}
+foreach my $f (@delmaps) {
+	&system_logged("dmsetup remove /dev/mapper/$f >/dev/null 2>&1");
+	}
+
+# Finally remove the LV
+local $cmd = "lvremove -f ".quotemeta($lv->{'device'});
 local $out = &backquote_logged("$cmd 2>&1 </dev/null");
 return $? ? $out : undef;
 }
 
 # resize_logical_volume(&lv, size)
+# Grows or shrinks a regular LV to the new size in KB
 sub resize_logical_volume
 {
-local $cmd = $_[1] > $_[0]->{'size'} ? "lvextend" : "lvreduce -f";
-$cmd .= " -L".quotemeta($_[1])."k";
-$cmd .= " ".quotemeta($_[0]->{'device'});
+local ($lv, $size) = @_;
+local $cmd = $size > $lv->{'size'} ? "lvextend" : "lvreduce -f";
+$cmd .= " -L".quotemeta($size)."k";
+$cmd .= " ".quotemeta($lv->{'device'});
+local $out = &backquote_logged("$cmd 2>&1 </dev/null");
+return $? ? $out : undef;
+}
+
+# resize_snapshot_volume(&lv, size)
+# Grows or shrinks a snapshot LV to the new size in KB
+sub resize_snapshot_volume
+{
+local ($lv, $size) = @_;
+local $cmd = $size > $lv->{'cow_size'} ? "lvextend" : "lvreduce -f";
+$cmd .= " -L".quotemeta($size)."k";
+$cmd .= " ".quotemeta($lv->{'device'});
 local $out = &backquote_logged("$cmd 2>&1 </dev/null");
 return $? ? $out : undef;
 }
 
 # change_logical_volume(&lv, [&old-lv])
+# Changes various parameters of an LV< like the permissions and readahead
 sub change_logical_volume
 {
+local ($lv, $oldlv) = @_;
 local $cmd = "lvchange ";
-$cmd .= " -p ".quotemeta($_[0]->{'perm'})
-	if (!$_[1] || $_[0]->{'perm'} ne $_[1]->{'perm'});
-$cmd .= " -r ".quotemeta($_[0]->{'readahead'})
-	if (!$_[1] || $_[0]->{'readahead'} ne $_[1]->{'readahead'});
-$cmd .= " -C ".quotemeta($_[0]->{'alloc'})
-	if (!$_[1] || $_[0]->{'alloc'} ne $_[1]->{'alloc'});
-$cmd .= " ".quotemeta($_[0]->{'device'});
+$cmd .= " -p ".quotemeta($lv->{'perm'})
+	if (!$oldlv || $lv->{'perm'} ne $oldlv->{'perm'});
+$cmd .= " -r ".quotemeta($lv->{'readahead'})
+	if (!$oldlv || $lv->{'readahead'} ne $oldlv->{'readahead'});
+$cmd .= " -C ".quotemeta($lv->{'alloc'})
+	if (!$oldlv || $lv->{'alloc'} ne $oldlv->{'alloc'});
+$cmd .= " ".quotemeta($lv->{'device'});
 local $out = &backquote_logged("$cmd 2>&1 </dev/null");
 return $? ? $out : undef;
 }
 
 # rename_logical_volume(&lv, name)
+# Renames an existing LV
 sub rename_logical_volume
 {
-local $cmd = "lvrename ".quotemeta($_[0]->{'device'})." ".
-	     quotemeta("/dev/$_[0]->{'vg'}/$_[1]");
+local ($lv, $name) = @_;
+local $cmd = "lvrename ".quotemeta($lv->{'device'})." ".
+	     quotemeta("/dev/$lv->{'vg'}/$name");
+local $out = &backquote_logged("$cmd 2>&1 </dev/null");
+return $? ? $out : undef;
+}
+
+# rollback_snapshot(&lv)
+# Returns the underlying LV to the state in the given snapshot
+sub rollback_snapshot
+{
+local ($lv) = @_;
+local $cmd = "lvconvert --merge ".quotemeta($lv->{'device'});
 local $out = &backquote_logged("$cmd 2>&1 </dev/null");
 return $? ? $out : undef;
 }
@@ -466,7 +571,8 @@ return $? ? $out : undef;
 # 0 = no, 1 = enlarge only, 2 = enlarge or shrink
 sub can_resize_filesystem
 {
-if ($_[0] =~ /^ext\d+$/) {
+local ($type) = @_;
+if ($type =~ /^ext\d+$/) {
 	if (&has_command("e2fsadm")) {
 		return 2;	# Can extend and reduce
 		}
@@ -479,13 +585,13 @@ if ($_[0] =~ /^ext\d+$/) {
 		return 0;
 		}
 	}
-elsif ($_[0] eq "xfs") {
+elsif ($type eq "xfs") {
 	return &has_command("xfs_growfs") ? 1 : 0;
 	}
-elsif ($_[0] eq "reiserfs") {
+elsif ($type eq "reiserfs") {
 	return &has_command("resize_reiserfs") ? 2 : 0;
 	}
-elsif ($_[0] eq "jfs") {
+elsif ($type eq "jfs") {
 	return 1;
 	}
 else {
@@ -507,12 +613,8 @@ else {
 	my $can = &can_resize_filesystem($type);
 	if ($can && $mounted) {
 		# If currently mounted, check if resizing is possible
-		if ($dir eq "/") {
-			# Cannot resize root
-			$can = 0;
-			}
-		elsif ($type =~ /^ext[3-9]$/ || $type eq "xfs" ||
-		       $type eq "reiserfs" || $type eq "jfs") {
+		if ($type =~ /^ext[3-9]$/ || $type eq "xfs" ||
+		    $type eq "reiserfs" || $type eq "jfs") {
 			# ext*, xfs, jfs and reiserfs can be resized up
 			$can = 1;
 			}
@@ -667,27 +769,10 @@ return %rv;
 # Returns an array of  directory, type, mounted
 sub device_status
 {
-@mounted = &mount::list_mounted() if (!@mounted);
-@mounts = &mount::list_mounts() if (!@mounts);
-my $label = &fdisk::get_label($_[0]);
-
-my ($mounted) = grep { &same_file($_->[1], $_[0]) ||
-			  $_->[1] eq "LABEL=$label" } @mounted;
-my ($mount) = grep { &same_file($_->[1], $_[0]) ||
-			$_->[1] eq "LABEL=$label" } @mounts;
-if ($mounted) { return ($mounted->[0], $mounted->[2], 1,
-			&indexof($mount, @mounts),
-			&indexof($mounted, @mounted)); }
-elsif ($mount) { return ($mount->[0], $mount->[2], 0,
-			 &indexof($mount, @mounts)); }
-elsif ($has_raid) {
-	$raidconf = &raid::get_raidtab() if (!$raidconf);
-	foreach my $c (@$raidconf) {
-		foreach my $d (&raid::find_value('device', $c->{'members'})) {
-			return ( $c->{'value'}, "raid", 1 ) if ($d eq $_[0]);
-			}
-		}
-	}
+local ($dev) = @_;
+return ( ) if ($dev !~ /^\//);
+local @st = &fdisk::device_status($dev);
+return @st if (@st);
 if (&foreign_check("server-manager")) {
 	# Look for Cloudmin systems using the disk, hosted on this system
 	if (!@server_manager_systems) {
@@ -726,10 +811,11 @@ if ($_[1] eq 'cloudmin') {
 	return &text($msg, "<tt>$_[0]</tt>");
 	}
 else {
-	# Used by filesystem or RAID
+	# Used by filesystem or RAID or iSCSI
 	$msg = $_[2] ? 'lv_mount' : 'lv_umount';
 	$msg .= 'vm' if ($_[1] eq 'swap');
 	$msg .= 'raid' if ($_[1] eq 'raid');
+	$msg .= 'iscsi' if ($_[1] eq 'iscsi');
 	return &text($msg, "<tt>$_[0]</tt>", "<tt>$_[1]</tt>");
 	}
 }
@@ -828,6 +914,52 @@ else {
 	$units = 1;
 	}
 return int($bytes / $units) * $units;
+}
+
+# move_logical_volume(&lv, from, to, [print])
+# Moves blocks on an LV from one PV to another. Returns an error message on
+# failure, or undef on success
+sub move_logical_volume
+{
+local ($lv, $from, $to, $print) = @_;
+local $cmd = "pvmove -n $lv->{'name'} /dev/$from /dev/$to";
+if ($print) {
+	open(OUT, "$cmd 2>&1 </dev/null |");
+	my $old = select(OUT);
+	$| = 1;
+	select($old);
+	while(<OUT>) {
+		print &html_escape($_);
+		}
+	my $ex = close(OUT);
+	return $? ? "Failed" : undef;
+	}
+else {
+	local $out = &backquote_logged("$cmd 2>&1 </dev/null");
+	return $? ? $out : undef;
+	}
+}
+
+# supports_snapshot_rollback()
+# Only newer kernels safely support this (2.6.35 and above)
+sub supports_snapshot_rollback
+{
+my $out = &backquote_command("uname -r 2>/dev/null </dev/null");
+return $out =~ /^(\d+)\./ && $1 >= 3 ||
+       $out =~ /^(\d+)\.(\d+)/ && $1 == 2 && $2 >= 7 ||
+       $out =~ /^(\d+)\.(\d+)\.(\d+)/ && $1 == 2 && $2 == 6 && $3 >= 35;
+}
+
+# create_thin_pool(&data-lv, &metadata-lv)
+# Convert two LVs into a thin pool
+sub create_thin_pool
+{
+local ($datalv, $metadatalv) = @_;
+local $cmd = "lvconvert -y --type thin-pool --poolmetadata ".
+	     quotemeta($metadatalv->{'device'})." ".
+	     quotemeta($datalv->{'device'});
+local $out = &backquote_logged("$cmd 2>&1 </dev/null");
+return $? ? $out : undef;
 }
 
 1;

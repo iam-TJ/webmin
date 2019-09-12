@@ -5,7 +5,7 @@
 require './dhcpd-lib.pl';
 require './params-lib.pl';
 &ReadParse();
-&lock_file($config{'dhcpd_conf'});
+&lock_all_files();
 $client = &get_parent_config();
 push(@parents, $client);
 foreach $i ($in{'sidx'}, $in{'uidx'}, $in{'gidx'}, $in{'idx'}) {
@@ -148,9 +148,13 @@ if ($config{'dhcpd_version'} >= 3) {
 			  &check_ip6address($cv) ||
 			    &error(&text('sopt_ecip', $in{"cname_$i"}));
 			}
-		if ($o && $o->{'values'}->[4] eq 'string' ||
-		    $cv !~ /^([0-9a-fA-F]{1,2}:)*[0-9a-fA-F]{1,2}$/ &&
-		    !&check_ipaddress($cv)) {
+		if ($o && $o->{'values'}->[4] =~ /^array\s+of\s+(\S+)/) {
+			local $atype = $1;
+			}
+		elsif ($o && $o->{'values'}->[4] eq 'string' ||
+		       $o && $o->{'values'}->[4] eq 'text' ||
+		       $cv !~ /^([0-9a-fA-F]{1,2}:)*[0-9a-fA-F]{1,2}$/ &&
+		       !&check_ipaddress($cv)) {
 			# Quote if type is a string, or unknown and not an IP
 			$cv = "\"$cv\"";
 			}
@@ -184,7 +188,7 @@ else {
 	}
 
 &flush_file_lines();
-&unlock_file($config{'dhcpd_conf'});
+&unlock_all_files();
 if ($client->{'name'} eq 'subnet') {
 	&webmin_log("options", 'subnet',
 		    "$client->{'values'}->[0]/$client->{'values'}->[2]", \%in);

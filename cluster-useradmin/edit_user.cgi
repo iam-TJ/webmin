@@ -3,7 +3,7 @@
 # Display a form for editing a user, or creating a new user
 
 require './cluster-useradmin-lib.pl';
-require 'timelocal.pl';
+use Time::Local;
 &ReadParse();
 &foreign_require("useradmin", "user-lib.pl");
 
@@ -131,7 +131,7 @@ printf "<input type=radio name=shell_def value=0> %s\n",
 print "<select name=shell>\n";
 @shlist = &unique(@shlist);
 foreach $s (@shlist) {
-	printf "<option value='%s'>%s\n", $s,
+	printf "<option value='%s'>%s</option>\n", $s,
 		$s eq "" ? "&lt;None&gt;" : $s;
 	}
 print "</select></td>\n";
@@ -408,7 +408,9 @@ foreach $h (@hosts) {
 	local ($ou) = grep { $_->{'user'} eq $in{'user'} } @{$h->{'users'}};
 	if ($ou) {
 		local ($s) = grep { $_->{'id'} == $h->{'id'} } @servers;
-		push(@icons, "/servers/images/$s->{'type'}.gif");
+		push(@icons, $gconfig{'webprefix'} ?
+			($gconfig{'webprefix'}."/servers/images/".$s->{'type'}.".gif") :
+			("../servers/images/".$s->{'type'}.".gif"));
 		push(@links, "edit_host.cgi?id=$h->{'id'}");
 		push(@titles, $s->{'desc'} ? $s->{'desc'} : $s->{'host'});
 		}
@@ -427,15 +429,39 @@ if (@icons < @hosts) {
 	      "value=\"$text{'uedit_sync'}\"></td>\n";
 	}
 
-print "</form><form action=\"delete_user.cgi\">\n";
+print "</tr></table></form><p><form action=\"delete_user.cgi\">\n";
 print "<input type=hidden name=user value=\"$uinfo{'user'}\">\n";
-print "<td align=right><input type=submit ",
-      "value=\"$text{'delete'}\"></td> </tr>\n";
-print "</form></table><p>\n";
+print "<input type=submit ",
+      "value=\"$text{'delete'}\">\n";
+print "</form><p>\n";
 
 print &ui_hr();
 print &ui_subheading($text{'uedit_hosts'});
-&icons_table(\@links, \@titles, \@icons);
+if ($config{'table_mode'}) {
+	# Show as table
+	print &ui_columns_start([ $text{'index_thost'},
+				  $text{'index_tdesc'},
+				  $text{'index_ttype'} ]);
+	foreach $h (@hosts) {
+		local ($s) = grep { $_->{'id'} == $h->{'id'} } @servers;
+		next if (!$s);
+		local ($type) = grep { $_->[0] eq $s->{'type'} }
+					@servers::server_types;
+		local ($link) = $config{'conf_host_links'} ?
+			&ui_link("edit_host.cgi?id=$h->{'id'}",($s->{'host'} || &get_system_hostname())) :
+			($s->{'host'} || &get_system_hostname());
+		print &ui_columns_row([
+			$link,
+			$s->{'desc'},
+			$type->[1],
+			]);
+		}
+	print &ui_columns_end();
+	}
+else {
+	# Show as icons
+	&icons_table(\@links, \@titles, \@icons);
+	}
 
 &ui_print_footer("", $text{'index_return'});
 
@@ -446,7 +472,7 @@ print "<input name=$_[3]d size=3 value='$_[0]'>";
 print "/<select name=$_[3]m>\n";
 local $m;
 foreach $m (1..12) {
-	printf "<option value=%d %s>%s\n",
+	printf "<option value=%d %s>%s</option>\n",
 		$m, $_[1] eq $m ? 'selected' : '', $text{"smonth_$m"};
 	}
 print "</select>";

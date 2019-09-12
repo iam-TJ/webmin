@@ -3,13 +3,17 @@
 # Saves or creates a new group
 
 require './user-lib.pl';
-require 'timelocal.pl';
+use Time::Local;
 &error_setup($text{'gsave_err'});
 &ReadParse();
 
 if ($in{'delete'}) {
 	# Redirect to deletion page
-	&redirect("delete_group.cgi?group=$in{'old'}");
+	&redirect("delete_group.cgi?group=".&urlize($in{'old'}));
+	return;
+	}
+elsif ($in{'clone'}) {
+	&redirect("edit_group.cgi?clone=".&urlize($in{'old'}));
 	return;
 	}
 

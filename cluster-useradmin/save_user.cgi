@@ -3,7 +3,7 @@
 # Updates an existing user across multiple servers
 
 require './cluster-useradmin-lib.pl';
-require 'timelocal.pl';
+use Time::Local;
 &error_setup($text{'usave_err'});
 &ReadParse();
 &foreign_require("useradmin", "user-lib.pl");
@@ -62,7 +62,7 @@ $in{'home_def'} || $in{'home'} =~ /^\// ||
 # Validate password
 if ($in{'passmode'} == 3) {
 	local $err = &useradmin::check_password_restrictions(
-			$in{'pass'}, $user{'user'});
+			$in{'pass'}, $user{'user'}, \%user);
 	&error($err) if ($err);
 	}
 

@@ -5,7 +5,7 @@
 require './spam-lib.pl';
 &ReadParse();
 $hsl = $module_info{'usermin'} ? undef :
-		&help_search_link("spamassassin", "perl", "google");
+		&help_search_link("spamassassin procmail amavisd", "man","doc", "google");
 &set_config_file_in(\%in);
 
 if (!&has_command($config{'spamassassin'}) ||
@@ -105,13 +105,12 @@ else {
 			}
 		if ($spam_enabled == 0) {
 			if ($module_info{'usermin'}) {
-				print &text('index_warn_usermin',
-					    "<tt>$pmrcs[0]</tt>",
-					    "<tt>$pmrcs[1]</tt>"),"<p>\n";
+				print &ui_alert_box(&text('index_warn_usermin',
+					    "<tt>$pmrcs[0]</tt>","<tt>$pmrcs[1]</tt>"), 'warn');
 				}
 			else {
-				print &text('index_warn_webmin',
-					    "<tt>$pmrcs[0]</tt>"),"<p>\n";
+				print &ui_alert_box(&text('index_warn_webmin',
+					    "<tt>$pmrcs[0]</tt>"), 'warn');
 				}
 			}
 
@@ -131,8 +130,10 @@ else {
 		push(@pages, 'razor') if (!$razor && $module_info{'usermin'});
 		push(@pages, 'setup') if ($spam_enabled == 0);
 		push(@pages, 'procmail') if ($delivery_enabled == 1);
+		push(@pages, 'amavisd') if ($spam_enabled == -1);
 		push(@pages, 'db') if (!$module_info{'usermin'});
 		push(@pages, 'awl') if (&supports_auto_whitelist());
+		push(@pages, 'manual');
 		@pages = grep { &can_use_page($_) } @pages;
 		$sfolder = $module_info{'usermin'} ? &spam_file_folder()
 						   : undef;
@@ -156,14 +157,13 @@ else {
 		if (!$module_info{'usermin'} &&
 		    (@pids = &get_process_pids())) {
 			print &ui_hr();
-			print "<form action=apply.cgi>\n";
-			print "<table>\n";
-			print "<tr> <td><input type=submit ",
-			      "value='$text{'index_apply'}'></td>\n";
-			print "<td>",&text('index_applydesc',
-				"<tt>".join(" and ", &unique(
-				map { $_->[1] } @pids))."</tt>"),"</td>\n";
-			print "</table>\n";
+			print &ui_buttons_start();
+			print &ui_buttons_row("apply.cgi",
+				$text{'index_apply'},
+				&text('index_applydesc',
+				  "<tt>".join(" and ", &unique(
+				  map { $_->[1] } @pids))."</tt>"));
+			print &ui_buttons_end();
 			}
 		}
 	}

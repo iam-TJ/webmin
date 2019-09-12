@@ -7,11 +7,27 @@ $main::webmin_script_type = 'cron';
 do './webmincron-lib.pl';
 $cron = $ARGV[0];
 
-# Require the module, call the function
-&foreign_require($cron->{'module'}, $cron->{'file'});
-if ($cron->{'args'}) {
-	&foreign_call($cron->{'module'}, $cron->{'func'});
+# Build list of args
+my @args;
+for(my $i=0; defined($cron->{'arg'.$i}); $i++) {
+	push(@args, $cron->{'arg'.$i});
 	}
-else {
-	&foreign_call($cron->{'module'}, $cron->{'func'}, @{$cron->{'args'}});
+
+# Force webmin script type to be cron
+$main::webmin_script_type = 'cron';
+
+# Require the module, call the function
+eval {
+	local $main::error_must_die = 1;
+	&foreign_require($cron->{'module'}, $cron->{'file'});
+	&foreign_call($cron->{'module'}, $cron->{'func'}, @args);
+	};
+$log = { %$cron };
+if ($@) {
+	$log->{'error'} = $@;
+	}
+
+# Log it, if enabled
+if ($gconfig{'logsched'}) {
+	&webmin_log("run", "webmincron", $cron->{'id'}, $log);
 	}

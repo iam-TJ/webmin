@@ -1,28 +1,14 @@
 
+use strict;
+use warnings;
+our (%text, %in, %access, $squid_version, %config);
 do 'squid-lib.pl';
 
 # backup_config_files()
 # Returns files and directories that can be backed up
 sub backup_config_files
 {
-# Add main config file
-local @rv = ( $config{'squid_conf'} );
-
-# Add users file
-local $conf = &get_config();
-local $file = &get_auth_file($conf);
-push(@rv, $file) if ($file);
-
-# Add files from ACLs
-local @acl = &find_config("acl", $conf);
-local $a;
-foreach $a (@acl) {
-	if ($a->{'values'}->[2] =~ /^"(.*)"$/ || $a->{'values'}->[3] =~ /^"(.*)"$/) {
-		push(@rv, $1);
-		}
-	}
-
-return &unique(@rv);
+return &get_all_config_files();
 }
 
 # pre_backup(&files)

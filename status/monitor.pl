@@ -15,9 +15,11 @@ if ($ARGV[0] ne "--force") {
 	!@hours || &indexof($tm[2], @hours) >= 0 || exit;
 	@days = split(/\s+/, $config{'sched_days'});
 	!@days || &indexof($tm[6], @days) >= 0 || exit;
+	$by = "cron";
 	}
 else {
 	shift(@ARGV);
+	$by = "web";
 	}
 
 # Check for list of monitors to limit refresh to
@@ -28,6 +30,8 @@ else {
 &read_file($oldstatus_file, \%oldstatus);
 &lock_file($fails_file);
 &read_file($fails_file, \%fails);
+&lock_file($lastsent_file);
+&read_file($lastsent_file, \%lastsent);
 
 # Get the list of services, ordered so that those with dependencies are first
 @services = &list_services();
@@ -90,6 +94,8 @@ foreach $serv (@services) {
 	# Check for a status change or failure on each monitored host,
 	# and perform the appropriate action
 	$newstats = { };
+	$newvalues = { };
+	$newvalues_nice = { };
 	foreach $r (@remotes) {
 		# Work out the hostname
 		local $host = $r eq "*" ? $thishost : $r;
@@ -125,7 +131,7 @@ foreach $serv (@services) {
 		if ($warn == 0 && $up == 0 && $o) {
 			# Service has just gone down
 			$suffix = "down";
-			$out = &run_on_command($serv, $serv->{'ondown'});
+			$out = &run_on_command($serv, $serv->{'ondown'}, $r);
 			}
 		elsif ($warn == 1 && $up != $o &&
 		       (defined($o) || $up == 0)) {
@@ -133,12 +139,12 @@ foreach $serv (@services) {
 			if ($up == 0) {
 				# A monitor has gone down
 				$suffix = "down";
-				$out = &run_on_command($serv, $serv->{'ondown'});
+				$out = &run_on_command($serv, $serv->{'ondown'}, $r);
 				}
 			elsif ($up == 1 && $o != -4) {
 				# A monitor has come back up after being down
 				$suffix = "up";
-				$out = &run_on_command($serv, $serv->{'onup'});
+				$out = &run_on_command($serv, $serv->{'onup'}, $r);
 				}
 			elsif ($up == -1) {
 				# Detected that a program the monitor depends on
@@ -153,42 +159,46 @@ foreach $serv (@services) {
 				# Monitor function timed out
 				$suffix = "timed";
 				$out = &run_on_command($serv,
-						       $serv->{'ontimeout'});
+						       $serv->{'ontimeout'}, $r);
 				}
 			}
 		elsif ($warn == 2 && $up == 0) {
 			# Service is down now
 			$suffix = "isdown";
-			$out = &run_on_command($serv, $serv->{'ondown'});
+			$out = &run_on_command($serv, $serv->{'ondown'}, $r);
 			}
 
 		# If something happened, notify people
-		if ($suffix) {
+		if ($suffix &&
+		    $nowunix - $lastsent{$serv->{'id'}} > $config{'email_interval'} * 60) {
 			$subj = &text('monitor_sub_'.$suffix,
 				      $serv->{'desc'}, $host);
 			if ($notify{'pager'}) {
 				$pager_msg .= &make_message($suffix, $host,
-							    $serv, 'pager');
+							$serv, 'pager', $stat);
 				}
 			if ($notify{'sms'}) {
 				$sms_msg .= &make_message($suffix, $host,
-                                                          $serv, 'sms');
+							$serv, 'sms', $stat);
 				}
 			if ($notify{'snmp'}) {
 				push(@snmp_msg, &make_message($suffix, $host,
-                                                              $serv, 'snmp'));
+							$serv, 'snmp', $stat));
 				}
 			if ($notify{'email'}) {
 				$thisemail .= &make_message($suffix, $host,
-                                                              $serv, 'email');
+							$serv, 'email', $stat);
 				if ($out) {
 					$thisemail .= $out;
 					}
 				$thisemail .= "\n";
 				$ecount++;
 				}
+			$lastsent{$serv->{'id'}} = $nowunix;
 			}
 		$newstats->{$r} = $up;
+		$newvalues->{$r} = $stat->{'value'};
+		$newvalues_nice->{$r} = $stat->{'nice_value'};
 
 		if ($serv->{'email'} && $thisemail) {
 			# If this service has an extra email address specified,
@@ -222,16 +232,36 @@ foreach $serv (@services) {
 			}
 		}
 
+	# Log the status
+	$newstatus_str = join(" ", map { "$_=$newstats->{$_}" } @remotes);
+	$newvalues_str = join("/", map { "$_=$newvalues->{$_}" } @remotes);
+	$newvalues_nice_str = join("/", map { "$_=$newvalues_nice->{$_}" } @remotes);
+	%history = ( 'time' => $nowunix,
+		     'new' => $newstatus_str,
+		     'value' => $newvalues_str,
+		     'nice_value' => $newvalues_nice_str,
+		     'by' => $by );
+	if (defined($oldstatus{$serv->{'id'}})) {
+		$history{'old'} = $oldstatus{$serv->{'id'}};
+		}
+	&add_history($serv, \%history);
+
 	# Update old status hash
-	$oldstatus{$serv->{'id'}} =
-		join(" ", map { "$_=$newstats->{$_}" } @remotes);
+	$oldstatus{$serv->{'id'}} = $newstatus_str;
+
+	# If successful, clear the last-sent time
+	if ($ok == 1) {
+		delete($lastsent{$serv->{'id'}});
+		}
 	}
 
-# Close oldstatus and fails files
+# Close oldstatus, fails and lastsent files
 &write_file($oldstatus_file, \%oldstatus);
 &unlock_file($oldstatus_file);
 &write_file($fails_file, \%fails);
 &unlock_file($fails_file);
+&write_file($lastsent_file, \%lastsent);
+&unlock_file($lastsent_file);
 
 # Send the email and page with all messages, if necessary
 if ($ecount && !$config{'sched_single'}) {
@@ -285,7 +315,12 @@ local ($carrier) = grep { $_->{'id'} eq $config{'sched_carrier'} }
 			&list_sms_carriers();
 return if (!$carrier);
 local $email = $config{'sched_sms'}."\@".$carrier->{'domain'};
-&mailboxes::send_text_mail($from, $email, undef, undef, $text,
+local $subject = $config{'sched_subject'};
+if ($subject eq "*") {
+	$subject = $text;
+	$text = undef;
+	}
+&mailboxes::send_text_mail($from, $email, undef, $subject, $text,
 			   $config{'sched_smtp'});
 }
 
@@ -382,42 +417,47 @@ if (!$@) {
 print STDERR "No SNMP perl module found\n";
 }
 
-# run_on_command(&serv, command)
+# run_on_command(&serv, command, remote-host)
 sub run_on_command
 {
-return undef if (!$_[1]);
+local ($serv, $cmd, $r) = @_;
+$r = undef if ($r eq "*");
+return undef if (!$cmd);
 local $out;
-if ($_[0]->{'runon'} && $_[0]->{'remote'}) {
+if ($serv->{'runon'} && $r) {
 	# Run on the remote host
-	local $cmd = quotemeta($_[1]);
 	$remote_error_msg = undef;
+	&remote_foreign_call($r, "status",
+		"set_monitor_environment", $serv);
 	&remote_error_setup(\&remote_error_callback);
 	if ($config{'output'}) {
-		$out = &remote_eval($_[0]->{'remote'}, "status",
-			     "`($cmd) 2>&1 </dev/null`");
+		$out = &remote_foreign_call($r, "status",
+			"backquote_command", "($cmd) 2>&1 </dev/null");
 		}
 	else {
-		&remote_eval($_[0]->{'remote'}, "status",
-			     "system('($cmd) >/dev/null 2>&1 </dev/null')");
+		&remote_foreign_call($r, "status",
+			"execute_command", $cmd);
 		}
 	&remote_error_setup(undef);
+	&remote_foreign_call($r, "status",
+		"reset_monitor_environment", $serv);
 	if ($remote_error_msg) {
-		return &text('monitor_runerr', $_[1], $_[0]->{'remote'},
+		return &text('monitor_runerr', $cmd, $r,
 			     $remote_error_msg);
 		}
-	return &text('monitor_run1', $_[1], $_[0]->{'remote'})."\n";
+	return &text('monitor_run1', $cmd, $r)."\n".$out;
 	}
 else {
 	# Just run locally
+	&set_monitor_environment($serv);
 	if ($config{'output'}) {
-		$out = `($_[1]) 2>&1 </dev/null`;
-		return &text('monitor_run2', $_[1])."\n".
-		       $out;
+		$out = &backquote_command("($cmd) 2>&1 </dev/null");
 		}
 	else {
-		system("($_[1]) >/dev/null 2>&1 </dev/null");
-		return &text('monitor_run2', $_[1])."\n";
+		&execute_command($cmd);
 		}
+	&reset_monitor_environment($serv);
+	return &text('monitor_run2', $cmd)."\n".$out;
 	}
 }
 
@@ -457,17 +497,17 @@ $t =~ s/([=\177-\377])/sprintf("=%2.2X",ord($1))/ge;
 return $t;
 }
 
-# make_message(status, host, &server, type)
+# make_message(status, host, &server, type, &status)
 # Returns the message for some email, SMS or SNMP. May use a template, or
 # the built-in default.
 sub make_message
 {
-local ($suffix, $host, $serv, $type) = @_;
+local ($suffix, $host, $serv, $type, $stat) = @_;
 local $tmpl = $serv->{'tmpl'} ? &get_template($serv->{'tmpl'}) : undef;
 if ($tmpl && $tmpl->{$type}) {
 	# Construct from template
 	local %hash = ( 'DESC' => $serv->{'desc'},
-			'HOST' => $host,
+			'HOST' => $host || &get_system_hostname(),
 			'DATE' => $nowdate,
 			'TIME' => $nowtime,
 			'STATUS' => $text{'mon_'.$suffix},
@@ -475,6 +515,11 @@ if ($tmpl && $tmpl->{$type}) {
 		      );
 	foreach my $s (@monitor_statuses) {
 		$hash{uc($s)} ||= 0;
+		}
+	if ($stat) {
+		foreach my $k ('value', 'nice_value', 'desc') {
+			$hash{'STATUS_'.uc($k)} = $stat->{$k} ? $stat->{$k} : "";
+			}
 		}
 	foreach my $k (keys %$serv) {
 		$hash{'SERVICE_'.uc($k)} = $serv->{$k};
@@ -499,8 +544,13 @@ else {
 			     $host, $serv->{'desc'});
 		}
 	elsif ($type eq 'email') {
-		return &text('monitor_email_'.$suffix,
-			     $host, $serv->{'desc'}, $now)."\n";
+		my $rv = &text('monitor_email_'.$suffix,
+			       $host, $serv->{'desc'}, $now)."\n";
+		if ($stat->{'desc'}) {
+			$rv .= &text('monitor_email_stat',
+				     $stat->{'desc'})."\n";
+			}
+		return $rv;
 		}
 	}
 }

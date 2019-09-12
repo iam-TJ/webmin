@@ -69,7 +69,7 @@ if ($config{'system_crontab'}) {
 	&open_readfile(TAB, $config{'system_crontab'});
 	while(<TAB>) {
 		# Comment line in Fedora 13
-		next if (/^#+\s+\*\s+\*\s+\*\s+\*\s+\*\s+command\s+to\s+be\s+executed/);
+		next if (/^#+\s+\*\s+\*\s+\*\s+\*\s+\*\s+(user-name\s+)?command\s+to\s+be\s+executed/);
 
 		if (/^(#+)?[\s\&]*(-)?\s*([0-9\-\*\/,]+)\s+([0-9\-\*\/,]+)\s+([0-9\-\*\/,]+)\s+(([0-9\-\*\/]+|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|,)+)\s+(([0-9\-\*\/]+|sun|mon|tue|wed|thu|fri|sat|,)+)\s+(\S+)\s+(.*)/i) {
 			# A normal h m s d w time
@@ -171,6 +171,7 @@ if ($config{'single_file'}) {
 				    'name' => $2,
 				    'value' => $3,
 				    'user' => "NONE",
+				    'command' => '',
 				    'index' => scalar(@rv) });
 			}
 		$lnum++;
@@ -280,7 +281,12 @@ else {
 				      $_[0]->{'type'} != 3);
 	push(@c, $_[0]->{'command'});
 	}
-return join(" ", @c);
+if ($gconfig{'os_type'} eq 'syno-linux') {
+	return join("\t", @c);
+	}
+else {
+	return join(" ", @c);
+	}
 }
 
 =head2 copy_cron_temp(&job)
@@ -337,7 +343,7 @@ else {
 	local $lref = &read_file_lines($cron_temp_file);
 	$_[0]->{'line'} = scalar(@$lref);
 	push(@$lref, &cron_job_line($_[0]));
-	&flush_file_lines();
+	&flush_file_lines($cron_temp_file);
 	&set_ownership_permissions($_[0]->{'user'}, undef, undef,
 				   $cron_temp_file);
 	&copy_crontab($_[0]->{'user'});
@@ -488,9 +494,15 @@ local($pwd);
 if (&read_file_contents($cron_temp_file) =~ /\S/) {
 	local $temp = &transname();
 	local $rv;
-	if ($config{'cron_edit_command'}) {
+	if (!&has_crontab_cmd()) {
+		# We have no crontab command .. emulate by copying to user file
+		$rv = system("cat $cron_temp_file".
+			" >$config{'cron_dir'}/$_[0] 2>/dev/null");
+		&set_ownership_permissions($_[0], undef, 0600,
+			"$config{'cron_dir'}/$_[0]");
+		}
+	elsif ($config{'cron_edit_command'}) {
 		# fake being an editor
-		# XXX does not work in translated command mode!
 		local $notemp = &transname();
 		&open_tempfile(NO, ">$notemp");
 		&print_tempfile(NO, "No\n");
@@ -514,8 +526,8 @@ if (&read_file_contents($cron_temp_file) =~ /\S/) {
 			}
 		unlink($notemp);
 		chdir($oldpwd);
-		}
-	else {
+
+	} else {
 		# use the cron copy command
 		if ($single_user) {
 			$rv = &execute_command(
@@ -527,7 +539,7 @@ if (&read_file_contents($cron_temp_file) =~ /\S/) {
 				&user_sub($config{'cron_copy_command'}, $_[0]),
 				$cron_temp_file, $temp, $temp);
 			}
-		}
+	}
 	local $out = &read_file_contents($temp);
 	unlink($temp);
 	if ($rv || $out =~ /error/i) {
@@ -537,13 +549,24 @@ if (&read_file_contents($cron_temp_file) =~ /\S/) {
 	}
 else {
 	# No more cron jobs left, so just delete
-	if ($single_user) {
-		&execute_command($config{'cron_user_delete_command'});
+	if (!&has_crontab_cmd()) {
+		# We have no crontab command .. emulate by deleting user crontab
+		$_[0] || &error("No user given!");
+		&unlink_logged("$config{'cron_dir'}/$_[0]");
 		}
-	else {
-		&execute_command(&user_sub(
-			$config{'cron_delete_command'}, $_[0]));
+	else{
+		if ($single_user) {
+			&execute_command($config{'cron_user_delete_command'});
+			}
+		else {
+			&execute_command(&user_sub(
+				$config{'cron_delete_command'}, $_[0]));
+			}
 		}
+	}
+if (!&has_crontab_cmd()) {
+	# to reload config
+	&kill_byname("crond", "SIGHUP");
 	}
 unlink($cron_temp_file);
 }
@@ -703,8 +726,9 @@ $dir = "$config{'run_parts_dir'}/$dir"
 opendir(DIR, &translate_filename($dir));
 local @rv = readdir(DIR);
 closedir(DIR);
-@rv = grep { !/^\./ } @rv;
+@rv = grep { /^[a-zA-Z0-9\_\-]+$/ } @rv;
 @rv = map { $dir."/".$_ } @rv;
+@rv = grep { -x $_ } @rv;
 return @rv;
 }
 
@@ -716,8 +740,10 @@ like /etc/cron.hourly. Returns undef otherwise.
 =cut
 sub is_run_parts
 {
+local ($cmd) = @_;
 local $rp = $config{'run_parts'};
-return $rp && $_[0] =~ /$rp(.*)\s+(\-\-\S+\s+)*([a-z0-9\.\-\/_]+)(\s*\))?$/i ? $3 : undef;
+$cmd =~ s/\s*#.*$//;
+return $rp && $cmd =~ /$rp(.*)\s+(\-\-\S+\s+)*([a-z0-9\.\-\/_]+)(\s*\))?$/i ? $3 : undef;
 }
 
 =head2 can_edit_user(&access, user)
@@ -750,6 +776,158 @@ else {
 	}
 }
 
+=head2 list_cron_specials()
+
+Returns a list of the names of special cron times, prefixed by an @ in crontab
+
+=cut
+sub list_cron_specials
+{
+return ('hourly', 'daily', 'weekly', 'monthly', 'yearly', 'reboot');
+}
+
+=head2 get_times_input(&job, [nospecial], [width-in-cols], [message])
+
+Returns HTML for selecting the schedule for a cron job, defined by the first
+parameter which must be a hash ref returned by list_cron_jobs. Suitable for
+use inside a ui_table_start/end
+
+=cut
+sub get_times_input
+{
+return &theme_get_times_input(@_) if (defined(&theme_get_times_input));
+my ($job, $nospecial, $width, $msg) = @_;
+$width ||= 2;
+
+# Javascript to disable and enable fields
+my $rv = <<EOF;
+<script>
+function enable_cron_fields(name, form, ena)
+{
+var els = form.elements[name];
+els.disabled = !ena;
+for(i=0; i<els.length; i++) {
+  els[i].disabled = !ena;
+  }
+change_special_mode(form, 0);
+}
+
+function change_special_mode(form, special)
+{
+  if(form.special_def) {
+    form.special_def[0].checked = special;
+    form.special_def[1].checked = !special;
+  }
+}
+</script>
+EOF
+
+if ($config{'vixie_cron'} && (!$nospecial || $job->{'special'})) {
+	# Allow selection of special @ times
+	my $sp = $job->{'special'} eq 'midnight' ? 'daily' :
+		 $job->{'special'} eq 'annually' ? 'yearly' : $job->{'special'};
+	my $specialsel = &ui_select("special", $sp,
+			[ map { [ $_, $text{'edit_special_'.$_} ] }
+			      &list_cron_specials() ],
+			1, 0, 0, 0, "onChange='change_special_mode(form, 1)'");
+	$rv .= &ui_table_row($msg,
+		&ui_radio("special_def", $job->{'special'} ? 1 : 0,
+			  [ [ 1, $text{'edit_special1'}." ".$specialsel ],
+			    [ 0, $text{'edit_special0'} ] ]),
+			  $msg ? $width-1 : $width);
+	}
+
+# Section for time selections
+my $table = &ui_columns_start([ $text{'edit_mins'}, $text{'edit_hours'},
+				$text{'edit_days'}, $text{'edit_months'},
+				$text{'edit_weekdays'} ], 100);
+my @mins = (0..59);
+my @hours = (0..23);
+my @days = (1..31);
+my @months = map { $text{"month_$_"}."=".$_ } (1 .. 12);
+my @weekdays = map { $text{"day_$_"}."=".$_ } (0 .. 6);
+my %arrmap = ( 'mins' => \@mins,
+	       'hours' => \@hours,
+	       'days' => \@days,
+	       'months' => \@months,
+	       'weekdays' => \@weekdays );
+my @cols;
+foreach my $arr ("mins", "hours", "days", "months", "weekdays") {
+	# Find out which ones are being used
+	my %inuse;
+	my $min = ($arr =~ /days|months/ ? 1 : 0);
+	my @arrlist = @{$arrmap{$arr}};
+	my $max = $min+scalar(@arrlist)-1;
+	foreach my $w (split(/,/ , $job->{$arr})) {
+		if ($w eq "*") {
+			# all values
+			for($j=$min; $j<=$max; $j++) { $inuse{$j}++; }
+			}
+		elsif ($w =~ /^\*\/(\d+)$/) {
+			# only every Nth
+			for($j=$min; $j<=$max; $j+=$1) { $inuse{$j}++; }
+			}
+		elsif ($w =~ /^(\d+)-(\d+)\/(\d+)$/) {
+			# only every Nth of some range
+			for($j=$1; $j<=$2; $j+=$3) { $inuse{int($j)}++; }
+			}
+		elsif ($w =~ /^(\d+)-(\d+)$/) {
+			# all of some range
+			for($j=$1; $j<=$2; $j++) { $inuse{int($j)}++; }
+			}
+		else {
+			# One value
+			$inuse{int($w)}++;
+			}
+		}
+	if ($job->{$arr} eq "*") {
+		%inuse = ( );
+		}
+
+	# Output selection list
+	my $dis = $arr eq "mins" && $hourly_only;
+	my $col = &ui_radio(
+		    "all_$arr", $job->{$arr} eq "*" ||
+				$job->{$arr} eq "" ? 1 : 0,
+		    [ [ 1, $text{'edit_all'}."<br>",
+			"onClick='enable_cron_fields(\"$arr\", form, 0)'" ],
+		      [ 0, $text{'edit_selected'}."<br>",
+			"onClick='enable_cron_fields(\"$arr\", form, 1)'" ] ],
+		    $dis);
+	$col .= "<table> <tr>\n";
+        for(my $j=0; $j<@arrlist; $j+=($arr eq "mins" && $hourly_only ? 60 : 12)) {
+                my $jj = $j+($arr eq "mins" && $hourly_only ? 59 : 11);
+		if ($jj >= @arrlist) { $jj = @arrlist - 1; }
+		my @sec = @arrlist[$j .. $jj];
+		my @opts;
+		foreach my $v (@sec) {
+			if ($v =~ /^(.*)=(.*)$/) {
+				push(@opts, [ $2, $1 ]);
+				}
+			else {
+				push(@opts, [ $v, $v ]);
+				}
+			}
+		my $dis = $job->{$arr} eq "*" || $job->{$arr} eq "";
+		$col .= "<td valign=top>".
+			&ui_select($arr, [ keys %inuse ], \@opts,
+			  @sec > 12 ? ($arr eq "mins" && $hourly_only ? 1 : 12)
+                                  : scalar(@sec),
+			  $arr eq "mins" && $hourly_only ? 0 : 1,
+			  0, $dis).
+			"</td>\n";
+		}
+	$col .= "</tr></table>\n";
+	push(@cols, $col);
+	}
+$table .= &ui_columns_row(\@cols, [ "valign=top", "valign=top", "valign=top",
+				    "valign=top", "valign=top" ]);
+$table .= &ui_columns_end();
+$table .= $text{'edit_ctrl'};
+$rv .= &ui_table_row(undef, $table, $width);
+return $rv;
+}
+
 =head2 show_times_input(&job, [nospecial])
 
 Print HTML for inputs for selecting the schedule for a cron job, defined
@@ -767,12 +945,12 @@ if ($config{'vixie_cron'} && (!$_[1] || $_[0]->{'special'})) {
 	print "<tr $cb> <td colspan=6>\n";
 	printf "<input type=radio name=special_def value=1 %s> %s\n",
 		$job->{'special'} ? "checked" : "", $text{'edit_special1'};
-	print "<select name=special>\n";
+	print "<select name=special onChange='change_special_mode(form, 1)'>\n";
 	local $s;
 	local $sp = $job->{'special'} eq 'midnight' ? 'daily' :
 	    $job->{'special'} eq 'annually' ? 'yearly' : $job->{'special'};
 	foreach $s ('hourly', 'daily', 'weekly', 'monthly', 'yearly', 'reboot'){
-		printf "<option value=%s %s>%s\n",
+		printf "<option value=%s %s>%s</option>\n",
 		    $s, $sp eq $s ? "selected" : "", $text{'edit_special_'.$s};
 		}
 	print "</select>\n";
@@ -790,6 +968,15 @@ var els = form.elements[name];
 els.disabled = !ena;
 for(i=0; i<els.length; i++) {
   els[i].disabled = !ena;
+  }
+change_special_mode(form, 0);
+}
+
+function change_special_mode(form, special)
+{
+  if(form.special_def) {
+    form.special_def[0].checked = special;
+    form.special_def[1].checked = !special;
   }
 }
 </script>
@@ -851,16 +1038,17 @@ foreach $arr ("mins", "hours", "days", "months", "weekdays") {
                 $jj = $j+($arr eq "mins" && $hourly_only ? 59 : 11);
 		if ($jj >= @$arr) { $jj = @$arr - 1; }
 		@sec = @$arr[$j .. $jj];
-                printf "<td valign=top><select %s size=%d name=$arr %s>\n",
+                printf "<td valign=top><select %s size=%d name=$arr %s %s>\n",
                         $arr eq "mins" && $hourly_only ? "" : "multiple",
                         @sec > 12 ? ($arr eq "mins" && $hourly_only ? 1 : 12)
 				  : scalar(@sec),
 			$job->{$arr} eq "*" ||  $job->{$arr} eq "" ?
-				"disabled" : "";
+				"disabled" : "",
+			"onChange='change_special_mode(form, 0)'";
 		foreach $v (@sec) {
 			if ($v =~ /^(.*)=(.*)$/) { $disp = $1; $code = $2; }
 			else { $disp = $code = $v; }
-			printf "<option value=\"$code\" %s>$disp\n",
+			printf "<option value=\"$code\" %s>$disp</option>\n",
 				$inuse{$code} ? "selected" : "";
 			}
 		print "</select></td>\n";
@@ -1042,11 +1230,12 @@ local $perl_path = &get_perl_path();
 &open_tempfile(CMD, ">$_[0]");
 &print_tempfile(CMD, <<EOF
 #!$perl_path
-open(CONF, "$config_directory/miniserv.conf");
+open(CONF, "$config_directory/miniserv.conf") || die "Failed to open $config_directory/miniserv.conf : \$!";
 while(<CONF>) {
         \$root = \$1 if (/^root=(.*)/);
         }
 close(CONF);
+\$root || die "No root= line found in $config_directory/miniserv.conf";
 \$ENV{'PERLLIB'} = "\$root";
 \$ENV{'WEBMIN_CONFIG'} = "$ENV{'WEBMIN_CONFIG'}";
 \$ENV{'WEBMIN_VAR'} = "$ENV{'WEBMIN_VAR'}";
@@ -1095,9 +1284,15 @@ Returns a human-readable text string describing when a cron job is run.
 sub when_text
 {
 local $pfx = $_[1] ? "uc" : "";
-if ($_[0]->{'special'}) {
+if ($_[0]->{'interval'}) {
+	return &text($pfx.'when_interval', $_[0]->{'interval'});
+	}
+elsif ($_[0]->{'special'}) {
 	$pfx = $_[1] ? "" : "lc";
 	return $text{$pfx.'edit_special_'.$_[0]->{'special'}};
+	}
+elsif ($_[0]->{'boot'}) {
+	return &text($pfx.'when_boot');
 	}
 elsif ($_[0]->{'mins'} eq '*' && $_[0]->{'hours'} eq '*' && $_[0]->{'days'} eq '*' && $_[0]->{'months'} eq '*' && $_[0]->{'weekdays'} eq '*') {
 	return $text{$pfx.'when_min'};
@@ -1127,15 +1322,17 @@ cron.deny files.
 =cut
 sub can_use_cron
 {
+local ($user) = @_;
+defined(getpwnam($user)) || return 0;	# User does not exist
 local $err;
 if (-r $config{cron_allow_file}) {
 	local @allowed = &list_allowed();
-	if (&indexof($_[0], @allowed) < 0 &&
+	if (&indexof($user, @allowed) < 0 &&
 	    &indexof("all", @allowed) < 0) { $err = 1; }
 	}
 elsif (-r $config{cron_deny_file}) {
 	local @denied = &list_denied();
-	if (&indexof($_[0], @denied) >= 0 ||
+	if (&indexof($user, @denied) >= 0 ||
 	    &indexof("all", @denied) >= 0) { $err = 1; }
 	}
 elsif ($config{cron_deny_all} == 0) { $err = 1; }
@@ -1241,8 +1438,8 @@ sub extract_input
 local ($cmd) = @_;
 $cmd =~ s/\\%/\0/g;
 local ($cmd, $input) = split(/\%/, $cmd, 2);
-$cmd =~ s/\0/%/g;
-$input =~ s/\0/%/g;
+$cmd =~ s/\0/\\%/g;
+$input =~ s/\0/\\%/g;
 return ($cmd, $input);
 }
 
@@ -1305,7 +1502,7 @@ Given a cron job with a # comment after the command, sets the comment field
 sub convert_comment
 {
 local ($job) = @_;
-if ($job->{'command'} =~ /^(.*)\s*#([^#]*)$/) {
+if ($job->{'command'} =~ /^(.*\S)\s*#([^#]*)$/) {
 	$job->{'command'} = $1;
 	$job->{'comment'} = $2;
 	return 1;
@@ -1341,14 +1538,20 @@ sub check_cron_config
 if ($config{'single_file'} && !-r $config{'single_file'}) {
 	return &text('index_esingle', "<tt>$config{'single_file'}</tt>");
 	}
-if ($config{'cron_get_command'} =~ /^(\S+)/ && !&has_command("$1")) {
+if (!&has_crontab_cmd() && $config{'cron_get_command'} =~ /^(\S+)/ &&
+    !&has_command("$1")) {
 	return &text('index_ecmd', "<tt>$1</tt>");
 	}
 # Check for directory
 local $fcron = ($config{'cron_dir'} =~ /\/fcron$/);
 if (!$single_user && !$config{'single_file'} &&
     !$fcron && !-d $config{'cron_dir'}) {
-	return &text('index_ecrondir', "<tt>$config{'cron_dir'}</tt>");
+	if (!$in{'create_dir'}) {
+		return &text('index_ecrondir', "<tt>$config{'cron_dir'}</tt>").
+		"<p><a href=\"index.cgi?create_dir=yes\">".&text('index_ecrondir_create' ,"<tt>$config{'cron_dir'}</tt>")."</a></p>";
+	} else {
+		&make_dir($config{'cron_dir'}, 0755);
+		}
 	}
 return undef;
 }
@@ -1399,6 +1602,155 @@ foreach my $f (readdir(DIR)) {
 		}
 	}
 closedir(DIR);
+}
+
+=head2 list_cron_files()
+
+Returns a list of all files containing cron jobs
+
+=cut
+sub list_cron_files
+{
+my @jobs = &list_cron_jobs();
+my @files = map { $_->{'file'} } grep { $_->{'file'} } @jobs;
+if ($config{'system_crontab'}) {
+	push(@files, $config{'system_crontab'});
+	}
+if ($config{'cronfiles_dir'}) {
+	push(@files, glob(&translate_filename($config{'cronfiles_dir'})."/*"));
+	}
+return &unique(@files);
+}
+
+=head2 has_crontab_cmd()
+
+Returns 1 if the crontab command exists on this system
+
+=cut
+sub has_crontab_cmd
+{
+my $cmd = $config{'cron_edit_command'};
+if ($cmd) {
+	$cmd =~ s/^su.*-c\s+//;
+	($cmd) = &split_quoted_string($cmd);
+	my $rv = &has_command($cmd);
+	return $rv if ($rv);
+	}
+return &has_command("crontab");
+}
+
+=head2 next_run(&job)
+
+Given a cron job, returns the unix time on which it will run next.
+
+=cut
+sub next_run
+{
+my ($job) = @_;
+my $now = time();
+my @tm = localtime($now);
+if ($job->{'special'} eq 'hourly') {
+	$job = { 'mins' => 0,
+		 'hours' => '*',
+		 'days' => '*',
+		 'months' => '*',
+		 'weekdays' => '*' };
+	}
+elsif ($job->{'special'} eq 'daily') {
+	$job = { 'mins' => 0,
+		 'hours' => 0,
+		 'days' => '*',
+		 'months' => '*',
+		 'weekdays' => '*' };
+	}
+elsif ($job->{'special'} eq 'weekly') {
+	$job = { 'mins' => 0,
+		 'hours' => 0,
+		 'days' => '*',
+		 'months' => '*',
+		 'weekdays' => 0 };
+	}
+elsif ($job->{'special'} eq 'yearly') {
+	$job = { 'mins' => 0,
+		 'hours' => 0,
+		 'days' => 1,
+		 'months' => 1,
+		 'weekdays' => '*' };
+	}
+elsif ($job->{'special'} eq 'reboot') {
+	return undef;
+	}
+my @mins = &cron_all_ranges($job->{'mins'}, 0, 59);
+my @hours = &cron_all_ranges($job->{'hours'}, 0, 23);
+my @days = &cron_all_ranges($job->{'days'}, 1, 31);
+my @months = &cron_all_ranges($job->{'months'}, 1, 12);
+my @weekdays = &cron_all_ranges($job->{'weekdays'}, 0, 6);
+my ($min, $hour, $day, $month, $year);
+my @possible;
+foreach $min (@mins) {
+	foreach $hour (@hours) {
+		foreach $day (@days) {
+			foreach $month (@months) {
+				foreach $year ($tm[5] .. $tm[5]+7) {
+					my $tt;
+					eval { $tt = timelocal(0, $min, $hour, $day, $month-1, $year) };
+					next if ($tt < $now);
+					my @ttm = localtime($tt);
+					next if (&indexof($ttm[6], @weekdays) < 0);
+					push(@possible, $tt);
+					last;
+					}
+				}
+			}
+		}
+	}
+@possible = sort { $a <=> $b } @possible;
+return $possible[0];
+}
+
+=head2 cron_range(range, min, max)
+
+=cut
+sub cron_range
+{
+my ($w, $min, $max) = @_;
+my $j;
+my %inuse;
+if ($w eq "*") {
+	# all values
+	for($j=$min; $j<=$max; $j++) { $inuse{$j}++; }
+	}
+elsif ($w =~ /^\*\/(\d+)$/) {
+	# only every Nth
+	my $step = $1 || 1;
+	for($j=$min; $j<=$max; $j+=$step) { $inuse{$j}++; }
+	}
+elsif ($w =~ /^(\d+)-(\d+)\/(\d+)$/) {
+	# only every Nth of some range
+	my $step = $3 || 1;
+	for($j=$1; $j<=$2; $j+=$step) { $inuse{int($j)}++; }
+	}
+elsif ($w =~ /^(\d+)-(\d+)$/) {
+	# all of some range
+	for($j=$1; $j<=$2; $j++) { $inuse{int($j)}++; }
+	}
+else {
+	# One value
+	$inuse{int($w)}++;
+	}
+return sort { $a <=> $b } (keys %inuse);
+}
+
+=head2 cron_all_ranges(comma-list, min, max)
+
+=cut
+sub cron_all_ranges
+{
+my @rv;
+foreach $r (split(/,/, $_[0])) {
+	push(@rv, &cron_range($r, $_[1], $_[2]));
+	}
+return sort { $a <=> $b } @rv;
 }
 
 1;

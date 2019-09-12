@@ -28,13 +28,16 @@ if (defined($in{'login'})) {
 		&foreign_require("cron");
 		&cron::create_wrapper($record_login_cmd,"","record-login.pl");
 		&cron::create_wrapper($record_logout_cmd,"","record-logout.pl");
+		&cron::create_wrapper($record_failed_cmd,"","record-failed.pl");
 		$miniserv{'login_script'} = $record_login_cmd;
 		$miniserv{'logout_script'} = $record_logout_cmd;
+		$miniserv{'failed_script'} = $record_failed_cmd;
 		}
 	else {
 		# Stop using
 		delete($miniserv{'login_script'});
 		delete($miniserv{'logout_script'});
+		delete($miniserv{'failed_script'});
 		}
 	}
 &put_miniserv_config(\%miniserv);
@@ -47,12 +50,16 @@ $gconfig{'logusers'} =
 	$in{'uall'} ? '' : join(" ", split(/\0/, $in{'users'}));
 $gconfig{'logmodules'} =
 	$in{'mall'} ? '' : join(" ", split(/\0/, $in{'modules'}));
+$gconfig{'logsched'} = $in{'logsched'};
 $gconfig{'logfiles'} = $in{'logfiles'};
 $gconfig{'logfullfiles'} = $in{'logfullfiles'};
 $gconfig{'logperms'} = $miniserv{'logperms'};
 !$in{'logfiles'} || &has_command("diff") ||
 	&error(&text('log_ediff', "diff"));
 $gconfig{'logsyslog'} = $in{'logsyslog'} if (defined($in{'logsyslog'}));
+$gconfig{'logemail'} = $in{'email_def'} ? undef : $in{'email'};
+$gconfig{'logmodulesemail'} =
+	$in{'mallemail'} ? '' : join(" ", split(/\0/, $in{'modulesemail'}));
 &lock_file("$config_directory/config");
 &write_file("$config_directory/config", \%gconfig);
 &unlock_file("$config_directory/config");

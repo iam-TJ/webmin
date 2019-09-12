@@ -40,6 +40,39 @@ if ($in{'ipv6'}) {
 	$@ && &error(&text('bind_eipv6', "<tt>Socket6</tt>"));
 	}
 
+# For any new ports, check if they are already in use
+@oldports = split(/\s+/, $in{'oldports'});
+@newports = &unique(grep { &indexof($_, @oldports) < 0 } @ports);
+if (&has_command("lsof")) {
+	foreach my $p (@newports) {
+		$out = &backquote_command("lsof -t -i tcp:$p 2>/dev/null");
+		if ($out =~ /\d+/) {
+			&error(&text('bind_elsof', $p));
+			}
+		}
+	}
+
+# Make sure each IP is actually active on the system
+@ips = grep { $_ ne "*" } map { $_->[0] } @sockets;
+if (@ips && &foreign_installed("net")) {
+	%onsystem = ( );
+	&foreign_require("net");
+	if (defined(&net::active_interfaces)) {
+		foreach $a (&net::active_interfaces()) {
+			$onsystem{$a->{'address'}} = $a;
+			foreach $ip6 (@{$a->{'address6'}}) {
+				$onsystem{&canonicalize_ip6($ip6)} = $a;
+				}
+			}
+		}
+	if (%onsystem) {
+		foreach $ip (@ips) {
+			$onsystem{&canonicalize_ip6($ip)} ||
+				&error(&text('bind_eonsystem', $ip));
+			}
+		}
+	}
+
 # Update config file
 &lock_file($ENV{'MINISERV_CONFIG'});
 $first = shift(@sockets);
@@ -73,7 +106,7 @@ $SIG{'TERM'} = 'ignore';
 &system_logged("$config_directory/stop >/dev/null 2>&1 </dev/null");
 $temp = &transname();
 $rv = &system_logged("$config_directory/start >$temp 2>&1 </dev/null");
-$out = `cat $temp`;
+$out = &read_file_contents($temp);
 $out =~ s/^Starting Webmin server in.*\n//;
 $out =~ s/at.*line.*//;
 unlink($temp);
@@ -87,17 +120,17 @@ if ($rv) {
 	}
 
 # If possible, open the new ports
-if (&foreign_check("firewall") && $in{'firewall'}) {
-	@oldports = split(/\s+/, $in{'oldports'});
-	@newports = &unique(grep { &indexof($_, @oldports) < 0 } @ports);
-	if (@newports) {
-		&clean_environment();
-		$ENV{'WEBMIN_CONFIG'} = $config_directory;
-		&system_logged(&module_root_directory("firewall").
-			       "/open-ports.pl ".
-			       join(" ", map { $_.":".($_+10) } @newports).
-			       " >/dev/null 2>&1");
-		&reset_environment();
+foreach my $mod ("firewall", "firewalld") {
+	if (&foreign_check($mod) && $in{'firewall'}) {
+		if (@newports) {
+			&clean_environment();
+			$ENV{'WEBMIN_CONFIG'} = $config_directory;
+			&system_logged(
+				&module_root_directory($mod)."/open-ports.pl ".
+			        join(" ", map { $_.":".($_+10) } @newports).
+			        " >/dev/null 2>&1");
+			&reset_environment();
+			}
 		}
 	}
 

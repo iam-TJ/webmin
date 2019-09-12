@@ -11,7 +11,8 @@ if ($in{'new'}) {
 	}
 else {
 	($prog) = grep { $_->{'name'} eq $in{'old'} &&
-			 $_->{'type'} eq $in{'oldtype'} } @$master;
+			 $_->{'type'} eq $in{'oldtype'} &&
+			 $_->{'enabled'} == $in{'oldenabled'} } @$master;
 	$prog || &error($text{'master_egone'});
 	}
 &lock_file($config{'postfix_master'});
@@ -81,7 +82,8 @@ else {
 &unlock_file($config{'postfix_master'});
 
 # Apply config
-&reload_postfix();
+$err = &reload_postfix();
+&error($err) if ($err);
 
 &webmin_log($in{'delete'} ? "delete" : $in{'new'} ? "create" : "modify",
 	    "master", $prog->{'name'}, $prog);

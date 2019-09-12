@@ -11,7 +11,7 @@ if (@clients) {
 	print &ui_form_start("delete_clients.cgi", "post");
 	@links = ( &select_all_link("d"),
 		   &select_invert_link("d"),
-		   "<a href='edit_client.cgi?new=1'>$text{'clients_add'}</a>" );
+		   &ui_link("edit_client.cgi?new=1",$text{'clients_add'}) );
 	print &ui_links_row(\@links);
 	@tds = ( "width=5", "width=30%", "width=40%", "width=30%" );
 	print &ui_columns_start([ "", $text{'clients_name'},
@@ -22,8 +22,7 @@ if (@clients) {
 		$addr = &find_value("Address", $f->{'members'});
 		$cat = &find_value("Catalog", $f->{'members'});
 		print &ui_checked_columns_row([
-			"<a href='edit_client.cgi?name=".&urlize($name)."'>".
-			$name."</a>",
+			&ui_link("edit_client.cgi?name=".&urlize($name), $name),
 			$addr,
 			$cat,
 			], \@tds, "d", $name);
@@ -34,7 +33,7 @@ if (@clients) {
 	}
 else {
 	print "<b>$text{'clients_none'}</b><p>\n";
-	print "<a href='edit_client.cgi?new=1'>$text{'clients_add'}</a><br>\n";
+	print &ui_link("edit_client.cgi?new=1",$text{'clients_add'})."<br>\n";
 	}
 
 &ui_print_footer("", $text{'index_return'});

@@ -20,6 +20,10 @@ print &ui_table_start($text{'view_header'}, undef, 2);
 # Device name
 print &ui_table_row($text{'view_device'}, "<tt>$raid->{'value'}</tt>");
 
+# UUID
+$uuid = &find_value('array-uuid', $raid->{'members'});
+print &ui_table_row($text{'view_uuid'}, $uuid);
+
 # RAID level
 $lvl = &find_value('raid-level', $raid->{'members'});
 print &ui_table_row($text{'view_level'},
@@ -29,6 +33,7 @@ print &ui_table_row($text{'view_level'},
 @st = &device_status($raid->{'value'});
 print &ui_table_row($text{'view_status'},
       $st[1] eq 'lvm' ? &text('view_lvm', "<tt>$st[0]</tt>") :
+      $st[1] eq 'iscsi' ? &text('view_iscsi', "<tt>$st[0]</tt>") :
       $st[2] ? &text('view_mounted', "<tt>$st[0]</tt>") :
       @st ? &text('view_mount', "<tt>$st[0]</tt>") :
       $raid->{'active'} ? $text{'view_active'} :
@@ -40,7 +45,9 @@ if ($raid->{'size'}) {
 	        "(".&nice_size($raid->{'size'}*1024).")");
 	}
 if ($raid->{'resync'}) {
-	print &ui_table_row($text{'view_resync'}, "$raid->{'resync'} \%");
+	print &ui_table_row($text{'view_resync'},
+		$raid->{'resync'} eq 'delayed' ? $text{'view_delayed'}
+					       : "$raid->{'resync'} \%");
 	}
 
 # Superblock?
@@ -48,8 +55,8 @@ $super = &find_value('persistent-superblock', $raid->{'members'});
 print &ui_table_row($text{'view_super'},
 	$super ? $text{'yes'} : $text{'no'});
 
-# Parity method
-if ($lvl eq '5') {
+# Layout
+if (($lvl eq '5') || ($lvl eq '6') || ($lvl eq '10')) {
 	$layout = &find_value('parity-algorithm', $raid->{'members'});
 	print &ui_table_row($text{'view_parity'}, $layout || $text{'default'});
 	}
@@ -80,10 +87,10 @@ if ($raid->{'state'}) {
 	}
 
 # Rebuild percent
-if ($raid->{'rebuild'}) {
+if ($raid->{'rebuild'} ne '') {
 	print &ui_table_row($text{'view_rebuild'},
 		$raid->{'rebuild'}." \% (".$raid->{'remain'}." min, ".
-		$raid->{'speed'}." KBytes/s)");
+		int($raid->{'speed'} / 1024)." MB/s)");
 	}
 
 
@@ -102,6 +109,7 @@ foreach $d (@devs) {
 			}
 		$rp .= "<br>\n";
 		push(@rdisks, [ $d->{'value'}, $name ]);
+		push(@datadisks, [ $d->{'value'}, $name ]);
 		}
 	}
 
@@ -119,6 +127,7 @@ foreach $d (@devs) {
 		local $name = &mount::device_name($d->{'value'});
 		$sp .= "$name<br>\n";
 		push(@rdisks, [ $d->{'value'}, $name ]);
+		push(@sparedisks, [ $d->{'value'}, $name ]);
 		$sparescnt++;
 		$newdisks++;
 		push(@spares, [ "$newdisks", "+ $sparescnt" ]);
@@ -161,6 +170,14 @@ if ($raid_mode eq "mdadm") {
 			    $text{'view_removedesc'});
 		push(@grid, &ui_submit($text{'view_remove_det'}, "remove_det"),
 			    $text{'view_remove_detdesc'});
+		}
+	if ($sparescnt > 0 && &get_mdadm_version() >= 3.3 && &supports_replace()) {
+		@rdisks = sort { $a->[0] cmp $b->[0] } @rdisks;
+		@spares = sort { $a->[0] cmp $b->[0] } @spares;
+                push(@grid, &ui_submit($text{'view_replace'}, "replace")." ".
+                            &ui_select("replacedisk", undef, \@datadisks)." with ".
+                            &ui_select("replacesparedisk", undef, \@sparedisks),
+                            $text{'view_replacedesc'});
 		}
 	if ($sparescnt > 0 && $lvl != 10) {
 		@spares = sort { $a->[0] cmp $b->[0] } @spares;

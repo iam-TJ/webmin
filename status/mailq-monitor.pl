@@ -15,14 +15,23 @@ elsif ($m eq "qmailadmin") {
 	}
 elsif ($m eq "postfix") {
 	&foreign_require("postfix", "postfix-lib.pl");
-	@qfiles = &postfix::list_queue();
+	eval {
+		local $main::error_must_die = 1;
+		@qfiles = &postfix::list_queue();
+		};
+	if ($@) {
+		return { 'up' => -1,
+			 'desc' => $@ };
+		}
 	}
 if (@qfiles > $_[0]->{'size'}) {
 	return { 'up' => 0,
-		 'desc' => "<font color=#ff0000>".&text('mailq_toomany', scalar(@qfiles))."</font>" };
+		 'value' => scalar(@qfiles),
+		 'desc' => &text('mailq_toomany', scalar(@qfiles)) };
 	}
 else {
 	return { 'up' => 1,
+		 'value' => scalar(@qfiles),
 		 'desc' => &text('mailq_ok', scalar(@qfiles)) };
 	}
 }

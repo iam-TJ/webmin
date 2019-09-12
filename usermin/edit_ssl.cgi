@@ -39,13 +39,31 @@ print &ui_table_row($text{'ssl_version'},
 	&ui_opt_textbox("version", $miniserv{'ssl_version'}, 4,
 			$text{'ssl_auto'}));
 
+print &ui_table_row($text{'ssl_deny'},
+	&ui_checkbox("no_ssl2", 1, "SSLv2", $miniserv{'no_ssl2'})."\n".
+	&ui_checkbox("no_ssl3", 1, "SSLv3", $miniserv{'no_ssl3'})."\n".
+	ui_checkbox("no_tls1", 1, "TLSv1.0", $miniserv{'no_tls1'})."\n".
+	ui_checkbox("no_tls1_1", 1, "TLSv1.1", $miniserv{'no_tls1_1'})."\n".
+	ui_checkbox("no_tls1_2", 1, "TLSv1.2", $miniserv{'no_tls1_2'})."\n"
+	);
+
+print &ui_table_row($text{'ssl_compression'},
+	&ui_yesno_radio("ssl_compression", !$miniserv{'no_sslcompression'}));
+
+print &ui_table_row($text{'ssl_honorcipherorder'},
+	&ui_yesno_radio("ssl_honorcipherorder",
+			$miniserv{'ssl_honorcipherorder'}));
+
 $clist = $miniserv{'ssl_cipher_list'};
 $cmode = !$clist ? 1 :
-	 $clist eq $webmin::strong_ssl_ciphers ? 2 : 0;
+	 $clist eq $webmin::strong_ssl_ciphers ? 2 :
+	 $clist eq $webmin::pfs_ssl_ciphers ? 3 :
+	 0;
 print &ui_table_row($text{'ssl_cipher_list'},
 	&ui_radio("cipher_list_def", $cmode,
 		  [ [ 1, $text{'ssl_auto'}."<br>" ],
 		    [ 2, $text{'ssl_strong'}."<br>" ],
+		    [ 3, $text{'ssl_pfs'}."<br>" ],
 		    [ 0, $text{'ssl_clist'}." ".
 			 &ui_textbox("cipher_list",
 				     $cmode == 0 ? $clist : "", 30) ] ]));
@@ -71,10 +89,8 @@ foreach $i ('cn', 'o', 'email', 'issuer_cn', 'issuer_o', 'issuer_email',
 		}
 	}
 @clinks = (
-	"<a href='download_cert.cgi/cert.pem'>".
-	"$text{'ssl_pem'}</a>",
-	"<a href='download_cert.cgi/cert.p12'>".
-	"$text{'ssl_pkcs12'}</a>"
+	&ui_link("download_cert.cgi/cert.pem", $text{'ssl_pem'}),
+	&ui_link("download_cert.cgi/cert.p12", $text{'ssl_pkcs12'})
 	);
 print &ui_table_row($text{'ssl_download'}, &ui_links_row(\@clinks));
 print &ui_table_end();
@@ -89,8 +105,8 @@ if (@ipkeys) {
 				  $text{'ssl_cert'} ]);
 	foreach $k (@ipkeys) {
 		print &ui_columns_row([
-			"<a href='edit_ipkey.cgi?idx=$k->{'index'}'>".
-			join(", ", @{$k->{'ips'}})."</a>",
+			&ui_link("edit_ipkey.cgi?idx=$k->{'index'}",
+				 join(", ", @{$k->{'ips'}})),
 			"<tt>$k->{'key'}</tt>",
 			$k->{'cert'} ? "<tt>$k->{'cert'}</tt>"
 				     : $text{'ssl_cert_def'},
@@ -101,7 +117,7 @@ if (@ipkeys) {
 else {
 	print "<b>$text{'ssl_ipkeynone'}</b><p>\n";
 	}
-print "<a href='edit_ipkey.cgi?new=1'>$text{'ssl_addipkey'}</a><p>\n";
+print &ui_link("edit_ipkey.cgi?new=1", $text{'ssl_addipkey'}),"<p>\n";
 print &ui_tabs_end_tab();
 
 # SSL key generation form
@@ -165,6 +181,16 @@ print &ui_form_end([ [ "save", $text{'save'} ] ]);
 print &ui_tabs_end_tab();
 
 print &ui_tabs_end(1);
+
+# Button to copy cert from Webmin
+&get_miniserv_config(\%wminiserv);
+if ($wminiserv{'ssl'}) {
+	print &ui_hr();
+	print &ui_buttons_start();
+	print &ui_buttons_row("copycert.cgi", $text{'ssl_copycert'},
+			      $text{'ssl_copycertdesc'});
+	print &ui_buttons_end();
+	}
 
 &ui_print_footer("", $text{'index_return'});
 

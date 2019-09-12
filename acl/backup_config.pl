@@ -1,5 +1,8 @@
 
+use strict;
+use warnings;
 do 'acl-lib.pl';
+our ($config_directory, %gconfig);
 
 # backup_config_files()
 # Returns files and directories that can be backed up
@@ -22,11 +25,13 @@ foreach my $u (&list_users(), &list_groups()) {
 	}
 
 # Add /etc/webmin/config
-system("cp $config_directory/config $config_directory/config.aclbackup");
+&copy_source_dest("$config_directory/config",
+		  "$config_directory/config.aclbackup");
 push(@rv, "$config_directory/config.aclbackup");
 
 # Add /etc/webmin/miniserv.conf
-system("cp $config_directory/miniserv.conf $config_directory/miniserv.conf.aclbackup");
+&copy_source_dest("$config_directory/miniserv.conf",
+		  "$config_directory/miniserv.conf.aclbackup");
 push(@rv, "$config_directory/miniserv.conf.aclbackup");
 
 return @rv;
@@ -71,24 +76,25 @@ my %aclbackup;
 &read_file("$config_directory/config.aclbackup", \%aclbackup);
 unlink("$config_directory/config.aclbackup");
 foreach my $k (keys %gconfig) {
-	delete($gconfig{$k}) if ($k =~ /^(lang_|notabs_|skill_|risk_|theme_|ownmods_)/);
+	delete($gconfig{$k}) if ($k =~ /^(lang_|notabs_|theme_|ownmods_)/);
 	}
 foreach my $k (keys %aclbackup) {
-	$gconfig{$k} = $aclbackup{$k} if ($k =~ /^(lang_|notabs_|skill_|risk_|theme_|ownmods_)/);
+	$gconfig{$k} = $aclbackup{$k} if ($k =~ /^(lang_|notabs_|theme_|ownmods_)/);
 	}
 &write_file("$config_directory/config", \%gconfig);
 
-# Splice miniserv.conf entries for users into real config
+# Splice miniserv.conf entries for users and password restrictions into
+# real config
 %aclbackup = ( );
 &read_file("$config_directory/miniserv.conf.aclbackup", \%aclbackup);
 unlink("$config_directory/miniserv.conf.aclbackup");
 my %miniserv;
 &get_miniserv_config(\%miniserv);
-foreach $k (keys %miniserv) {
-	delete($miniserv{$k}) if ($k =~ /^(preroot_)/);
+foreach my $k (keys %miniserv) {
+	delete($miniserv{$k}) if ($k =~ /^(preroot_|pass_)/);
 	}
-foreach $k (keys %aclbackup) {
-	$miniserv{$k} = $aclbackup{$k} if ($k =~ /^(preroot_)/);
+foreach my $k (keys %aclbackup) {
+	$miniserv{$k} = $aclbackup{$k} if ($k =~ /^(preroot_|pass_)/);
 	}
 &put_miniserv_config(\%miniserv);
 

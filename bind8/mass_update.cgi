@@ -1,15 +1,18 @@
 #!/usr/local/bin/perl
 # Change all instances of some IP 
+use strict;
+use warnings;
+our (%access, %text, %in);
 
 require './bind8-lib.pl';
 &ReadParse();
-$conf = &get_config();
 &error_setup($text{'umass_err'});
 
 # Get the zones
-foreach $d (split(/\0/, $in{'d'})) {
-	($idx, $viewidx) = split(/\s+/, $d);
-	$zone = &get_zone_name($idx, $viewidx);
+my @zones;
+foreach my $d (split(/\0/, $in{'d'})) {
+	my ($zonename, $viewidx) = split(/\s+/, $d);
+	my $zone = &get_zone_name_or_error($zonename, $viewidx);
 	$zone || &error($text{'umass_egone'});
 	&can_edit_zone($zone) ||
 		&error($text{'master_edelete'});
@@ -56,18 +59,19 @@ elsif ($in{'type'} eq 'ttl') {
 # Do each one
 &ui_print_unbuffered_header(undef, $text{'umass_title'}, "");
 
-foreach $zi (@zones) {
+foreach my $zi (@zones) {
 	print &text('umass_doing', "<tt>$zi->{'name'}</tt>"),"<br>\n";
 	if ($zi->{'type'} ne 'master') {
 		# Skip - not a master zone
 		print $text{'umass_notmaster'},"<p>\n";
 		next;
 		}
-	$rcount = 0;
-	@recs = &read_zone_file($zi->{'file'}, $zi->{'name'});
-	$realfile = &make_chroot(&absolute_path($zi->{'file'}));
-	foreach $r (@recs) {
-		$v = join(" ", @{$r->{'values'}});
+	my $rcount = 0;
+	&before_editing($zi);
+	my @recs = &read_zone_file($zi->{'file'}, $zi->{'name'});
+	my $realfile = &make_chroot(&absolute_path($zi->{'file'}));
+	foreach my $r (@recs) {
+		my $v = join(" ", @{$r->{'values'} || []});
 		if ($r->{'type'} eq $in{'type'} &&
 		    ($v eq $in{'old'} || $in{'old_def'})) {
 			# Found a regular record to fix
@@ -92,6 +96,7 @@ foreach $zi (@zones) {
 	else {
 		print &text('umass_none', scalar(@recs)),"<p>\n";
 		}
+	&after_editing($zi);
 	}
 
 &unlock_all_files();

@@ -3,6 +3,8 @@
 
 $apt_get_command = $config{'apt_mode'} ? "aptitude" : "apt-get";
 $apt_search_command = $config{'apt_mode'} ? "aptitude" : "apt-cache";
+$sources_list_file = "/etc/apt/sources.list";
+$sources_list_dir = "/etc/apt/sources.list.d";
 
 sub list_update_system_commands
 {
@@ -19,10 +21,8 @@ local (@rv, @newpacks);
 
 # Build the command to run
 $ENV{'DEBIAN_FRONTEND'} = 'noninteractive';
-local $cmd = $apt_get_command eq "apt-get" ?
-  "$apt_get_command -y ".($force ? " --force-yes -f" : "")." install $update" :
-  "$apt_get_command -y".($force ? " -f" : "")." install $update";
 $update = join(" ", map { quotemeta($_) } split(/\s+/, $update));
+local $cmd = "$apt_get_command -y ".($force ? " -f" : "")." install $update";
 print "<b>",&text('apt_install', "<tt>$cmd</tt>"),"</b><p>\n";
 print "<pre>";
 &additional_log('exec', undef, $cmd);
@@ -41,6 +41,7 @@ foreach (0..100) {
 &close_tempfile(YESFILE);
 
 # Run the command
+&clean_language();
 &open_execute_command(CMD, "$cmd <$yesfile", 2);
 while(<CMD>) {
 	if (/setting\s+up\s+(\S+)/i && !/as\s+MDA/i) {
@@ -56,6 +57,7 @@ while(<CMD>) {
 	print &html_escape("$_");
 	}
 close(CMD);
+&reset_environment();
 if (!@rv && $config{'package_system'} ne 'debian' && !$?) {
 	# Other systems don't list the packages installed!
 	@rv = @newpacks;
@@ -76,13 +78,25 @@ $ENV{'DEBIAN_FRONTEND'} = 'noninteractive';
 my $cmd = "apt-get -s install ".
 	  join(" ", map { quotemeta($_) } split(/\s+/, $packages)).
 	  " </dev/null 2>&1";
+&clean_language();
 my $out = &backquote_command($cmd);
+&reset_environment();
 my @rv;
 foreach my $l (split(/\r?\n/, $out)) {
 	if ($l =~ /Inst\s+(\S+)\s+\[(\S+)\]\s+\(([^ \)]+)/ ||
 	    $l =~ /Inst\s+(\S+)\s+\[(\S+)\]/) {
+		# Format like : Inst telnet [amd64] (5.6.7 Ubuntu)
 		my $pkg = { 'name' => $1,
 			    'version' => $3 || $2 };
+		if ($pkg->{'version'} =~ s/^(\S+)://) {
+			$pkg->{'epoch'} = $1;
+			}
+		push(@rv, $pkg);
+		}
+	elsif ($l =~ /Inst\s+(\S+)\s+\(([^ \)]+)/) {
+		# Format like : Inst telnet (5.6.7 Ubuntu [amd64])
+		my $pkg = { 'name' => $1,
+			    'version' => $2 };
 		if ($pkg->{'version'} =~ s/^(\S+)://) {
 			$pkg->{'epoch'} = $1;
 			}
@@ -121,14 +135,26 @@ print &ui_form_end([ [ undef, $text{'apt_apply'} ] ]);
 sub update_system_resolve
 {
 local ($name) = @_;
-return $name eq "dhcpd" ? "dhcp3-server" :
+return $name eq "dhcpd" && $gconfig{'os_version'} >= 7 ?
+		"isc-dhcp-server" :
+       $name eq "dhcpd" && $gconfig{'os_version'} < 7 ?
+		"dhcp3-server" :
        $name eq "bind" ? "bind9" :
-       $name eq "mysql" ? "mysql-client mysql-server mysql-admin" :
+       $name eq "mysql" && $gconfig{'os_version'} >= 10 ?
+		"mariadb-client mariadb-server" :
+       $name eq "mysql" && $gconfig{'os_version'} >= 7 ?
+		"mysql-client mysql-server" :
+       $name eq "mysql" && $gconfig{'os_version'} < 7 ?
+		"mysql-client mysql-server mysql-admin" :
        $name eq "apache" ? "apache2" :
+       $name eq "squid" && $gconfig{'os_version'} >= 8 ?
+		"squid3" :
        $name eq "postgresql" ? "postgresql postgresql-client" :
        $name eq "openssh" ? "ssh" :
        $name eq "openldap" ? "slapd" :
+       $name eq "ldap" ? "libnss-ldap libpam-ldap" :
        $name eq "dovecot" ? "dovecot-common dovecot-imapd dovecot-pop3d" :
+       $name eq "virtualmin-modules" ? "webmin-.*" :
 			       $name;
 }
 
@@ -220,10 +246,12 @@ if (&has_command("apt-show-versions")) {
 	# pinned versions and backports into account
 	local @rv;
 	&clean_language();
+	&execute_command("apt-show-versions -i");
 	&open_execute_command(PKGS, "apt-show-versions 2>/dev/null", 1, 1);
 	while(<PKGS>) {
 		if (/^(\S+)\/(\S+)\s+upgradeable\s+from\s+(\S+)\s+to\s+(\S+)/ &&
 		    !$holds{$1}) {
+			# Old format
 			local $pkg = { 'name' => $1,
 				       'source' => $2,
 				       'version' => $4 };
@@ -232,9 +260,25 @@ if (&has_command("apt-show-versions")) {
 				}
 			push(@rv, $pkg);
 			}
+		elsif (/^(\S+):(\S+)\/(\S+)\s+(\S+)\s+upgradeable\s+to\s+(\S+)/ && !$holds{$1}) {
+			# New format, like 
+			# libgomp1:i386/unstable 4.8.2-2 upgradeable to 4.8.2-4
+			local $pkg = { 'name' => $1,
+				       'arch' => $2,
+				       'source' => $3,
+				       'version' => $5 };
+			if ($pkg->{'version'} =~ s/^(\S+)://) {
+				$pkg->{'epoch'} = $1;
+				}
+			push(@rv, $pkg);
+			}
 		}
 	close(PKGS);
 	&reset_environment();
+	@rv = &filter_held_packages(@rv);
+	foreach my $pkg (@rv) {
+		$pkg->{'security'} = 1 if ($pkg->{'source'} =~ /security/i);
+		}
 	return @rv;
 	}
 else {
@@ -294,6 +338,7 @@ else {
 		close(PKGS);
 		&reset_environment();
 		}
+	@rv = &filter_held_packages(@rv);
 	&set_pinned_versions(\@rv);
 	return @rv;
 	}
@@ -326,3 +371,144 @@ close(PKGS);
 &reset_environment();
 }
 
+# filter_held_packages(package, ...)
+# Returns a list of package updates, minus those that are held
+sub filter_held_packages
+{
+my @pkgs = @_;
+my %hold;
+
+# Get holds from dpkg
+&clean_language();
+&open_execute_command(PKGS, "dpkg --get-selections 2>/dev/null", 1, 1);
+while(<PKGS>) { 
+	if (/^(\S+)\s+hold/) {
+		$hold{$1} = 1;
+		}
+	}
+close(PKGS);
+&reset_environment();
+
+# Get holds from aptitude
+if (&has_command("aptitude")) {
+	&clean_language();
+	&open_execute_command(PKGS, "aptitude search '~ahold' 2>/dev/null", 1, 1);
+	while(<PKGS>) { 
+		if (/^\.h\s+(\S+)/) {
+			$hold{$1} = 1;
+			}
+		}
+	close(PKGS);
+	&reset_environment();
+	}
+
+return grep { !$hold{$_->{'name'}} } @pkgs;
+}
+
+# list_package_repos()
+# Returns a list of configured repositories
+sub list_package_repos
+{
+my @rv;
+
+# Read all repos files
+foreach my $f ($sources_list_file, glob("$sources_list_dir/*")) {
+	my $lref = &read_file_lines($f, 1);
+	my $lnum = 0;
+	foreach my $l (@$lref) {
+		if ($l =~ /^(#*)\s*deb\s+((http|https)\S+)\s+(\S.*)/) {
+			my $repo = { 'file' => $f,
+				     'line' => $lnum,
+				     'words' => \@w,
+				     'url' => $2,
+				     'enabled' => !$1 };
+			my @w = split(/\s+/, $4);
+			$repo->{'name'} = join("/", @w);
+			$repo->{'id'} = $repo->{'url'}.$repo->{'name'};
+			push(@rv, $repo);
+			}
+		$lnum++;
+		}
+	}
+
+return @rv;
+}
+
+# create_repo_form()
+# Returns HTML for a package repository creation form
+sub create_repo_form 
+{
+my $rv;
+$rv .= &ui_table_row($text{'apt_repo_url'},
+		     &ui_textbox("url", undef, 40));
+$rv .= &ui_table_row($text{'apt_repo_path'},
+		     &ui_textbox("path", undef, 40));
+return $rv;
+}
+
+# create_repo_parse(&in)
+# Parses input from create_repo_form, and returns either a new repo object or
+# an error string
+sub create_repo_parse
+{
+my ($in) = @_;
+my $repo = { 'enabled' => 1 };
+
+# Parse base URL
+$in->{'url'} =~ /^(http|https|ftp|file):\S+$/ ||
+	return $text{'apt_repo_eurl'};
+$repo->{'url'} = $in->{'url'};
+
+# Parse distro components
+my @w = split(/\s+|\//, $in->{'path'});
+@w || $text{'apt_repo_epath'};
+$repo->{'name'} = join("/", @w);
+$repo->{'id'} = $repo->{'url'}.$repo->{'name'};
+
+return $repo;
+}
+
+# create_package_repo(&repo)
+# Creates a new repository from the given hash (returned by create_repo_parse)
+sub create_package_repo
+{
+my ($repo) = @_;
+&lock_file($sources_list_file);
+my $lref = &read_file_lines($sources_list_file);
+push(@$lref, ($repo->{'enabled'} ? "" : "# ").
+	     "deb ".
+	     $repo->{'url'}." ".
+	     join(" ", split(/\//, $repo->{'name'})));
+&flush_file_lines($sources_list_file);
+&unlock_file($sources_list_file);
+return undef;
+}
+
+# delete_package_repo(&repo)
+# Delete a repo from the sources.list file
+sub delete_package_repo
+{
+my ($repo) = @_;
+&lock_file($repo->{'file'});
+my $lref = &read_file_lines($repo->{'file'});
+splice(@$lref, $repo->{'line'}, 1);
+&flush_file_lines($repo->{'file'});
+&unlock_file($repo->{'file'});
+}
+
+# enable_package_repo(&repo, enable?)
+# Enable or disable a repository
+sub enable_package_repo
+{
+my ($repo, $enable) = @_;
+&lock_file($repo->{'file'});
+my $lref = &read_file_lines($repo->{'file'});
+$lref->[$repo->{'line'}] =~ s/^#+\s*//;
+if (!$enable) {
+	$lref->[$repo->{'line'}] = "# ".$lref->[$repo->{'line'}];
+	}
+&flush_file_lines($repo->{'file'});
+&unlock_file($repo->{'file'});
+}
+
+1;

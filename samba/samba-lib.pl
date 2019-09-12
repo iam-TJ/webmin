@@ -338,7 +338,7 @@ return undef;
 
 # setval(name, value, [default])
 # Sets some value in %share. Synonyms with the same meaning are removed.
-# If the value is the same as the share or given default, dont store it
+# If the value is the same as the share or given default, don't store it
 sub setval
 {
 local($_);
@@ -541,37 +541,37 @@ return join("," , @rv);
 }
 
 
+# yesno_input(config-name, [input-name])
+# Returns a true / false selector
 sub yesno_input
 {
-($n = $_[0]) =~ s/ /_/g;
-return sprintf "<input type=radio name=$n value=yes %s> $text{'yes'}\n".
-	       "<input type=radio name=$n value=no %s> $text{'no'}\n",
-		&istrue($_[0]) ? "checked" : "",
-		&isfalse($_[0]) ? "checked" : "";
+local ($c, $n) = @_;
+if (!$n) {
+	($n = $c) =~ s/ /_/g;
+	}
+return &ui_radio($n, &istrue($c) ? "yes" : "no",
+		 [ [ "yes", $text{'yes'} ],
+		   [ "no", $text{'no'} ] ]);
 }
 
 # username_input(name)
 # Outputs HTML for an username field
 sub username_input
 {
+local $n;
 ($n = $_[0]) =~ s/ /_/g;
-$v = &getval($_[0]);
-print "<td><input name=$n size=8 value=\"$v\"> ",
-	&user_chooser_button($n, 0),"</td>\n";
+return &ui_user_textbox($n, &getval($_[0]));
 }
 
 # username_input(name, default)
 sub groupname_input
 {
+local $n;
 ($n = $_[0]) =~ s/ /_/g;
-$v = &getval($_[0]);
-print "<td><input name=$n size=8 value=\"$v\"> ",
-	&group_chooser_button($n, 0),"</td>\n";
+return &ui_group_textbox($n, &getval($_[0]));
 }
 
-
-
-@sock_opts = ("SO_KEEPALIVE", "SO_REUSEADDR", "SO_BROADCAST", "TCP_NODELAY", 
+@sock_opts = ("SO_KEEPALIVE", "SO_REUSEADDR", "SO_BROADCAST", "TCP_NODELAY",
 	      "IPTOS_LOWDELAY", "IPTOS_THROUGHPUT", "SO_SNDBUF*", "SO_RCVBUF*",
 	      "SO_SNDLOWAT*", "SO_RCVLOWAT*");
 
@@ -597,7 +597,7 @@ while(<PASS>) {
 	chop;
 	s/#.*$//g;
 	local @b = split(/:/, $_);
-	next if (@b < 4);
+	next if (@b < 4 || $b[1] !~ /^\d+$/);
 	local $u = { 'name' => $b[0],  'uid' => $b[1],
 		     'pass1' => $b[2], 'pass2' => $b[3],
 		     'oldname' => $b[0] };
@@ -637,11 +637,15 @@ if ($has_pdbedit) {
 	# Use the pdbedit command
 	local $ws = &indexof("W", @{$_[0]->{'opts'}}) >= 0 ? "-m" : "";
 	local @opts = grep { $_ ne "U" && $_ ne "W" } @{$_[0]->{'opts'}};
+	local $temp = &transname();
+	&open_tempfile(TEMP, ">$temp", 0, 1);
+	&print_tempfile(TEMP, "\n\n");
+	&close_tempfile(TEMP);
 	local $out = &backquote_logged(
-		"cd / && $config{'pdbedit'} -a -s $config{'smb_conf'} -u ".
+		"cd / && $config{'pdbedit'} -a -s $config{'smb_conf'} -t -u ".
 		quotemeta($_[0]->{'name'}).
 		($config{'sync_gid'} ? " -G $config{'sync_gid'}" : "").
-		" -c '[".join("", @opts)."]' $ws");
+		" -c '[".join("", @opts)."]' $ws <$temp 2>&1");
 	$? && &error("$config{'pdbedit'} failed : <pre>$out</pre>");
 	}
 else {
@@ -829,7 +833,7 @@ if ($acc->{'per_' . $stype . '_acls'}) {
 		return 0 if index($acl, $_) == -1;
 		}
 	}
-return 1;	
+return 1;
 }
 
 # save_samba_acl($permissions_string, \%access, $share_name)
@@ -958,6 +962,14 @@ else {
 	$out = &backquote_logged("$config{'net'} -s $config{'smb_conf'} maxrid 2>&1");
 	local $maxrid = $out =~ /rid:\s+(\d+)/ ? $1 + 1 : undef;
 	$maxrid = 1000 if ($maxrid < 1000);	# Should be >1000
+	if (&foreign_check("useradmin")) {
+		&foreign_require("useradmin");
+		local %taken;
+		&useradmin::build_user_used(\%taken);
+		while($taken{$maxrid}) {
+			$maxrid++;
+			}
+		}
 	$out = &backquote_logged(
 		"$config{'net'} -s $config{'smb_conf'} groupmap add".
 		" rid=$maxrid".

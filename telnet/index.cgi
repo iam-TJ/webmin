@@ -15,11 +15,20 @@ if ($ENV{'HTTPS'} eq 'ON' && !$config{'mode'}) {
 	      "</font></center><br>\n";
 	}
 
+# Work out SSH server port
+$default_ssh_port = 22;
+if (&foreign_installed("sshd")) {
+	&foreign_require("sshd");
+	$conf = &sshd::get_sshd_config();
+	@ports = map { $_->{'values'}->[0] } &sshd::find("Port", $conf);
+	$default_ssh_port = $ports[0] if (@ports && $ports[0]);
+	}
+
 # Work out real host and port
 $addr = $config{'host'} || $ENV{'SERVER_NAME'} ||
 	&to_ipaddress(&get_system_hostname());
 $port = $config{'port'} ? $config{'port'} :
-	$config{'mode'} ? 22 : 23;
+	$config{'mode'} ? $default_ssh_port : 23;
 
 if ($config{'no_test'}) {
 	# Just assume that the telnet server is running
@@ -159,10 +168,10 @@ else {
 	print "</applet><br>\n";
 
 	print &text('index_credits',
-		    "http://www.mud.de/se/jta/"),"<br>\n";
+		    "http://javassh.org/space/start"),"<br>\n";
 	if ($config{'mode'}) {
 		print &text('index_sshcredits',
-			    "http://www.systemics.com/docs/cryptix/"),"<br>\n";
+			    "http://www.cryptix.org/"),"<br>\n";
 		}
 	print "</center>\n";
 	}

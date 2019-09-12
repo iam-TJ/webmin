@@ -5,11 +5,11 @@
 require './lvm-lib.pl';
 &ReadParse();
 
+@lvs = &list_logical_volumes($in{'vg'});
 ($vg) = grep { $_->{'name'} eq $in{'vg'} } &list_volume_groups();
 $vg || &error($text{'vg_egone'});
 if ($in{'lv'}) {
-	($lv) = grep { $_->{'name'} eq $in{'lv'} }
-		     &list_logical_volumes($in{'vg'});
+	($lv) = grep { $_->{'name'} eq $in{'lv'} } @lvs;
 	$lv || &error($text{'lv_egone'});
 	$oldlv = { %$lv };
 	}
@@ -22,6 +22,14 @@ if ($in{'confirm'}) {
 	&webmin_log("delete", "lv", $in{'lv'}, $lv);
 	&redirect("index.cgi?mode=lvs");
 	}
+elsif ($in{'confirm_rollback'}) {
+	# Rollback the Snapshot
+	&error_setup($text{'lv_err3'});
+	$err = &rollback_snapshot($lv);
+	&error("<pre>$err</pre>") if ($err);
+	&webmin_log("rollback", "lv", $in{'lv'}, $lv);
+	&redirect("index.cgi?mode=lvs");
+	}
 elsif ($in{'delete'}) {
 	# Ask the user if he is sure
 	&ui_print_header(undef, $text{'lv_delete'}, "");
@@ -31,9 +39,29 @@ elsif ($in{'delete'}) {
 	print &ui_hidden("lv", $in{'lv'});
 	print "<b>",&text($lv->{'is_snap'} ? 'lv_rusnap' : 'lv_rusure',
 			  "<tt>$lv->{'device'}</tt>"),"</b><p>\n";
+	if ($lv->{'thin'}) {
+		@thinc = grep { $_->{'thin_in'} eq $lv->{'name'} } @lvs;
+		if (@thinc) {
+			print "<b>",&text('lv_delthin',
+					  scalar(@thinc)),"</b><p>\n";
+			}
+		}
 	print &ui_form_end([ [ 'confirm', $text{'lv_deleteok'} ] ]);
 	print "</center>\n";
-	&ui_print_footer("index.cgi?mode=lvs", $text{'index_return'});
+	&ui_print_footer("index.cgi?mode=lvs", $text{'index_return3'});
+	}
+elsif ($in{'rollback'}) {
+	# Ask the user if he is sure
+	&ui_print_header(undef, $text{'lv_snaprollback'}, "");
+	print "<center>\n";
+	print &ui_form_start("save_lv.cgi");
+	print &ui_hidden("vg", $in{'vg'});
+	print &ui_hidden("lv", $in{'lv'});
+	print "<b>",&text('lv_rusnaprb',
+			"<tt>$lv->{'device'}</tt>"),"</b><p>\n";
+	print &ui_form_end([ [ 'confirm_rollback', $text{'lv_snaprollbackok'} ] ]);
+	print "</center>\n";
+	&ui_print_footer("index.cgi?mode=lvs", $text{'index_return3'});
 	}
 else {
 	# Validate inputs
@@ -43,7 +71,11 @@ else {
 		       &list_logical_volumes($in{'vg'});
 	$same && (!$in{'lv'} || $in{'lv'} ne $in{'name'}) &&
 		&error($text{'lv_esame'});
-	if ($in{'size_mode'} == 0) {
+	if ($in{'size_mode'} == -1) {
+		# Cannot change
+		$size = undef;
+		}
+	elsif ($in{'size_mode'} == 0) {
 		# Absolute size
 		$in{'size'} =~ /^\d+$/ || &error($text{'lv_esize'});
 		$size = $in{'size'};
@@ -63,9 +95,11 @@ else {
 		}
 	elsif ($in{'size_mode'} == 2) {
 		# Size of free space
-		$in{'freesize'} =~ /^\d+$/ &&
-			$in{'freesize'} > 0 &&
-			$in{'freesize'} <= 100 || &error($text{'lv_efreesize'});
+		if (!$in{'lv'}) {
+			$in{'freesize'} =~ /^\d+$/ &&
+				$in{'freesize'} > 0 &&
+				$in{'freesize'} <= 100 || &error($text{'lv_efreesize'});
+			}
 		$size = $in{'freesize'};
 		$sizeof = 'FREE';
 		}
@@ -106,14 +140,16 @@ else {
 			$lv->{'stripesize'} = $in{'stripesize'};
 			$lv->{'readahead'} = $in{'readahead'};
 			}
+		$lv->{'thin_in'} = $in{'thin'};
 		$err = &create_logical_volume($lv);
 		&error("<pre>$err</pre>") if ($err);
 		&webmin_log("create", "lv", $in{'name'}, $lv);
 		}
 	elsif ($lv->{'is_snap'}) {
 		# Modifying a snapshot
-		if ($lv->{'size'} != $size) {
-			$err = &resize_logical_volume($lv, $size);
+		$oldsize = $lv->{'cow_size'} || $lv->{'size'};
+		if (defined($size) && $oldsize != $size) {
+			$err = &resize_snapshot_volume($lv, $size);
 			&error("<pre>$err</pre>") if ($err);
 			$lv->{'size'} = $size;
 			}
@@ -138,6 +174,12 @@ else {
 				}
 
 			local $realsize = $nblocks * $vg->{'pe_size'};
+
+			if ($in{'size_mode'} == 2) {
+				# Calculate free VG space and add current LV size to get the actual new LV size
+				$realsize = ($vg->{'pe_total'}*$vg->{'pe_size'})-($vg->{'pe_alloc'}*$vg->{'pe_size'})+$lv->{'size'};
+				}
+
 			if ($in{'sizeconfirm'}) {
 				# Just resize the logical volume
 				$err = &resize_logical_volume($lv, $realsize);
@@ -180,7 +222,7 @@ else {
 					print "<b>$err</b> <p>\n";
 					print "<input type=submit name=sizeconfirm value='$text{'resize_ok'}'>\n";
 					print "</form></center>\n";
-					&ui_print_footer("", $text{'index_return'});
+					&ui_print_footer("index.cgi?mode=lvs", $text{'index_return3'});
 					exit;
 					}
 				}

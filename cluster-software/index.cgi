@@ -47,8 +47,7 @@ if (@links) {
 			local ($type) = grep { $_->[0] eq $s->{'type'} }
 					     @servers::server_types;
 			print &ui_columns_row([
-				"<a href='edit_host.cgi?id=$h->{'id'}'>".
-				($s->{'host'} || &get_system_hostname())."</a>",
+				&ui_link("edit_host.cgi?id=$h->{'id'}",($s->{'host'} || &get_system_hostname())),
 				$s->{'desc'},
 				scalar(@{$h->{'packages'}}),
 				$type->[1],
@@ -70,39 +69,37 @@ $formno++;
 print "<table width=100%><tr>\n";
 @addservers = grep { !$gothost{$_->{'id'}} } @servers;
 if (@addservers && $access{'add'}) {
-	print "<form action=add.cgi>\n";
-	print "<td width=33%>\n";
+	print "<td width=33%><form action=add.cgi>\n";
 	print "<input type=submit name=add value='$text{'index_add'}'>\n";
 	print "<select name=server>\n";
-	foreach $s (@addservers) {
+	foreach $s (sort { $a->{'host'} cmp $b->{'host'} } @addservers) {
 		print "<option value=$s->{'id'}>",
-			$s->{'desc'} || $s->{'realhost'} || $s->{'host'},"\n";
+		    $s->{'host'}.($s->{'desc'} ? " ($s->{'desc'})" : ""),"</option>\n";
 		}
-	print "</select></td>\n";
-	print "</form>\n";
+	print "</select>\n";
+	print "</form></td>\n";
 	}
 
 # Show button for compare form
 if (@hosts) {
-	print "<form action=compare_form.cgi>\n";
 	print "<td align=center width=33%>\n";
+	print "<form action=compare_form.cgi>\n";
 	print "<input type=submit value='$text{'index_compare'}'>\n";
-	print "</td>\n";
 	print "</form>\n";
+	print "</td>\n";
 	}
 
 # Show form for adding a group of servers
 @groups = &servers::list_all_groups(\@servers);
 if (@groups && $access{'add'}) {
-	print "<form action=add.cgi>\n";
-	print "<td align=right width=33%>\n";
+	print "<td align=right width=33%><form action=add.cgi>\n";
 	print "<input type=submit name=gadd value='$text{'index_gadd'}'>\n";
 	print "<select name=group>\n";
 	foreach $g (@groups) {
-		print "<option>$g->{'name'}\n";
+		print "<option>$g->{'name'}</option>\n";
 		}
-	print "</select></td>\n";
-	print "</form>\n";
+	print "</select>\n";
+	print "</form></td>\n";
 	}
 print "</tr></table>\n";
 

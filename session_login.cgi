@@ -2,13 +2,13 @@
 # session_login.cgi
 # Display the login form used in session login mode
 
-BEGIN { push(@INC, ".."); };
+BEGIN { push(@INC, "."); };
 use WebminCore;
 
 $pragma_no_cache = 1;
 #$ENV{'MINISERV_INTERNAL'} || die "Can only be called by miniserv.pl";
 &init_config();
-&ReadParse();
+&ReadParse(undef, undef, undef, 2);
 if ($gconfig{'loginbanner'} && $ENV{'HTTP_COOKIE'} !~ /banner=1/ &&
     !$in{'logout'} && !$in{'failed'} && !$in{'timed_out'}) {
 	# Show pre-login HTML page
@@ -24,16 +24,22 @@ if ($gconfig{'loginbanner'} && $ENV{'HTTP_COOKIE'} !~ /banner=1/ &&
 	return;
 	}
 $sec = uc($ENV{'HTTPS'}) eq 'ON' ? "; secure" : "";
+if (!$config{'no_httponly'}) {
+	$sec .= "; httpOnly";
+}
 &get_miniserv_config(\%miniserv);
 $sidname = $miniserv{'sidname'} || "sid";
 print "Set-Cookie: banner=0; path=/$sec\r\n" if ($gconfig{'loginbanner'});
 print "Set-Cookie: $sidname=x; path=/$sec\r\n" if ($in{'logout'});
 print "Set-Cookie: testing=1; path=/$sec\r\n";
+$title = $text{'session_header'};
+if ($gconfig{'showhost'}) {
+        $title = &get_display_hostname()." : ".$title;
+	}
 &ui_print_unbuffered_header(
 	undef, undef, undef, undef, undef, 1, 1, undef,
-	"<title>$text{'session_header'}</title>",
-	"onLoad='document.forms[0].pass.value = \"\"; ".
-	"document.forms[0].user.focus()'");
+	"<title>$title</title>",
+	"onLoad='document.forms[0].user.focus()'");
 
 if ($tconfig{'inframe'}) {
 	# Framed themes lose original page
@@ -42,13 +48,19 @@ if ($tconfig{'inframe'}) {
 
 print "<center>\n";
 if (defined($in{'failed'})) {
-	print "<h3>$text{'session_failed'}</h3><p>\n";
+	if ($in{'twofactor_msg'}) {
+		print "<h3>",&text('session_twofailed',
+			&html_escape($in{'twofactor_msg'})),"</h3><p></p>\n";
+		}
+	else {
+		print "<h3>$text{'session_failed'}</h3><p></p>\n";
+		}
 	}
 elsif ($in{'logout'}) {
-	print "<h3>$text{'session_logout'}</h3><p>\n";
+	print "<h3>$text{'session_logout'}</h3><p></p>\n";
 	}
 elsif ($in{'timed_out'}) {
-	print "<h3>",&text('session_timed_out', int($in{'timed_out'}/60)),"</h3><p>\n";
+	print "<h3>",&text('session_timed_out', int($in{'timed_out'}/60)),"</h3><p></p>\n";
 	}
 print "$text{'session_prefix'}\n";
 
@@ -71,10 +83,20 @@ print &ui_table_row(undef,
 	    "<tt>$host</tt>"), 2, [ "align=center", "align=center" ]);
 
 # Username and password
+$tags = $gconfig{'noremember'} ? "autocomplete=off" : "";
 print &ui_table_row($text{'session_user'},
-	&ui_textbox("user", $in{'failed'}, 20));
+	&ui_textbox("user", $in{'failed'}, 20, 0, undef, $tags));
 print &ui_table_row($text{'session_pass'},
-	&ui_password("pass", undef, 20));
+	&ui_password("pass", undef, 20, 0, undef, $tags));
+
+# Two-factor token, for users that have it
+if ($miniserv{'twofactor_provider'}) {
+	print &ui_table_row($text{'session_twofactor'},
+		&ui_textbox("twofactor", undef, 20, 0, undef,
+			    "autocomplete=off"));
+	}
+
+# Remember session cookie?
 if (!$gconfig{'noremember'}) {
 	print &ui_table_row(" ",
 		&ui_checkbox("save", 1, $text{'session_save'}, 0));

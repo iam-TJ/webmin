@@ -7,6 +7,7 @@ require './mysql-lib.pl';
 &can_edit_db($in{'db'}) || &error($text{'dbase_ecannot'});
 $access{'edonly'} && &error($text{'dbase_ecannot'});
 &error_setup($text{'exec_err'});
+$sql_charset = $in{'charset'};
 
 if ($in{'clear'}) {
 	# Delete the history file
@@ -25,7 +26,7 @@ else {
 	if (@data) {
 		print &ui_columns_start($d->{'titles'});
 		foreach $r (@data) {
-			print &ui_columns_row($r);
+			print &ui_columns_row([ map { &html_escape($_) } @$r ]);
 			}
 		print &ui_columns_end();
 		}
@@ -49,6 +50,6 @@ else {
 
 	&ui_print_footer("exec_form.cgi?db=$in{'db'}", $text{'exec_return'},
 		"edit_dbase.cgi?db=$in{'db'}", $text{'dbase_return'},
-		"", $text{'index_return'});
+		&get_databases_return_link($in{'db'}), $text{'index_return'});
 	}
 

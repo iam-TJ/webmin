@@ -9,6 +9,7 @@ use WebminCore;
 open(MODE, "$module_config_directory/mode");
 chop($raid_mode = <MODE>);
 close(MODE);
+$raid_mode ||= "mdadm";
 
 %container = ( 'raiddev', 1,
 	       'device', 1 );
@@ -36,7 +37,7 @@ local %mdstat;
 local $lastdev;
 open(MDSTAT, $config{'mdstat'});
 while(<MDSTAT>) {
-	if (/^(md\d+)\s*:\s+(\S+)\s+(\S+)\s+(.*)\s+(\d+)\s+blocks\s*(.*)resync=(\d+)/) {
+	if (/^(md\d+)\s*:\s+(\S+)\s+(\S+)\s+(.*)\s+(\d+)\s+blocks\s*(.*)resync=([0-9\.]+|delayed)/) {
 		$mdstat{$lastdev = "/dev/$1"} = [ $2, $3, $4, $5, $7, $6 ];
 		}
 	elsif (/^(md\d+)\s*:\s+(\S+)\s+(\S+)\s+(.*)\s+(\d+)\s+blocks\s*(.*)/) {
@@ -45,15 +46,21 @@ while(<MDSTAT>) {
 	elsif (/^(md\d+)\s*:\s+(\S+)\s+(\S+)\s+(.*)/) {
 		$mdstat{$lastdev = "/dev/$1"} = [ $2, $3, $4 ];
 		$_ = <MDSTAT>;
-		if (/\s+(\d+)\s+blocks\s*(.*)resync=(\d+)/) {
+		if (/\s+(\d+)\s+blocks\s*(.*)resync=([0-9\.]+)/) {
+			# Block count and resync progress after device line
 			$mdstat{$lastdev}->[3] = $1;
 			$mdstat{$lastdev}->[4] = $3;
 			$mdstat{$lastdev}->[5] = $2;
 			}
 		elsif (/\s+(\d+)\s+blocks\s*(.*)/) {
+			# Block count only after device line
 			$mdstat{$lastdev}->[3] = $1;
 			$mdstat{$lastdev}->[5] = $2;
 			}
+		}
+	elsif (/^\s*\[\S+\]\s*(resync|recovery)\s*=\s([0-9\.]+)/) {
+		# Resync section is on it's own line
+		$mdstat{$lastdev}->[5] = $2;
 		}
 	}
 close(MDSTAT);
@@ -147,7 +154,7 @@ else {
 			elsif (/^\s*State\s*:\s*(.*)/) {
 				$md->{'state'} = $1;
 				}
-			elsif ((/^\s*Rebuild\s+Status\s*:\s*(\d+)\s*\%/) || (/^\s*Reshape\s+Status\s*:\s*(\d+)\s*\%/)) {
+			elsif ((/^\s*Rebuild\s+Status\s*:\s*([0-9\.]+)\s*\%/) || (/^\s*Reshape\s+Status\s*:\s*([0-9\.]+)\s*\%/) || (/^\s*Resync\s+Status\s*:\s*([0-9\.]+)\s*\%/)) {
 				$md->{'rebuild'} = $1;
 				}
 			elsif (/^\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+|\-)\s+(.*\S)\s+(\/\S+)/) {
@@ -166,14 +173,28 @@ else {
 					{ 'name' => 'chunk-size',
 					  'value' => $2 });
 				}
+			elsif (/^\s+Layout\s+:\s*(.*)/) {
+                                push(@{$md->{'members'}},
+                                        { 'name' => 'parity-algorithm',
+                                          'value' => $1 });
+                                }
+			elsif (/^\s+UUID\s+:\s*(.*)/) {
+                                push(@{$md->{'members'}},
+                                        { 'name' => 'array-uuid',
+                                          'value' => $1 });
+                                }
 			}
 		close(MDSTAT);
+		local $lastdev;
 		open(MDSTAT, $config{'mdstat'});
 		while(<MDSTAT>){
-			if (/^.*finish=(\S+)min/){
+			if (/^(md\d+)/) {
+		                $lastdev = "/dev/$1";
+               			}
+			if ((/^.*finish=(\S+)min/) && ($lastdev eq $m)) {
 				$md->{'remain'} = $1;
 				}
-			if (/^.*speed=(\S+)K/){
+			if ((/^.*speed=(\S+)K/) && ($lastdev eq $m)) {
 				$md->{'speed'} = $1;
 				}
 			}
@@ -199,6 +220,19 @@ else {
 		}
 	}
 return \@get_raidtab_cache;
+}
+
+# get_uuid(&raid)
+# Get the UUID of an mdadm RAID after creation.
+sub get_uuid
+{
+	open(MDSTAT, "mdadm --detail $_[0]->{'value'} |");
+                while(<MDSTAT>) {
+                        if (/^\s+UUID\s+:\s*(.*)/) {
+				return $1;
+                                }
+                        }
+                close(MDSTAT);
 }
 
 # disk_errors(string)
@@ -240,19 +274,10 @@ if ($raid_mode eq "raidtools") {
 	&flush_file_lines();
 	}
 else {
-	# Add to /etc/mdadm.conf
-	local ($d, @devices);
-	foreach $d (&find("device", $_[0]->{'members'})) {
-		push(@devices, $d->{'value'});
-		}
+	# Add to mdadm.conf
 	local $sg = &find_value("spare-group", $_[0]->{'members'});
 	local $lref = &read_file_lines($config{'mdadm'});
-	local $lvl = &find_value('raid-level', $_[0]->{'members'});
-	$lvl = $lvl =~ /^\d+$/ ? "raid$lvl" : $lvl;
-	push(@$lref, "DEVICE ".
-		     join(" ", map { &device_to_volid($_) } @devices));
-	push(@$lref, "ARRAY $_[0]->{'value'} level=$lvl devices=".
-		     join(",", @devices).
+	push(@$lref, "ARRAY $_[0]->{'value'} uuid=$_[1]". 
 		     ($sg ? " spare-group=$sg" : ""));
 	&flush_file_lines();
 	&update_initramfs();
@@ -358,11 +383,12 @@ else {
 			push(@parities, $d->{'value'});
 			}
 		}
-	local $cmd = "mdadm --$mode --level $lvl --chunk $chunk";
+	local $cmd = "mdadm --$mode --level $lvl";
 	if ($_[2]) {
 		push(@devices, "missing");
 		}
 	$cmd .= " --layout $layout" if ($layout);
+	$cmd .= " --chunk $chunk" if ($chunk);
 	$cmd .= " --raid-devices ".scalar(@devices);
 	$cmd .= " --spare-devices ".scalar(@spares) if (@spares);
 	$cmd .= " --force" if ($_[1]);
@@ -455,7 +481,7 @@ sub grow
 {
 if ($raid_mode eq "mdadm") {
 	# Call mdadm command to add
-	$cmd="mdadm --grow $_[0]->{'value'} -n $_[1] 2>&1";
+	$cmd="mdadm -G $_[0]->{'value'} -n $_[1] 2>&1";
 	local $out = &backquote_logged(
 		$cmd);
 	&error(&text('emdadmgrow', "<tt>'$cmd' -> $out</tt>")) if ($?);
@@ -468,17 +494,15 @@ sub convert_raid
 {
 if ($raid_mode eq "mdadm") {
 	if ($_[2]) {
+		# Use backup file in case something goes wrong during critical section of reshape
+		$raid_device_short = $_[0]->{'value'};
+		$raid_device_short =~ s/\/dev\///;
+		$date = `date \+\%Y\%m\%d-\%H\%M`;
+		chomp($date);
+		$backup_file = "/raid-level-convert-$raid_device_short-$date.bck";
+
 		# Call mdadm command to convert
-		$cmd="mdadm --grow $_[0]->{'value'} --level $_[3]";
-		$grow_by = $_[2] - $_[1];
-		if ($grow_by == 1) {
-			$raid_device_short = $_[0]->{'value'};
-        		$raid_device_short =~ s/\/dev\///;
-			$date = `date \+\%Y\%m\%d-\%H\%M`;
-			chomp($date);
-			$cmd .= " --backup-file /tmp/convert-$raid_device_short-$date";
-		}
-		$cmd .= " -n $_[2]  2>&1";
+		$cmd="mdadm -G $_[0]->{'value'} -l $_[3] -n $_[2] --backup-file $backup_file 2>&1";
         
 		local $out = &backquote_logged(
 			$cmd);
@@ -507,10 +531,10 @@ if ($raid_mode eq "mdadm") {
 	# Call mdadm commands to fail and remove
 	local $out = &backquote_logged(
 		"mdadm --manage $_[0]->{'value'} --fail $_[1] 2>&1");
-	&error(&text('emdadfail', "<tt>$out</tt>")) if ($?);
+	&error(&text('emdadmfail', "<tt>$out</tt>")) if ($?);
 	local $out = &backquote_logged(
 		"mdadm --manage $_[0]->{'value'} --remove $_[1] 2>&1");
-	&error(&text('emdadremove', "<tt>$out</tt>")) if ($?);
+	&error(&text('emdadmremove', "<tt>$out</tt>")) if ($?);
 
 	# Remove device from mdadm.conf
 	local $lref = &read_file_lines($config{'mdadm'});
@@ -544,8 +568,20 @@ if ($raid_mode eq "mdadm") {
 	# Call mdadm commands to remove
 	local $out = &backquote_logged(
 		"mdadm --manage $_[0]->{'value'} --remove detached 2>&1");
-	&error(&text('emdadremove', "<tt>$out</tt>")) if ($?);
+	&error(&text('emdadmremove', "<tt>$out</tt>")) if ($?);
 	}
+}
+
+# replace_partition(&raid, device, spare) 
+# Hot replaces a data disk with a spare disk
+sub replace_partition
+{
+if ($raid_mode eq "mdadm") {
+        # Call mdadm commands to replace
+        local $out = &backquote_logged(
+                "mdadm --replace $_[0]->{'value'} $_[1] --with $_[2] 2>&1");
+        &error(&text('emdadmreplace', "<tt>$out</tt>")) if ($?);
+        }
 }
 
 # directive_lines(&directive, indent)
@@ -585,34 +621,7 @@ else { return $v[0]->{'value'}; }
 # Returns an array of  directory, type, mounted
 sub device_status
 {
-@mounted = &mount::list_mounted() if (!@mounted);
-@mounts = &mount::list_mounts() if (!@mounts);
-local $label = &fdisk::get_label($_[0]);
-local $volid = &fdisk::get_volid($_[0]);
-
-local ($mounted) = grep { &same_file($_->[1], $_[0]) ||
-			  $_->[1] eq "LABEL=$label" ||
-			  $_->[1] eq "UUID=$volid" } @mounted;
-local ($mount) = grep { &same_file($_->[1], $_[0]) ||
-			$_->[1] eq "LABEL=$label" ||
-		        $_->[1] eq "UUID=$volid" } @mounts;
-if ($mounted) { return ($mounted->[0], $mounted->[2], 1,
-			&indexof($mount, @mounts),
-			&indexof($mounted, @mounted)); }
-elsif ($mount) { return ($mount->[0], $mount->[2], 0,
-			 &indexof($mount, @mounts)); }
-if (!scalar(@physical_volumes)) {
-	@physical_volumes = ();
-	foreach $vg (&lvm::list_volume_groups()) {
-		push(@physical_volumes,
-			&lvm::list_physical_volumes($vg->{'name'}));
-		}
-	}
-foreach $pv (@physical_volumes) {
-	return ( $pv->{'vg'}, "lvm", 1)
-		if ($pv->{'device'} eq $_[0]);
-	}
-return ();
+return &fdisk::device_status($_[0]);
 }
 
 # find_free_partitions(&skip, showtype, showsize)
@@ -622,7 +631,10 @@ sub find_free_partitions
 &foreign_require("fdisk");
 &foreign_require("mount");
 &foreign_require("lvm");
-local %skip = map { $_, 1 } @{$_[0]};
+local %skip;
+if ($_[0]) {
+	%skip = map { $_, 1 } @{$_[0]};
+	}
 local %used;
 local $c;
 local $conf = &get_raidtab();
@@ -635,11 +647,11 @@ local @disks;
 local $d;
 foreach $d (&fdisk::list_disks_partitions()) {
 	foreach $p (@{$d->{'parts'}}) {
-		next if ($used{$p->{'device'}} || $p->{'extended'} ||
-			 $skip{$p->{'device'}});
+		next if ($used{$p->{'device'}} || $used{$d->{'device'}} ||
+			 $p->{'extended'} || $skip{$p->{'device'}});
 		local @st = &device_status($p->{'device'});
 		next if (@st);
-		$tag = &fdisk::tag_name($p->{'type'});
+		$tag = $p->{'type'} ? &fdisk::tag_name($p->{'type'}) : undef;
 		$p->{'blocks'} =~ s/\+$//;
 		push(@disks, [ $p->{'device'},
 			       $p->{'desc'}.
@@ -809,6 +821,14 @@ sub get_mdadm_version
 local $out = `mdadm --version 2>&1`;
 local $ver = $out =~ /\s+v([0-9\.]+)/ ? $1 : undef;
 return wantarray ? ( $ver, $out ) : $ver;
+}
+
+# supports_replace()
+# Only kernels with version 3.3 and above support the hot replace feature
+sub supports_replace
+{
+my $out = &backquote_command("uname -r 2>/dev/null </dev/null");
+return $out =~ /^(\d+)\.(\d+)/ && $1 == 3 && $2 >= 3;
 }
 
 1;

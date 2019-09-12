@@ -11,7 +11,7 @@ chop($v = `cat $dir/version`);
 print "Copying $dir to /opt/webmin ..\n";
 system("rm -rf /opt/webmin");
 mkdir("/opt/webmin", 0755);
-system("cd $dir ; tar cf - . | (cd /opt/webmin ; tar xf -)");
+system("cd $dir && /opt/csw/bin/gtar cf - . | (cd /opt/webmin ; /opt/csw/bin/gtar xf -)");
 open(MODE, ">/opt/webmin/install-type");
 print MODE "solaris-pkg\n";
 close(MODE);
@@ -21,7 +21,7 @@ system("chmod -R og-rxw /opt/webmin");
 print ".. done\n\n";
 
 print "Deleting non-Solaris modules ..\n";
-system("cd /opt/webmin ; rm -rf /opt/webmin/{adsl-client,exports,fdisk,firewall,frox,grub,heartbeat,idmapd,ipsec,krb5,lilo,lvm,ppp-client,pptp-client,pptp-server,raid,shorewall,smart-status,vgetty,ldap-client}");
+system("cd /opt/webmin ; rm -rf /opt/webmin/{adsl-client,exports,fdisk,firewall,frox,grub,heartbeat,idmapd,ipsec,krb5,lilo,lvm,ppp-client,pptp-client,pptp-server,raid,shorewall,smart-status,vgetty,ldap-client,iscsi-server,iscsi-client,iscsi-target,bsdfdisk,firewalld}");
 print ".. done\n\n";
 
 print "Setting Perl path to /usr/bin/perl ..\n";

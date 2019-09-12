@@ -24,6 +24,10 @@ by useradmin::list_users.
 =cut
 sub can_edit_passwd
 {
+if ($access{'self'} && $_[0]->[0] eq $remote_user) {
+	# Self-editing override is enabled
+	return 1;
+	}
 if ($access{'mode'} == 0) {
 	# Can change any
 	return 1;
@@ -42,10 +46,10 @@ elsif ($access{'mode'} == 5) {
 	return 0 if (&indexof($_[0]->[0],
 			      split(/\s+/, $access{'notusers'})) >= 0);
 	local $g = getgrgid($_[0]->[3]);
-	return 1 if (&indexof($g, split(/\s+/, $access{'users'})) >= 0);
+	return 1 if (&indexof($g, split(/\s+/, $access{'groups'})) >= 0);
 	if ($access{'sec'}) {
 		local $gname;
-		foreach $gname (split(/\s+/, $access{'users'})) {
+		foreach $gname (split(/\s+/, $access{'groups'})) {
 			local @g = getgrnam($gname);
 			return 1 if (&indexof($_[0]->[0],
 					      split(/\s+/, $g[3])) >= 0);

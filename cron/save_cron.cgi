@@ -19,6 +19,16 @@ else {
 	$job->{'nolog'} = $oldjob->{'nolog'};
 	}
 
+# Check if this user is allowed to execute cron jobs
+if (&supports_users()) {
+	&can_use_cron($in{'user'}) ||
+		&error(&text('save_eallow', $in{'user'}));
+	}
+
+# Check module access control
+&can_edit_user(\%access, $in{'user'}) ||
+	&error(&text('save_ecannot', $in{'user'}));
+
 @files = &unique((map { $_->{'file'} } @jobs),
 	         "$config{'cron_dir'}/$in{'user'}");
 foreach $f (@files) { &lock_file($f); }
@@ -49,13 +59,8 @@ if ($access{'command'}) {
 else {
 	$job->{'command'} = $oldjob->{'command'};
 	}
-$job->{'comment'} = $in{'comment'};
-&unconvert_comment($job);
 
 if (&supports_users()) {
-	# Check if this user is allowed to execute cron jobs
-	&can_use_cron($in{'user'}) ||
-		&error(&text('save_eallow', $in{'user'}));
 	$job->{'user'} = $in{'user'};
 	}
 
@@ -65,9 +70,8 @@ if (defined($in{'range_def'})) {
 	&unconvert_range($job);
 	}
 
-# Check module access control
-&can_edit_user(\%access, $in{'user'}) ||
-	&error(&text('save_ecannot', $in{'user'}));
+$job->{'comment'} = $in{'comment'};
+&unconvert_comment($job);
 
 if (!$in{'new'}) {
 	# Editing an existing job
@@ -112,7 +116,7 @@ if ($in{'saverun'}) {
 	}
 else {
 	# Just go back to main menu
-	&redirect("");
+	&redirect("index.cgi?search=".&urlize($in{'search'}));
 	}
 
 

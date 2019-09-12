@@ -8,7 +8,6 @@ if (-r 'mysql-lib.pl') {
 else {
 	require './postgresql-lib.pl';
 	}
-require './view-lib.pl';
 
 if ($config{'charset'}) {
 	$main::force_charset = $config{'charset'};
@@ -206,7 +205,9 @@ print "<table width=100% cellspacing=0 cellpadding=0>\n";
 
 if ($in{'field'}) {
 	# Show details of simple search
-	print "<tr> <td><b>",&text('view_searchhead', "<tt>$in{'for'}</tt>",
+	my $msg = $in{'match'} == 2 || $in{'match'} == 3 ?
+			'view_searchheadnot' : 'view_searchhead';
+	print "<tr> <td><b>",&text($msg, "<tt>$in{'for'}</tt>",
 			   "<tt>$in{'field'}</tt>"),"</b></td>\n";
 	print "<td align=right><a href='view_table.cgi?db=$in{'db'}&",
 	      "table=$in{'table'}$sortargs'>$text{'view_searchreset'}</a></td> </tr>\n";
@@ -241,8 +242,9 @@ print $sorthids;
 $check = !defined($in{'row'}) && !$in{'new'} && $keyed;
 if ($total || $in{'new'}) {
 	# Get the rows of data, and show the table header
-	$d = &execute_sql_safe($in{'db'},
-		"select * from ".&quote_table($in{'table'})." $search $sortsql $limitsql");
+	$sql = "select * from ".&quote_table($in{'table'}).
+	       " $search $sortsql $limitsql";
+	$d = &execute_sql_safe($in{'db'}, $sql);
 	@data = @{$d->{'data'}};
 	@tds = $check ? ( "width=5" ) : ( );
 	($has_blob) = grep { &is_blob($_) } @str;
@@ -375,7 +377,7 @@ if ($total || $in{'new'}) {
 				if ($displayconfig{'blob_mode'} &&
 				    &is_blob($str[$j]) && $c ne '') {
 					# Show download link for blob
-					push(@cols, "<a href='download.cgi?db=$in{'db'}&table=$in{'table'}&start=$in{'start'}".$searchargs.$sortargs."&row=$i&col=$j'>$text{'view_download'}</a>");
+					push(@cols, &ui_link("download.cgi?db=$in{'db'}&table=$in{'table'}&start=$in{'start'}".$searchargs.$sortargs."&row=$i&col=$j",$text{'view_download'}));
 					}
 				else {
 					# Just show text (up to limit)
@@ -399,6 +401,7 @@ if ($total || $in{'new'}) {
 		}
 	print &ui_columns_end();
 	print &ui_links_row(\@rowlinks);
+	print &text('view_sqlrun', "<tt>".&html_escape($sql)."</tt>")."<p>\n";
 	}
 else {
 	print "<b>$text{'view_none'}</b> <p>\n";
@@ -465,14 +468,14 @@ if (!$in{'field'} && $total > $displayconfig{'perpage'}) {
 
 if ($access{'edonly'}) {
 	&ui_print_footer("edit_dbase.cgi?db=$in{'db'}",$text{'dbase_return'},
-		"", $text{'index_return'});
+		 &get_databases_return_link($in{'db'}), $text{'index_return'});
 	}
 else {
 	&ui_print_footer("edit_table.cgi?db=$in{'db'}&table=".
 			 &urlize($in{'table'}),
 			$text{'table_return'},
 			"edit_dbase.cgi?db=$in{'db'}", $text{'dbase_return'},
-			"", $text{'index_return'});
+			&get_databases_return_link($in{'db'}), $text{'index_return'});
 	}
 
 # column_sort_link(name)

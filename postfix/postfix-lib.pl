@@ -15,26 +15,33 @@ do 'aliases-lib.pl';
 $config{'perpage'} ||= 20;      # a value of 0 can cause problems
 
 # Get the saved version number
-if (&open_readfile(VERSION, "$module_config_directory/version")) {
+$version_file = "$module_config_directory/version";
+if (&open_readfile(VERSION, $version_file)) {
 	chop($postfix_version = <VERSION>);
 	close(VERSION);
+	my @vst = stat($version_file);
+	my @cst = stat(&has_command($config{'postfix_config_command'}));
+	if (@cst && $cst[9] > $vst[9]) {
+		# Postfix was probably upgraded
+		$postfix_version = undef;
+		}
 	}
 
 if (!$postfix_version) {
 	# Not there .. work it out
 	if (&has_command($config{'postfix_config_command'}) &&
-	    &backquote_command("$config{'postfix_config_command'} mail_version 2>&1", 1) =~ /mail_version\s*=\s*(.*)/) {
+	    &backquote_command("$config{'postfix_config_command'} -d mail_version 2>&1", 1) =~ /mail_version\s*=\s*(.*)/) {
 		# Got the version
 		$postfix_version = $1;
 		}
 
 	# And save for other callers
-	&open_tempfile(VERSION, ">$module_config_directory/version", 0, 1);
+	&open_tempfile(VERSION, ">$version_file", 0, 1);
 	&print_tempfile(VERSION, "$postfix_version\n");
 	&close_tempfile(VERSION);
 	}
 
-if ($postfix_version >= 2) {
+if (&compare_version_numbers($postfix_version, 2) >= 0) {
 	$virtual_maps = "virtual_alias_maps";
 	$ldap_timeout = "ldap_timeout";
 	}
@@ -121,8 +128,8 @@ foreach my $l (@$lref) {
 if (!defined($out)) {
 	# Fall back to asking Postfix
 	# -h tells postconf not to output the name of the parameter
-	$out = &backquote_command(
-	  "$config{'postfix_config_command'} -c $config_dir -h $name 2>&1", 1);
+	$out = &backquote_command("$config{'postfix_config_command'} -c $config_dir -h ".
+				  quotemeta($name)." 2>/dev/null", 1);
 	if ($?) {
 		&error(&text('query_get_efailed', $name, $out));
 		}
@@ -130,6 +137,10 @@ if (!defined($out)) {
 		return undef;
 		}
 	chop($out);
+	}
+else {
+	# Trim trailing whitespace
+	$out =~ s/\s+$//;
 	}
 if ($key) {
 	# If the value asked for was like foo:bar, extract from the value
@@ -234,19 +245,23 @@ sub check_postfix
 #
 sub reload_postfix
 {
-    $access{'startstop'} || &error($text{'reload_ecannot'});
     if (is_postfix_running())
     {
-	if (check_postfix()) { &error("$text{'check_error'}"); }
-	my $ex;
+	if (check_postfix()) {
+		return $text{'check_error'};
+		}
+	my $cmd;
 	if (!$config{'reload_cmd'}) {
-		$ex = &system_logged("$config{'postfix_control_command'} -c $config_dir reload >/dev/null 2>&1");
+		$cmd = "$config{'postfix_control_command'} -c $config_dir ".
+		       "reload";
 		}
 	else {
-		$ex = &system_logged("$config{'reload_cmd'} >/dev/null 2>&1");
+		$cmd = $config{'reload_cmd'};
 		}
-	if ($ex) { &error($text{'reload_efailed'}); }
+	my $ex = &system_logged("$cmd >/dev/null 2>&1");
+	return $ex ? ($out || "$cmd failed") : undef;
     }
+    return undef;
 }
 
 # stop_postfix()
@@ -551,9 +566,9 @@ sub save_options
 
     foreach $key (keys %options)
     {
-	if ($key =~ /_def/)
+	if ($key =~ /_def$/)
 	{
-	    (my $param = $key) =~ s/_def//;
+	    (my $param = $key) =~ s/_def$//;
 	    my $value = $options{$key} eq "__USE_FREE_FIELD__" ?
 			$options{$param} : $options{$key};
 	    $value =~ s/\0/, /g;
@@ -588,7 +603,13 @@ sub regenerate_aliases
 	foreach $map (get_maps_types_files(get_real_value("alias_maps")))
 	{
 	    if (&file_map_type($map->[0])) {
-		    $out = &backquote_logged("$config{'postfix_aliases_table_command'} -c $config_dir $map->[1] 2>&1");
+		    my $cmd = $config{'postfix_aliases_table_command'};
+		    if ($cmd =~ /newaliases/) {
+			$cmd .= " -oA$map->[1]";
+		    } else {
+			$cmd .= " $map->[1]";
+		    }
+		    $out = &backquote_logged("$cmd 2>&1");
 		    if ($?) { &error(&text('regenerate_table_efailed', $map->[1], $out)); }
 	    }
 	}
@@ -618,6 +639,11 @@ sub regenerate_bcc_table
 sub regenerate_relay_recipient_table
 { 
     &regenerate_any_table("relay_recipient_maps");
+}
+
+sub regenerate_sender_restrictions_table
+{
+    &regenerate_any_table("smtpd_sender_restrictions");
 }
 
 # regenerate_recipient_bcc_table()
@@ -653,6 +679,13 @@ sub regenerate_canonical_table
 sub regenerate_transport_table
 {
     &regenerate_any_table("transport_maps");
+}
+
+# regenerate_dependent_table
+#
+sub regenerate_dependent_table
+{
+    &regenerate_any_table("sender_dependent_default_transport_maps");
 }
 
 
@@ -716,6 +749,7 @@ sub get_maps
 			 $_[2] ? &get_maps_types_files($_[2]) :
 			         &get_maps_types_files(&get_real_value($_[0]));
 	my $number = 0;
+	$maps_cache{$_[0]} = [ ];
 	foreach my $maps_type_file (@maps_files)
 	{
 	    my ($maps_type, $maps_file) = @$maps_type_file;
@@ -832,7 +866,7 @@ sub generate_map_edit
     }
 
     # Make sure the user is allowed to edit them
-    foreach my $f (&get_maps_types_files(&get_current_value($_[0]))) {
+    foreach my $f (&get_maps_types_files(&get_real_value($_[0]))) {
       if (&file_map_type($f->[0])) {
 	  &is_under_directory($access{'dir'}, $f->[1]) ||
 		&error(&text('mapping_ecannot', $access{'dir'}));
@@ -840,7 +874,7 @@ sub generate_map_edit
     }
 
     # Make sure we *can* edit them
-    foreach my $f (&get_maps_types_files(&get_current_value($_[0]))) {
+    foreach my $f (&get_maps_types_files(&get_real_value($_[0]))) {
        my $err = &can_access_map(@$f);
        if ($err) {
 	  print "<b>",&text('map_cannot', $err),"</b><p>\n";
@@ -852,8 +886,12 @@ sub generate_map_edit
     my $nt = $_[3] || $text{'mapping_name'};
     my $vt = $_[4] || $text{'mapping_value'};
 
-    local @links = ( "<a href='edit_mapping.cgi?map_name=$_[0]'>".
-		      $text{'new_mapping'}."</a>",);
+    local @links = ( &ui_link("edit_mapping.cgi?map_name=$_[0]",
+			      $text{'new_mapping'}),);
+    if ($access{'manual'} && &can_map_manual($_[0])) {
+	push(@links, &ui_link("edit_manual.cgi?map_name=$_[0]",
+			      $text{'new_manual'}));
+	}
 
     if ($#{$mappings} ne -1)
     {
@@ -931,17 +969,6 @@ sub generate_map_edit
         print "<b>$text{'mapping_none'}</b><p>\n";
         print &ui_links_row(\@links);
     }
-
-    # Manual edit button
-    if ($access{'manual'} && &can_map_manual($_[0])) {
-	    print &ui_hr();
-	    print &ui_buttons_start();
-	    print &ui_buttons_row("edit_manual.cgi", $text{'new_manual'},
-				  $text{'new_manualmsg'},
-				  &ui_hidden("map_name", $_[0]));
-	    print &ui_buttons_end();
-	    }
-
 }
 
 
@@ -1271,7 +1298,7 @@ foreach $trans (@{$maps}) {
 return $max_number+1;
 }
 
-# postfix_mail_file(user)
+# postfix_mail_file(user|user-details-list)
 sub postfix_mail_file
 {
 local @s = &postfix_mail_system();
@@ -1442,7 +1469,17 @@ if (defined($save_file)) {
 # Returns the value of a parameter, with $ substitions done
 sub get_real_value
 {
-my $v = &get_current_value($_[0]);
+my ($name) = @_;
+my $v = &get_current_value($name);
+if ($postfix_version >= 2.1 && $v =~ /\$/) {
+	# Try to use the built-in command to expand the param
+	my $out = &backquote_command("$config{'postfix_config_command'} -c $config_dir -x -h ".
+				     quotemeta($name)." 2>/dev/null", 1);
+	if (!$? && $out !~ /warning:.*unknown\s+parameter/) {
+		chop($out);
+		return $out;
+		}
+	}
 $v =~ s/\$(\{([^\}]+)\}|([A-Za-z0-9\.\-\_]+))/get_real_value($2 || $3)/ge;
 return $v;
 }
@@ -1650,7 +1687,10 @@ return ($prog->{'enabled'} ? "" : "#").
 sub redirect_to_map_list
 {
 local ($map_name) = @_;
-if ($map_name =~ /transport/) { &redirect("transport.cgi"); }
+if ($map_name =~ /sender_dependent_default_transport_maps/) {
+	redirect("dependent.cgi");
+	}
+elsif ($map_name =~ /transport/) { &redirect("transport.cgi"); }
 elsif ($map_name =~ /canonical/) { &redirect("canonical.cgi"); }
 elsif ($map_name =~ /virtual/) { &redirect("virtual.cgi"); }
 elsif ($map_name =~ /relocated/) { &redirect("relocated.cgi"); }
@@ -1659,7 +1699,7 @@ elsif ($map_name =~ /body/) { &redirect("body.cgi"); }
 elsif ($map_name =~ /sender_bcc/) { &redirect("bcc.cgi?mode=sender"); }
 elsif ($map_name =~ /recipient_bcc/) { &redirect("bcc.cgi?mode=recipient"); }
 elsif ($map_name =~ /^smtpd_client_restrictions:/) { &redirect("client.cgi"); }
-elsif ($map_name =~ /relay_recipient_maps/) { &redirect("smtpd.cgi"); }
+elsif ($map_name =~ /relay_recipient_maps|smtpd_sender_restrictions/) { &redirect("smtpd.cgi"); }
 else { &redirect(""); }
 }
 
@@ -1680,6 +1720,12 @@ if ($map_name =~ /smtpd_client_restrictions:(\S+)/) {
 if ($map_name =~ /relay_recipient_maps/) {
 	&regenerate_relay_recipient_table();
 	}
+if ($map_name =~ /sender_dependent_default_transport_maps/) {
+	&regenerate_dependent_table();
+	}
+if ($map_name =~ /smtpd_sender_restrictions/) {
+	&regenerate_sender_restrictions_table();
+	}
 }
 
 # mailq_table(&qfiles)
@@ -1694,7 +1740,7 @@ foreach my $q (@$qfiles) {
 	local @cols;
 	push(@cols, { 'type' => 'checkbox', 'name' => 'file',
 		      'value' => $q->{'id'} });
-	push(@cols, "<a href='view_mailq.cgi?id=$q->{'id'}'>$q->{'id'}</a>");
+	push(@cols, &ui_link("view_mailq.cgi?id=$q->{'id'}",$q->{'id'}));
 	local $size = &nice_size($q->{'size'});
 	push(@cols, "<font size=1>$q->{'date'}</font>");
 	push(@cols, "<font size=1>".&html_escape($q->{'from'})."</font>");
@@ -1707,9 +1753,11 @@ foreach my $q (@$qfiles) {
 # Show the table and form
 print &ui_form_columns_table("delete_queues.cgi",
 	[ [ undef, $text{'mailq_delete'} ],
-	  $postfix_version >= 1.1 ? ( [ 'move', $text{'mailq_move'} ] ) : ( ),
-	  $postfix_version >= 2 ? ( [ 'hold', $text{'mailq_hold'} ],
-				    [ 'unhold', $text{'mailq_unhold'} ] ) : ( ),
+	  &compare_version_numbers($postfix_version, 1.1) >= 0 ?
+		( [ 'move', $text{'mailq_move'} ] ) : ( ),
+	  &compare_version_numbers($postfix_version, 2) >= 0 ?
+		( [ 'hold', $text{'mailq_hold'} ],
+		  [ 'unhold', $text{'mailq_unhold'} ] ) : ( ),
 	],
 	1,
 	undef,
@@ -1779,11 +1827,14 @@ return &popup_window_button("map_chooser.cgi?mapname=$mapname", 1024, 600, 1,
 # and file paths.
 sub get_maps_types_files
 {
-    $_[0] =~ /^\s*([^:]+):(\/[^,\s]*),?(.*)/ || return ( );
-    (my $returntype, $returnvalue, my $recurse) = ( $1, $2, $3 );
-
-    return ( [ $returntype, $returnvalue ],
-	     &get_maps_types_files($recurse) );
+my ($v) = @_;
+my @rv;
+foreach my $w (split(/[, \t]+/, $v)) {
+	if ($w =~ /^(proxy:)?([^:]+):(\/.*)$/) {
+		push(@rv, [ $2, $3 ]);
+		}
+	}
+return @rv;
 }
 
 # list_mysql_sources()
@@ -1868,11 +1919,12 @@ elsif ($type eq "mysql") {
 		$conf->{'dbname'} || return &text('mysql_esource', $value);
 		}
 
-	# Do we have the field and table info?
-	foreach my $need ('table', 'select_field', 'where_field') {
-		$conf->{$need} || return &text('mysql_eneed', $need);
+	if (!$conf->{"query"}) {
+		# Do we have the field and table info?
+		foreach my $need ('table', 'select_field', 'where_field') {
+			$conf->{$need} || return &text('mysql_eneed', $need);
+			}
 		}
-
 	# Try a connect, and a query
 	local $dbh = &connect_mysql_db($conf);
 	if (!ref($dbh)) {
@@ -2041,6 +2093,13 @@ if ($value =~ /^[\/\.]/) {
 		}
 	-r $cfile || &error(&text('mysql_ecfile', "<tt>$cfile</tt>"));
 	$conf = &get_backend_config($cfile);
+		
+	if ($conf->{'query'} =~ /^select\s+(\S+)\s+from\s+(\S+)\s+where\s+(\S+)\s*=\s*'\%s'/i && !$conf->{'table'}) {
+		# Try to extract table and fields from the query
+		$conf->{'select_field'} = $1;
+		$conf->{'table'} = $2;
+		$conf->{'where_field'} = $3;
+		}
 	}
 else {
 	# Backend name
@@ -2050,6 +2109,12 @@ else {
 		       "additional_conditions") {
 		local $v = &get_real_value($value."_".$k);
 		$conf->{$k} = $v;
+		}
+	if ($conf->{'query'} =~ /^select\s+(\S+)\s+from\s+(\S+)\s+where\s+(\S+)\s*=\s*'\%s'/i && !$conf->{'table'}) {
+		# Try to extract table and fields from the query
+		$conf->{'select_field'} = $1;
+		$conf->{'table'} = $2;
+		$conf->{'where_field'} = $3;
 		}
 	}
 return $conf;
@@ -2140,8 +2205,9 @@ sub list_smtpd_restrictions
 {
 return ( "permit_mynetworks",
 	 "permit_inet_interfaces",
-	 $postfix_version < 2.3 ? "reject_unknown_client"
-				: "reject_unknown_reverse_client_hostname",
+	 &compare_version_numbers($postfix_version, 2.3) < 0 ?
+		"reject_unknown_client" :
+		"reject_unknown_reverse_client_hostname",
 	 "permit_sasl_authenticated",
 	 "reject_unauth_destination",
 	 "check_relay_domains",
@@ -2154,9 +2220,11 @@ sub list_client_restrictions
 {
 return ( "permit_mynetworks",
 	 "permit_inet_interfaces",
-	 $postfix_version < 2.3 ? "reject_unknown_client"
-				: "reject_unknown_reverse_client_hostname",
+	 &compare_version_numbers($postfix_version, 2.3) < 0 ?
+		"reject_unknown_client" :
+		"reject_unknown_reverse_client_hostname",
 	 "permit_tls_all_clientcerts",
+	 "permit_sasl_authenticated",
 	);
 }
 
@@ -2194,6 +2262,49 @@ return undef;
 sub rebuild_map_cmd
 {
 return 0;
+}
+
+# valid_postfix_command(cmd)
+# Check if some command exists on the system. Strips off args.
+sub valid_postfix_command
+{
+my ($cmd) = @_;
+($cmd) = &split_quoted_string($cmd);
+return &has_command($cmd);
+}
+
+# get_all_config_files()
+# Returns a list of all possible postfix config files
+sub get_all_config_files
+{
+my @rv;
+
+# Add main config file
+push(@rv, $config{'postfix_config_file'});
+push(@rv, $config{'postfix_master'});
+
+# Add known map files
+push(@rv, &get_maps_files("alias_maps"));
+push(@rv, &get_maps_files("alias_database"));
+push(@rv, &get_maps_files("canonical_maps"));
+push(@rv, &get_maps_files("recipient_canonical_maps"));
+push(@rv, &get_maps_files("sender_canonical_maps"));
+push(@rv, &get_maps_files($virtual_maps));
+push(@rv, &get_maps_files("transport_maps"));
+push(@rv, &get_maps_files("relocated_maps"));
+push(@rv, &get_maps_files("relay_recipient_maps"));
+push(@rv, &get_maps_files("smtpd_sender_restrictions"));
+
+# Add other files in /etc/postfix
+local $cdir = &guess_config_dir();
+opendir(DIR, $cdir);
+foreach $f (readdir(DIR)) {
+	next if ($f eq "." || $f eq ".." || $f =~ /\.(db|dir|pag)$/i);
+	push(@rv, "$cdir/$f");
+	}
+closedir(DIR);
+
+return &unique(@rv);
 }
 
 1;

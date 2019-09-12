@@ -9,6 +9,7 @@ $access{'users'} || &error($text{'user_ecannot'});
 
 if ($in{'delete'}) {
 	# just delete the user
+	$main::disable_postgresql_escaping = 1;
 	&execute_sql_logged($config{'basedb'}, "drop user \"$in{'user'}\"");
 	&webmin_log("delete", "user", $in{'user'});
 	}
@@ -29,11 +30,13 @@ else {
 	else {
 		$sql .= " nocreatedb";
 		}
-	if ($in{'other'}) {
-		$sql .= " createuser";
-		}
-	else {
-		$sql .= " nocreateuser";
+	if (&get_postgresql_version() < 9.5) {
+		if ($in{'other'}) {
+			$sql .= " createuser";
+			}
+		else {
+			$sql .= " nocreateuser";
+			}
 		}
 	if (!$in{'until_def'}) {
 		$sql .= " valid until '$in{'until'}'";

@@ -106,7 +106,9 @@ print &ui_table_row($text{'edit_location'},
 		$dinfo->{'device'});
 
 # Device name
-$dev = $dinfo->{'prefix'}.$np;
+$dev = $dinfo->{'prefix'} =~ /^\/dev\/mmcblk.*/ ?
+	$dinfo->{'prefix'}.'p'.$np :
+	$dinfo->{'prefix'}.$np;
 print &ui_table_row($text{'edit_device'}, $dev);
 
 # Partition type
@@ -164,6 +166,7 @@ elsif (!$in{'new'}) {
 		$msg .= 'vm' if ($stat[1] eq 'swap');
 		$msg .= 'raid' if ($stat[1] eq 'raid');
 		$msg .= 'lvm' if ($stat[1] eq 'lvm');
+		$msg .= 'iscsi' if ($stat[1] eq 'iscsi');
 		$stat = &text($msg, "<tt>$stat[0]</tt>",
 				    "<tt>$stat[1]</tt>");
 		}
@@ -178,7 +181,8 @@ if ($stat) {
 # Partition size
 if (!$in{'new'}) {
 	print &ui_table_row($text{'edit_size'},
-		$dinfo->{'cylsize'} ? &nice_size(($pinfo->{'end'} - $pinfo->{'start'} + 1) * $dinfo->{'cylsize'}) : &text('edit_blocks', $pinfo->{'blocks'}));
+		$pinfo->{'size'} ? &nice_size($pinfo->{'size'})
+				 : &text('edit_blocks', $pinfo->{'blocks'}));
 	}
 
 # Show field for editing filesystem label
@@ -257,8 +261,9 @@ if (!$in{'new'} && !$pinfo->{'extended'}) {
 		if ($types[0] eq "swap") {
 			# Swap partition
 			print &ui_buttons_row("../mount/edit_mount.cgi",
-				$text{'edit_newmount2'}, $text{'edit_mountmsg2'},
-				&ui_hidden("type", $types[0]));
+				$text{'edit_newmount2'},$text{'edit_mountmsg2'},
+				&ui_hidden("type", $types[0]).
+				&ui_hidden("newdev", $dev));
 			}
 		else {
 			# For some filesystem
@@ -272,7 +277,8 @@ if (!$in{'new'} && !$pinfo->{'extended'}) {
 				}
 			print &ui_buttons_row("../mount/edit_mount.cgi",
 				$text{'edit_newmount'}, $text{'edit_mountmsg'},
-				undef, $dirsel);
+				&ui_hidden("newdev", $dev),
+				$dirsel);
 			}
 		}
 

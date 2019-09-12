@@ -28,11 +28,11 @@ if (!scalar(@get_config_cache)) {
 return \@get_config_cache;
 }
 
-# read_config_file(filename)
+# read_config_file(filename, [&include-parent-rv])
 # Convert a file into a list od directives
 sub read_config_file
 {
-local ($file) = @_;
+local ($file, $incrv) = @_;
 local $filedir = $file;
 $filedir =~ s/\/[^\/]+$//;
 local $lnum = 0;
@@ -92,6 +92,32 @@ foreach (@lines) {
 			push(@{$section->{'members'}}, $dir);
 			$section->{'eline'} = $lnum;
 			}
+
+		# Fix up references to other variables
+		my @w = split(/\s+/, $dir->{'value'});
+		my $changed;
+		foreach my $w (@w) {
+			if ($w =~ /^\$(\S+)/) {
+				my $var = $1;
+				my ($prev) = grep { $_->{'name'} eq $var } @rv;
+				if (!$prev && $incrv) {
+					($prev) = grep { $_->{'name'} eq $var }
+						       @$incrv;
+					}
+				if ($prev) {
+					$w = $prev->{'value'};
+					$changed = 1;
+					}
+				else {
+					$w = undef;
+					$changed = 1;
+					}
+				}
+			}
+		if ($changed) {
+			@w = grep { defined($_) } @w;
+			$dir->{'value'} = join(" ", @w);
+			}
 		push(@rv, $dir);
 		}
 	elsif (/^\s*!(include|include_try)\s+(\S+)/) {
@@ -101,7 +127,7 @@ foreach (@lines) {
 			$glob = $filedir."/".$glob;
 			}
 		foreach my $i (glob($glob)) {
-			push(@rv, &read_config_file($i));
+			push(@rv, &read_config_file($i, \@rv));
 			}
 		}
 	$lnum++;
@@ -109,11 +135,11 @@ foreach (@lines) {
 return @rv;
 }
 
-# find(name, &config, [disabled-mode], [sectionname], [sectionvalue])
+# find(name, &config, [disabled-mode], [sectionname], [sectionvalue], [first])
 # Mode 0=enabled, 1=disabled, 2=both
 sub find
 {
-local ($name, $conf, $mode, $sname, $svalue) = @_;
+local ($name, $conf, $mode, $sname, $svalue, $first) = @_;
 local @rv = grep { !$_->{'section'} &&
 		   $_->{'name'} eq $name &&
 		   ($mode == 0 && $_->{'enabled'} ||
@@ -123,7 +149,15 @@ if (defined($sname)) {
 	@rv = grep { $_->{'sectionname'} eq $sname &&
 		     $_->{'sectionvalue'} eq $svalue } @rv;
 	}
-return wantarray ? @rv : $rv[0];
+if (wantarray) {
+	return @rv;
+	}
+elsif ($first) {
+	return $rv[0];
+	}
+else {
+	return $rv[$#rv];
+	}
 }
 
 # find_value(name, &config, [disabled-mode], [sectionname], [sectionvalue])
@@ -134,8 +168,14 @@ local @rv = &find(@_);
 if (wantarray) {
 	return map { $_->{'value'} } @rv;
 	}
+elsif (!@rv) {
+	return undef;
+	}
 else {
-	return $rv[0]->{'value'};
+	# Prefer the last one that isn't self-referential
+	my @unself = grep { $_->{'value'} !~ /\$\Q$name\E/ } @rv;
+	@rv = @unself if (@unself);
+	return $rv[$#rv]->{'value'};
 	}
 }
 
@@ -161,7 +201,19 @@ return wantarray ? @rv : $rv[0];
 sub save_directive
 {
 local ($conf, $name, $value, $sname, $svalue) = @_;
-local $dir = ref($name) ? $name : &find($name, $conf, 0, $sname, $svalue);
+local $dir;
+if (ref($name)) {
+	# Old directive given
+	$dir = $name;
+	}
+else {
+	# Find by name, by prefer those that aren't self-referential
+	my @dirs = &find($name, $conf, 0, $sname, $svalue, 1);
+	($dir) = grep { $_->{'value'} !~ /\$\Q$name\E/ } @dirs;
+	if (!$dir) {
+		$dir = $dirs[0];
+		}
+	}
 local $newline = ref($name) ? "$name->{'name'} = $value" : "$name = $value";
 if ($sname) {
 	$newline = "  ".$newline;
@@ -359,8 +411,18 @@ return $text{'default'};
 # Returns the dovecot version number, or undef if not available
 sub get_dovecot_version
 {
-local $out = `$config{'dovecot'} --version 2>&1`;
+local $out = &backquote_command("$config{'dovecot'} --version 2>&1");
 return $out =~ /([0-9\.]+)/ ? $1 : undef;
+}
+
+# version_atleast(ver)
+# Returns 1 if running at least some version or above
+sub version_atleast
+{
+local ($wantver) = @_;
+local $ver = &get_dovecot_version();
+return 0 if (!$ver);
+return &compare_version_numbers($wantver, $ver) >= 0;
 }
 
 sub list_lock_methods

@@ -2,8 +2,14 @@
 # Add or update a server or group from the webmin servers module
 
 require './firewall-lib.pl';
-$access{'cluster'} || &error($text{'ecluster'});
 &ReadParse();
+if (&get_ipvx_version() == 6) {
+	require './firewall6-lib.pl';
+	}
+else {
+	require './firewall4-lib.pl';
+	}
+$access{'cluster'} || &error($text{'ecluster'});
 &foreign_require("servers", "servers-lib.pl");
 @allservers = grep { $_->{'user'} } &servers::list_servers();
 
@@ -23,8 +29,9 @@ else {
 	&error_setup($text{'add_gerr'});
 	$msg = &text('add_gmsg', $in{'group'});
 	}
+@add || &error($text{'add_enone'});
 
-&ui_print_header(undef, $text{'add_title'}, "");
+&ui_print_header($text{"index_title_v${ipvx}"}, $text{'add_title'}, "");
 print "<b>$msg</b><p>\n";
 
 # Setup error handler for down hosts
@@ -38,7 +45,7 @@ $add_error_msg = join("", @_);
 foreach $s (@add) {
 	$add_error_msg = undef;
 	local $host = { 'id' => $s->{'id'} };
-	local $firewall = &remote_foreign_check($s->{'host'}, "firewall");
+	local $firewall = &remote_foreign_check($s->{'host'}, $module_name);
 	if ($add_error_msg) {
 		print "$add_error_msg<p>\n";
 		next;
@@ -47,17 +54,17 @@ foreach $s (@add) {
 		print &text('add_echeck', $s->{'host'}),"<p>\n";
 		next;
 		}
-	&remote_foreign_require($s->{'host'}, "firewall", "firewall-lib.pl");
+	&remote_foreign_require($s->{'host'}, $module_name);
 
-	local $missing = &remote_foreign_call($s->{'host'}, "firewall",
+	local $missing = &remote_foreign_call($s->{'host'}, $module_name,
 					      "missing_firewall_commands");
 	if ($missing) {
-		print &text('add_emissing', "<tt>$missing</tt>"),"<p>\n";
+		print &text('add_emissing', $s->{'host'}, "<tt>$missing</tt>"),"<p>\n";
 		next;
 		}
 
-	@livetables = &remote_foreign_call($s->{'host'}, "firewall",
-				   "get_iptables_save", "iptables-save |");
+	@livetables = &remote_foreign_call($s->{'host'}, $module_name,
+			   "get_iptables_save", "ip${ipvx}tables-save |");
 	$rc = 0;
 	foreach $t (@livetables) {
 		$rc += @{$t->{'rules'}};
@@ -74,5 +81,5 @@ else {
 	&webmin_log("add", "group", $in{'group'});
 	}
 
-&ui_print_footer("cluster.cgi", $text{'cluster_return'});
+&ui_print_footer("cluster.cgi?version=${ipvx_arg}", $text{'cluster_return'});
 

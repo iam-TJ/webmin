@@ -1,22 +1,28 @@
 # htaccess-lib.pl
 # Common functions for the htaccess and htpasswd file management module
 
+use strict;
+use warnings;
+our (%config, %module_info, @remote_user_info, $user_module_config_directory,
+     $remote_user, $module_config_directory);
 BEGIN { push(@INC, ".."); };
 use WebminCore;
 &init_config();
 do 'htpasswd-file-lib.pl';
 
-@accessdirs = ( );
+our ($default_dir, @accessdirs, $directories_file, $apachemod,
+     $can_htpasswd, $can_htgroups, $can_create, $can_sync, %access);
+our ($old_uid, $old_gid);
 if ($module_info{'usermin'}) {
 	# Allowed directories are in module configuration
 	&switch_to_remote_user();
 	&create_user_config_dirs();
 	$default_dir = &resolve_links($remote_user_info[7]);
 	push(@accessdirs, $default_dir) if ($config{'home'});
-	local $d;
-	foreach $d (split(/\t+/, $config{'dirs'})) {
+	foreach my $d (split(/\t+/, $config{'dirs'})) {
 		push(@accessdirs, $d =~ /^\// ? $d : "$default_dir/$d");
 		}
+	@accessdirs = &expand_root_variables(@accessdirs);
 	$directories_file = "$user_module_config_directory/directories";
 	$apachemod = "htaccess";
 	$can_htpasswd = $config{'can_htpasswd'};
@@ -26,16 +32,15 @@ if ($module_info{'usermin'}) {
 else {
 	# Allowed directories come from ACL
 	%access = &get_module_acl();
-	local @uinfo;
-	if (&supports_users()) {
+	my @uinfo;
+	if (&supports_users() && $access{'home'} && $remote_user) {
 		# Include user home
 		@uinfo = getpwnam($remote_user);
-		if ($access{'home'} && scalar(@uinfo)) {
+		if (scalar(@uinfo)) {
 			push(@accessdirs, &resolve_links($uinfo[7]));
 			}
 		}
-	local $d;
-	foreach $d (split(/\t+/, $access{'dirs'})) {
+	foreach my $d (split(/\t+/, $access{'dirs'})) {
 		push(@accessdirs, $d =~ /^\// || !@uinfo ?
 			$d : &resolve_links("$uinfo[7]/$d"));
 		}
@@ -54,17 +59,18 @@ else {
 # users file, encryption mode, sync mode and groups file for each
 sub list_directories
 {
-local @rv;
-open(DIRS, $directories_file);
-while(<DIRS>) {
+my @rv;
+my $fh;
+open($fh, $directories_file) || return ();
+while(<$fh>) {
 	s/\r|\n//g;
-	local @dir = split(/\t+/, $_);
+	my @dir = split(/\t+/, $_);
 	next if (!@dir);
 	if ($_[0] || -d $dir[0] && -r "$dir[0]/$config{'htaccess'}") {
 		push(@rv, \@dir);
 		}
 	}
-closedir(DIRS);
+close($fh);
 return @rv;
 }
 
@@ -73,12 +79,14 @@ return @rv;
 # returned by list_directories
 sub save_directories
 {
-local $d;
-&open_tempfile(DIRS, ">$directories_file");
+my $d;
+my $fh = "DIRS";
+&open_tempfile($fh, ">$directories_file");
 foreach $d (@{$_[0]}) {
-	&print_tempfile(DIRS, join("\t", @$d),"\n");
+	my @safed = map { defined($_) ? $_ : "" } @$d;
+	&print_tempfile($fh, join("\t", @safed),"\n");
 	}
-&close_tempfile(DIRS);
+&close_tempfile($fh);
 }
 
 # can_access_dir(dir)
@@ -86,7 +94,7 @@ foreach $d (@{$_[0]}) {
 sub can_access_dir
 {
 return 1 if (!$ENV{'GATEWAY_INTERFACE'});
-local $d;
+my $d;
 foreach $d (@accessdirs) {
 	return 1 if (&is_under_directory(&resolve_links($d),
 					 &resolve_links($_[0])));
@@ -101,7 +109,7 @@ sub switch_user
 {
 if (!$module_info{'usermin'} &&
     $access{'user'} ne 'root' && !defined($old_uid) && &supports_users()) {
-	local @uinfo = getpwnam($access{'user'} eq "*" ? $remote_user
+	my @uinfo = getpwnam($access{'user'} eq "*" ? $remote_user
 						       : $access{'user'});
 	$old_uid = $>;
 	$old_gid = $);
@@ -117,6 +125,23 @@ if (defined($old_uid)) {
 	$) = $old_gid;
 	$old_uid = $old_gid = undef;
 	}
+}
+
+# expand_root_variables(dir, ...)
+# Replaces $USER and $HOME in a list of dirs
+sub expand_root_variables
+{
+my @rv;
+my %hash = ( 'user' => $remote_user_info[0],
+		'home' => $remote_user_info[7],
+		'uid' => $remote_user_info[2],
+		'gid' => $remote_user_info[3] );
+my @ginfo = getgrgid($remote_user_info[3]);
+$hash{'group'} = $ginfo[0];
+foreach my $dir (@_) {
+	push(@rv, &substitute_template($dir, \%hash));
+	}
+return @rv;
 }
 
 1;

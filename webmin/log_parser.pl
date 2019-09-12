@@ -31,6 +31,12 @@ elsif ($action eq 'theme') {
 elsif ($action eq 'deletecache') {
 	return &text('log_deletecache', $object);
 	}
+elsif ($action eq 'letsencryptdns' || $action eq 'letsencryptcleanup') {
+	return &text('log_'.$action, $object);
+	}
+elsif ($type eq 'webmincron') {
+	return &text('log_'.$action.'_webmincron', $object);
+	}
 elsif ($text{"log_$action"}) {
 	return $text{"log_$action"};
 	}

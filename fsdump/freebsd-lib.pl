@@ -29,9 +29,9 @@ print &ui_table_row(&hlink($text{'dump_dest'}, "dest"),
 	       &ui_textbox("file", $_[0]->{'file'}, 50).
 	       " ".&file_chooser_button("file")."<br>" ],
 	  [ 1, &text('dump_host',
-		     &ui_textbox("host", $_[0]->{'host'}, 15),
-		     &ui_textbox("huser", $_[0]->{'huser'}, 8),
-		     &ui_textbox("hfile", $_[0]->{'hfile'}, 20)) ] ]), 3);
+		     &ui_textbox("host", $_[0]->{'host'}, 20),
+		     &ui_textbox("huser", $_[0]->{'huser'}, 15),
+		     &ui_textbox("hfile", $_[0]->{'hfile'}, 40)) ] ]), 3);
 
 if ($_[0]->{'fs'} eq 'tar') {
 	# Display gnutar options
@@ -197,11 +197,12 @@ if ($_[0]->{'fs'} eq 'tar') {
 	$cmd .= " -h" if ($_[0]->{'links'});
 	$cmd .= " -l" if ($_[0]->{'xdev'});
 	$cmd .= " -F \"$tapecmd $_[0]->{'id'}\""
-		if (!$_[0]->{'gzip'});
+		if (!$_[0]->{'gzip'} && ($_[0]->{'file'} =~ /^\/dev/ ||
+					 $_[0]->{'hfile'} =~ /^\/dev/));
 	$cmd .= " --rsh-command=$_[0]->{'rsh'}"
 		if ($_[0]->{'rsh'} && $_[0]->{'host'});
 	$cmd .= " $_[0]->{'extra'}" if ($_[0]->{'extra'});
-	$cmd .= " '$_[0]->{'dir'}'";
+	$cmd .= " ".quotemeta(&date_subs($_[0]->{'dir'}));
 	}
 else {
 	# Construct ufs dump command
@@ -215,7 +216,7 @@ else {
 		}
 	$cmd .= " -h 0" if ($_[0]->{'honour'});
 	$cmd .= " $_[0]->{'extra'}" if ($_[0]->{'extra'});
-	$cmd .= " '$_[0]->{'dir'}'";
+	$cmd .= " ".quotemeta(&date_subs($_[0]->{'dir'}));
 	}
 
 &system_logged("sync");
@@ -261,9 +262,9 @@ print &ui_table_row(&hlink($text{'restore_src'}, "rsrc"),
 	       &ui_textbox("file", $_[1]->{'file'}, 50).
 	       " ".&file_chooser_button("file")."<br>" ],
 	  [ 1, &text('dump_host',
-		     &ui_textbox("host", $_[1]->{'host'}, 15),
-		     &ui_textbox("huser", $_[1]->{'huser'}, 8),
-		     &ui_textbox("hfile", $_[1]->{'hfile'}, 20)) ] ]), 3, $tds);
+		     &ui_textbox("host", $_[1]->{'host'}, 20),
+		     &ui_textbox("huser", $_[1]->{'huser'}, 15),
+		     &ui_textbox("hfile", $_[1]->{'hfile'}, 40)) ] ]), 3, $tds);
 
 if ($_[0] eq 'tar') {
 	# tar restore options

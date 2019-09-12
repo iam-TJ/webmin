@@ -152,3 +152,88 @@ More German translation updates, thanks to Raymond Vetter.
 More French translation updates, thanks to ButterflyOfFire.
 ---- Changes since 1.570 ----
 Even more German translation updates, thanks to Raymond Vetter.
+Added UTF-8 encodings for languages using the iso-8859-2, like Czech and Polish.
+Catalan updates, thanks to Jaume Badiella.
+Norwegian translation updates, thanks to Stein-Aksel Basma.
+The MySQL, PostgreSQL, Filesystem Backup and Backup Configuration Files modules now all support the use of Webmin variable substitutions in backup paths (like $HOSTNAME) via a new Module Config option.
+---- Changes since 1.580 ----
+Even more German translation updates, thanks to Raymond Vetter.
+More Dutch updates, thanks to Gandyman.
+Catalan updates, thanks to Jaume Badiella.
+Norwegian updates, thanks to Stein-Aksel Basma.
+All languages now have UTF-8 encoded variants, as well as their native character sets.
+Added support for Ubuntu 12.04.
+---- Changes since 1.590 ----
+Even more German translation updates, thanks to Raymond Vetter.
+Norwegian updates, thanks to Stein-Aksel Basma.
+Dutch translation updates, thanks to Gandyman.
+Switch order of command and mode in debug logs to make it clear that "mode=X" is part of the log, not part of the command.
+Added the new Gray Framed Theme, and made it the default for new installs.
+---- Changes since 1.600 ----
+Even more German translation updates, thanks to Raymond Vetter.
+Catalan updates, thanks to Jaume Badiella.
+---- Changes since 1.610 ----
+Norwegian updates, thanks to Stein-Aksel Basma.
+Catalan updates, thanks to Jaume Badiella.
+Yet more German translation updates, thanks to Raymond Vetter.
+Polish translation updates from Piotr Kozica.
+---- Changes since 1.620 ----
+More German translation updates, thanks to Raymond Vetter.
+Polish translation updates from Piotr Kozica.
+Norwegian updates, thanks to Stein-Aksel Basma.
+Improved FreeBSD 8 and 9 support across multiple modules.
+Hungarian translation updates from Balázs Zoltán.
+---- Changes since 1.650 ----
+More German translation updates, thanks to Raymond Vetter.
+Norwegian updates, thanks to Stein-Aksel Basma.
+---- Changes since 1.660 ----
+More German translation updates, thanks to Raymond Vetter.
+Norwegian updates, thanks to Stein-Aksel Basma.
+Catalan updates, thanks to Jaume Badiella.
+IPv6 access control now match an address exactly, unless a network size is entered.
+FTP uploads and downloads to IPv6-only servers now work properly, thanks to support for the EPSV protocol command.
+Added a Bahasa Malaysia translation, thanks to Nawawi Jamili, Nizam Adnan and Weldan Jamili.
+Added filtering for lists in the user, group and file chooser popups, thanks to a patch from Nawawi Jamili.
+---- Changes since 1.670 ----
+More German translation updates, thanks to Raymond Vetter.
+Norwegian updates, thanks to Stein-Aksel Basma.
+Catalan updates, thanks to Jaume Badiella.
+Security fixes for XSS attacks in user_chooser.cgi and other scripts.
+---- Changes since 1.690 ----
+More German translation updates, thanks to Raymond Vetter.
+Support for RHEL 7, CentOS 7 and other derivatives in multiple modules.
+---- Changes since 1.700 ----
+More German translation updates, thanks to Raymond Vetter.
+Catalan updates, thanks to Jaume Badiella.
+Added additional protected against Shellshock exploits made via the Webmin webserver.
+---- Changes since 1.710 ----
+SSL v2 and v3 are now disabled by default at Webmin install time, to block the POODLE attack. They can be re-enabled on the SSL Encryption page of the Webmin Configuration module.
+---- Changes since 1.720 ----
+Deprecated the old blue-theme in favor of the new gray-theme.
+Catalan translation updates from Jaume Badiella.
+More German translation updates, thanks to Raymond Vetter.
+---- Changes since 1.730 ----
+More German translation updates, thanks to Raymond Vetter.
+Norwegian updates, thanks to Stein-Aksel Basma.
+The awesome new Authentic Theme by Ilia Rostovtsev is now included in the Webmin package.
+Catalan translation updates from Jaume Badiella.
+---- Changes since 1.740 ----
+Norwegian updates, thanks to Stein-Aksel Basma.
+Catalan translation updates from Jaume Badiella.
+More German translation updates, thanks to Raymond Vetter.
+---- Changes since 1.750 ----
+Norwegian updates, thanks to Stein-Aksel Basma.
+Catalan translation updates from Jaume Badiella.
+More German translation updates, thanks to Raymond Vetter.
+Fixed an XSS bug that allowed xmlrpc.cgi to be abused by a malicious link.
+---- Changes since 1.760 ----
+For new installs, switched the location of data files in many modules to /var/webmin instead of /etc/webmin.
+---- Changes since 1.790 ----
+Added a recent logins section to the System Information page.
+Major rework of majordomo module, Kay Marquardt
+---- Changes since 1.870 ----
+German translation updates, thanks to Raymond Vetter.
+Catalan translation updates from Jaume Badiella.
+Bulgarian translations from Grigor Gatchev.
+Added Support for Synology NAS and opkg/ipkg Community Package Manager, Kay Marquardt
+Added Support for configuring spam filtering when amvisd is used, Kay Marquardt

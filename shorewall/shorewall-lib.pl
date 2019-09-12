@@ -19,9 +19,10 @@ $shorewall_version = &get_shorewall_version(0);
 @shorewall_files = ( 'zones', 'interfaces', 'policy', 'rules', 'tos',
 	   	     'masq', 'nat', 'proxyarp', 'routestopped',
 	   	     'tunnels', 'hosts', 'blacklist',
-		     ( &version_atleast(2, 3) ? ( 'providers' ) : ( ) ),
+		     ( &version_atleast(2, 3) ? ( 'providers', 'route_rules' )
+					      : ( ) ),
 	   	     'params', 'shorewall.conf',
-);
+		   );
 @comment_tables = ( 'masq', 'nat', 'rules', 'tcrules' );
 
 sub debug_message
@@ -184,12 +185,17 @@ sub create_table_row
 {
 local $lref = &read_file_lines("$config{'config_dir'}/$_[0]");
 local ($i, $idx);
+$idx = -1;
 for($i=0; $i<@$lref; $i++) {
 	if ($lref->[$i] =~ /^#+\s*LAST\s+LINE/) {
 		$idx = $i;
 		last;
 		}
-	elsif ($lref->[$i] =~ /^SECTION\s+NEW/) {
+	elsif ($lref->[$i] =~ /^\??SECTION\s+NEW/) {
+		$idx = $i+1;
+		last;
+		}
+	elsif ($lref->[$i] =~ /^\??FORMAT\s+[1-2]/) {
 		$idx = $i+1;
 		last;
 		}
@@ -197,10 +203,20 @@ for($i=0; $i<@$lref; $i++) {
 if (defined($_[3])) {
 	local $lnum = &find_line_num($lref, $_[1], $_[3]);
 	$lnum = $idx if (!defined($lnum));
-	splice(@$lref, $lnum, 0, &simplify_line($_[2]));
+	if ($lnum < 0) {
+		push(@$lref, &simplify_line($_[2]));
+		}
+	else {
+		splice(@$lref, $lnum, 0, &simplify_line($_[2]));
+		}
 	}
 else {
-	splice(@$lref, $idx, 0, &simplify_line($_[2]));
+	if ($idx < 0) {
+		push(@$lref, &simplify_line($_[2]));
+		}
+	else {
+		splice(@$lref, $idx, 0, &simplify_line($_[2]));
+		}
 	}
 &flush_file_lines();
 }
@@ -209,15 +225,16 @@ else {
 sub create_table_struct
 {
 local $lref = &read_file_lines("$config{'config_dir'}/$_[0]->{'table'}");
-local ($i, $idx);
-for($i=0; $i<@$lref; $i++) {
+my $idx = -1;
+for(my $i=0; $i<@$lref; $i++) {
 	if ($lref->[$i] =~ /^#+\s*LAST\s+LINE/) {
 		$idx = $i;
 		last;
 		}
 	}
-if (!defined($idx)) {
-	$idx = @$lref;
+if ($idx < 0) {
+	# Add at end
+	$idx = scalar(@$lref);
 	}
 local $cache = &read_table_struct($_[0]->{'table'}, $_[1]);
 if ($_[2]) {
@@ -314,7 +331,7 @@ sub standard_parser
 local $l = $_[0];
 $l =~ s/#.*$//;
 local @sp = split(/\s+/, $l);
-return undef if ($sp[0] eq "SECTION");
+return undef if ($sp[0] =~ /\??SECTION/ || $sp[0] =~ /\??FORMAT/);
 return @sp ? \@sp : undef;
 }
 
@@ -375,28 +392,28 @@ if ($_[3] == 2) {
 	$found = !$_[1];
 	}
 elsif ($_[3] == 1) {
-	printf "<option value=- %s>%s\n",
+	printf "<option value=- %s>%s</option>\n",
 		$_[1] eq '-' ? "selected" : "", "&lt;$text{'list_any'}&gt;";
 	$found = !$_[1] || $_[1] eq '-';
 	}
 elsif ($_[3] == 0) {
-	printf "<option value=all %s>%s\n",
+	printf "<option value=all %s>%s</option>\n",
 		$_[1] eq 'all' ? "selected" : "", "&lt;$text{'list_any'}&gt;";
-	printf "<option value=\$FW %s>%s\n",
+	printf "<option value=\$FW %s>%s</option>\n",
 		&is_fw($_[1]) ? "selected" : "", "&lt;$text{'list_fw'}&gt;";
 	$found = !$_[1] || $_[1] eq 'all' || &is_fw($_[1]);
 	}
 foreach $z (@ztable) {
-	printf "<option value=%s %s>%s\n",
+	printf "<option value=%s %s>%s</option>\n",
 		$z->[0], $_[1] eq $z->[0] ? "selected" : "", &convert_zone($z->[0]);
 	$found++ if ($_[1] eq $z->[0]);
 	}
 if ($_[2]) {
-	printf "<option value='' %s>%s\n",
+	printf "<option value='' %s>%s</option>\n",
 		$found ? "" : "selected", $text{'list_other'};
 	}
 else {
-	print "<option value=$_[1] selected>$_[1]\n" if (!$found);
+	print "<option value=$_[1] selected>$_[1]</option>\n" if (!$found);
 	}
 print "</select>\n";
 return $found;
@@ -409,11 +426,11 @@ local @itable = &read_table_file("interfaces", \&standard_parser);
 print "<select name=$_[0]>\n";
 local $found = !$_[1];
 foreach $i (@itable) {
-	printf "<option value=%s %s>%s\n",
+	printf "<option value=%s %s>%s</option>\n",
 		$i->[1], $_[1] eq $i->[1] ? "selected" : "", $i->[1];
 	$found++ if ($_[1] eq $i->[1]);
 	}
-print "<option value=$_[1] selected>$_[1]\n" if (!$found);
+print "<option value=$_[1] selected>$_[1]</option>\n" if (!$found);
 print "</select>\n";
 }
 
@@ -620,18 +637,43 @@ else {
 
 ################################# interfaces ###################################
 
-sub interfaces_row
+sub new_interfaces_format
 {
-return ( $_[1],
-	 $_[0] eq '-' ? $text{'list_any'} : $_[0],
-	 $_[2] eq 'detect' ? $text{'list_auto'} :
-	  $_[2] eq '-' || $_[2] eq '' ? $text{'list_none'} : $_[2],
-	 $_[3] ? $_[3] : $text{'list_none'} );
+if (&version_atleast(4, 5, 3)) {
+	open(FILE, "$config{'config_dir'}/interfaces");
+	while(<FILE>) {
+		s/\r|\n//g;
+		if ($_ =~ /\??FORMAT\s+2/) {
+			return 1;
+			}
+		}
+	close(FILE);
+	}
+return 0;
 }
 
-@interfaces_opts = ( 'dhcp', 'noping', 'filterping', 'routestopped', 'norfc1918',
-		     'multi', 'routefilter', 'dropunclean', 'logunclean',
-		     'blacklist', 'maclist', 'tcpflags', 'proxyarp' );
+sub interfaces_row
+{
+if (&new_interfaces_format()) {
+	return ( $_[1],
+		$_[0] eq '-' ? $text{'list_any'} : $_[0],
+		$_[2] eq '-' || $_[2] eq '' ? $text{'list_none'} : $_[2] );
+	}
+else {
+	return ( $_[1],
+		$_[0] eq '-' ? $text{'list_any'} : $_[0],
+		$_[2] eq 'detect' ? $text{'list_auto'} :
+		 $_[2] eq '-' || $_[2] eq '' ? $text{'list_none'} : $_[2],
+		$_[3] eq '-' || $_[3] eq '' ? $text{'list_none'} : $_[3] );
+	}
+}
+
+@interfaces_opts = ( 'dhcp', 'multi', 'routefilter',
+		     'maclist', 'tcpflags', 'proxyarp' );
+if (!&version_atleast(5, 0, 4)) {
+	push(@interfaces_opts, 'noping', 'filterping', 'routestopped',
+		       'norfc1918', 'dropunclean', 'logunclean', 'blacklist');
+	}
 if (&version_atleast(3)) {
 	push(@interfaces_opts, "logmartians", "routeback", "arp_filter",
 			       "arp_ignore", "nosmurfs", "detectnets", "upnp");
@@ -648,35 +690,62 @@ print "<td>\n";
 &zone_field("zone", $_[0], 0, 1);
 print "</td> </tr>\n";
 
-local $bmode = $_[2] eq 'detect' ? 2 :
-	       $_[2] eq '-' || $_[2] eq '' ? 1 : 0;
-print "<tr> <td><b>$text{'interfaces_2'}</b></td> <td colspan=3>\n";
-printf "<input type=radio name=broad_mode value=1 %s> %s\n",
-	$bmode == 1 ? "checked" : "", $text{'list_none'};
-printf "<input type=radio name=broad_mode value=2 %s> %s\n",
-	$bmode == 2 ? "checked" : "", $text{'list_auto'};
-printf "<input type=radio name=broad_mode value=0 %s>\n",
-	$bmode == 0 ? "checked" : "";
-printf "<input name=broad size=50 value='%s'></td> </tr>\n",
-	$bmode == 0 ? $_[2] : "";
+if (&new_interfaces_format()) {
+	local %opts = map { $_, 1 } split(/,/, $_[2]);
+	print "<tr> <td valign=top><b>$text{'interfaces_3'}</b></td> <td colspan=3>\n";
+	&options_input("opts", $_[2], \@interfaces_opts);
+	print "</td> </tr>\n";
+	}
+else {
+	local $bmode = $_[2] eq 'detect' ? 2 :
+		$_[2] eq '-' || $_[2] eq '' ? 1 : 0;
+	print "<tr> <td><b>$text{'interfaces_2'}</b></td> <td colspan=3>\n";
+	printf "<input type=radio name=broad_mode value=1 %s> %s\n",
+		$bmode == 1 ? "checked" : "", $text{'list_none'};
+	printf "<input type=radio name=broad_mode value=2 %s> %s\n",
+		$bmode == 2 ? "checked" : "", $text{'list_auto'};
+	printf "<input type=radio name=broad_mode value=0 %s>\n",
+		$bmode == 0 ? "checked" : "";
+	printf "<input name=broad size=50 value='%s'></td> </tr>\n",
+		$bmode == 0 ? $_[2] : "";
 
-# options
-local %opts = map { $_, 1 } split(/,/, $_[3]);
-print "<tr> <td valign=top><b>$text{'interfaces_3'}</b></td> <td colspan=3>\n";
-&options_input("opts", $_[3], \@interfaces_opts);
-print "</td> </tr>\n";
+	local %opts = map { $_, 1 } split(/,/, $_[3]);
+	print "<tr> <td valign=top><b>$text{'interfaces_3'}</b></td> <td colspan=3>\n";
+	&options_input("opts", $_[3], \@interfaces_opts);
+	print "</td> </tr>\n";
+	}
 }
 
 sub interfaces_validate
 {
-$in{'iface'} =~ /^[a-z]+\d*(\.\d+)?$/ ||
+$in{'iface'} =~ /^[a-z]+\d*(s\d*)?(\.\d+)?$/ ||
 	$in{'iface'} =~ /^[a-z]+\+$/ || &error($text{'interfaces_eiface'});
-$in{'broad_mode'} || $in{'broad'} =~ /^[0-9\.,]+$/ ||
-	&error($text{'interfaces_ebroad'});
-return ( $in{'zone'}, $in{'iface'},
-	 $in{'broad_mode'} == 2 ? 'detect' :
-	 $in{'broad_mode'} == 1 ? '-' : $in{'broad'},
-	 join(",", split(/\0/, $in{'opts'})) );
+local @result = ( $in{'zone'}, $in{'iface'});
+if (not &new_interfaces_format()) {
+	$in{'broad_mode'} || $in{'broad'} =~ /^[0-9\.,]+$/ ||
+		&error($text{'interfaces_ebroad'});
+	push(@result, $in{'broad_mode'} == 2 ? 'detect' :
+		$in{'broad_mode'} == 1 ? '-' : $in{'broad'});
+	}
+push(@result, join(",", split(/\0/, $in{'opts'})));
+return @result;
+}
+
+sub interfaces_columns
+{
+return &new_interfaces_format() ? 3 : 4;
+}
+
+sub interfaces_colnames
+{
+local @result = (
+	$text{'interfaces_0'},
+	$text{'interfaces_1'} );
+if (not &new_interfaces_format()) {
+	push(@result, $text{'interfaces_2'});
+	}
+push(@result, $text{'interfaces_3'});
+return @result;
 }
 
 ################################# policy #######################################
@@ -712,27 +781,27 @@ print "<tr> <td><b>$text{'policy_2'}</b></td>\n";
 print "<td><select name=policy>\n";
 $found = !$_[2];
 foreach $p (@policy_list) {
-	printf "<option value=%s %s>%s\n",
+	printf "<option value=%s %s>%s</option>\n",
 		$p, lc($p) eq lc($_[2]) ? "selected" : "", $p;
 	$found++ if (lc($p) eq lc($_[2]));
 	}
-print "<option value=$_[2] selected>$_[2]\n" if (!$found);
+print "<option value=$_[2] selected>$_[2]</option>\n" if (!$found);
 print "</select></td>\n";
 
 print "<td><b>$text{'policy_3'}</b></td>\n";
 print "<td><select name=log>\n";
-printf "<option value=- %s>%s\n",
+printf "<option value=- %s>%s</option>\n",
 	$_[3] eq '-' || !$_[3] ? "selected" : "", "&lt;$text{'policy_nolog'}&gt;";
-printf "<option value=ULOG %s>%s\n",
+printf "<option value=ULOG %s>%s</option>\n",
 	$_[3] eq 'ULOG' ? "selected" : "", "&lt;$text{'policy_ulog'}&gt;";
 $found = !$_[3] || $_[3] eq '-' || $_[3] eq 'ULOG';
 &foreign_require("syslog", "syslog-lib.pl");
 foreach $l (&syslog::list_priorities()) {
-	printf "<option value=%s %s>%s\n",
+	printf "<option value=%s %s>%s</option>\n",
 		$l, $_[3] eq $l ? "selected" : "", $l;
 	$found++ if ($_[3] eq $l);
 	}
-print "<option value=$_[3] selected>$_[3]\n" if (!$found);
+print "<option value=$_[3] selected>$_[3]</option>\n" if (!$found);
 print "</select></td> </tr>\n";
 
 local ($l, $b) = $_[4] =~ /(\d+):(\d+)/ ? ($1, $2) : ( );
@@ -753,7 +822,7 @@ if (!$in{'limit_def'}) {
 	$in{'limit'} =~ /^\d+$/ || &error($text{'policy_elimit'});
 	$in{'burst'} =~ /^\d+$/ || &error($text{'policy_eburst'});
 	}
-return ( $in{'source'}, $in{'dest'}, $in{'policy'}, $in{'log'}, 
+return ( $in{'source'}, $in{'dest'}, $in{'policy'}, $in{'log'},
 	 $in{'limit_def'} ? ( ) : ( "$in{'limit'}:$in{'burst'}" ) );
 }
 
@@ -824,27 +893,27 @@ foreach $a ((sort { $a cmp $b } @rules_actions),
 	    &list_standard_actions(),
 	    (&version_atleast(3) ? ( "-------- Macros --------",
 				     &list_standard_macros() ) : ( ) )) {
-	printf "<option value=%s %s>%s\n",
+	printf "<option value=%s %s>%s</option>\n",
 		$a, $action eq $a ? "selected" : "", $a;
 	$found++ if ($action eq $a);
 	}
-print "<option value=$action selected>$action\n" if (!$found);
+print "<option value=$action selected>$action</option>\n" if (!$found);
 print "</select>\n";
 
 # Logging level
 print "<b>$text{'rules_log'}</b> <select name=log>\n";
-printf "<option value='' %s>%s\n",
+printf "<option value='' %s>%s</option>\n",
 	!$log ? "selected" : "", "&lt;$text{'rules_nolog'}&gt;";
-printf "<option value=ULOG %s>%s\n",
+printf "<option value=ULOG %s>%s</option>\n",
 	$log eq 'ULOG' ? "selected" : "", "&lt;$text{'policy_ulog'}&gt;";
 $found = !$log || $log eq '-' || $log eq 'ULOG';
 &foreign_require("syslog", "syslog-lib.pl");
 foreach $l (&syslog::list_priorities()) {
-	printf "<option value=%s %s>%s\n",
+	printf "<option value=%s %s>%s</option>\n",
 		$l, $log eq $l ? "selected" : "", $l;
 	$found++ if ($log eq $l);
 	}
-print "<option value=$log selected>$log\n" if (!$found);
+print "<option value=$log selected>$log</option>\n" if (!$found);
 print "</select></td> </tr>\n";
 
 if (&version_atleast(3)) {
@@ -889,13 +958,13 @@ print "<tr> <td><b>$text{'rules_3'}</b></td>\n";
 print "<td colspan=3><select name=proto>\n";
 $found = !$_[3];
 foreach $p (@rules_protos) {
-	printf "<option value=%s %s>%s\n",
+	printf "<option value=%s %s>%s</option>\n",
 		$p, $p eq $_[3] ? "selected" : "",
 		$p eq 'all' ? "&lt;$text{'list_any'}&gt;" :
 		 $p eq 'related' ? "&lt;$text{'rules_related'}&gt;" : uc($p);
 	$found++ if ($p eq $_[3]);
 	}
-printf "<option value='' %s>%s\n",
+printf "<option value='' %s>%s</option>\n",
 	$found ? "" : "selected", $text{'list_other'};
 print "</select>\n";
 printf "<input name=pother size=5 value='%s'></td> </tr>\n",
@@ -964,7 +1033,7 @@ $in{'dnat_def'} || &check_ipaddress($in{'dnat'}) ||
 	($in{'dnat'} =~ /^\!([0-9\.,]+)$/ &&
          scalar(grep { &check_ipaddress($_) } split(/,/, $1))) ||
 	&error($text{'rules_ednat'});
-$in{'action'} ne 'DNAT' && $in{'action'} ne 'REDIRECT' && $in{'action'} ne 'DNAT-' && 
+$in{'action'} ne 'DNAT' && $in{'action'} ne 'REDIRECT' && $in{'action'} ne 'DNAT-' &&
 	!$in{'dnat_def'} && &error($text{'rules_ednat2'});
 
 $in{'sinzone'} =~ s/\s+/,/g;
@@ -1060,11 +1129,11 @@ print "<tr> <td><b>$text{'tos_2'}</b></td>\n";
 print "<td><select name=proto>\n";
 $found = !$_[2];
 foreach $p (@tos_protos) {
-	printf "<option value=%s %s>%s\n",
+	printf "<option value=%s %s>%s</option>\n",
 		$p, $p eq $_[2] ? "selected" : "", uc($p);
 	$found++ if ($p eq $_[2]);
 	}
-printf "<option value='' %s>%s\n",
+printf "<option value='' %s>%s</option>\n",
 	$found ? "" : "selected", $text{'list_other'};
 print "</select>\n";
 printf "<input name=pother size=5 value='%s'></td> </tr>\n",
@@ -1090,11 +1159,11 @@ print "<tr> <td><b>$text{'tos_5'}</b></td>\n";
 print "<td><select name=tos>\n";
 $found = !$_[5];
 foreach $t (sort { $a <=> $b } keys %tos_map) {
-	printf "<option value=%s %s>%s\n",
+	printf "<option value=%s %s>%s</option>\n",
 		$t, $_[5] == $t ? "selected" : "", $tos_map{$t};
 	$found++ if ($_[5] == $t);
 	}
-print "<option value=$_[5] selected>$_[5]\n" if (!$found);
+print "<option value=$_[5] selected>$_[5]</option>\n" if (!$found);
 print "</select></td> </tr>\n";
 
 print "<tr> <td><b>$text{'tos_6'}</b></td>\n";
@@ -1149,7 +1218,7 @@ printf "<input type=checkbox name=net_def value=1 %s> %s\n",
 print "<input name=net size=20 value='$net'></td> </tr>\n";
 
 local ($mnet, $miface, $mode);
-if ($_[1] =~ /^[0-9\.\/]+$/) {
+if ($_[1] =~ /^[0-9\.\/]+(,[0-9\.\/]+)*$/) {
 	$mnet = $_[1];
 	$mode = 0;
 	}
@@ -1165,7 +1234,7 @@ else {
 print "<tr> <td valign=top><b>$text{'masq_1'}</b></td> <td colspan=3>\n";
 printf "<input type=radio name=mode value=0 %s> %s\n",
 	$mode == 0 ? "checked" : "", $text{'masq_mode0'};
-printf "<input name=mnet size=20 value='%s'><br>\n",
+printf "<input name=mnet size=60 value='%s'><br>\n",
 	$mode == 0 ? $mnet : "";
 printf "<input type=radio name=mode value=1 %s> %s\n",
 	$mode == 1 ? "checked" : "", $text{'masq_mode1'};
@@ -1344,8 +1413,8 @@ return ( $in{'addr'},
 	 $in{'ext'},
 	 $in{'have'} ? "yes" : "no",
 	 &version_atleast(2, 0, 0) ? ( $in{'pers'} ? "yes" : "no" ) : ( )
-	); 
-	 
+	);
+
 }
 
 sub proxyarp_columns
@@ -1429,12 +1498,12 @@ foreach $tt ('ipsec', 'ipsecnat',
 				       : ( )),
 	     'ip', 'gre', 'pptpclient', 'pptpserver', 'generic',
 	     (&version_atleast(1, 3, 14) ? ( 'openvpn' ) : ( )) ) {
-	printf "<option value=%s %s>%s\n",
+	printf "<option value=%s %s>%s</option>\n",
 		$tt, $ttype eq $tt ? "selected" : "",
 		$text{'tunnels_'.$tt.'_l'} || $text{'tunnels_'.$tt};
 	$found++ if ($ttype eq $tt);
 	}
-print "<option value=$ttype selected>",uc($ttype),"\n" if (!$found);
+print "<option value=$ttype selected>",uc($ttype),"</option>\n" if (!$found);
 print "</select>\n";
 print "<input name=tport size=10 value='$tport'>\n";
 print "</td>\n";
@@ -1563,12 +1632,12 @@ print "<tr> <td><b>$text{'blacklist_proto'}</b></td>\n";
 print "<td colspan=3><select name=proto>\n";
 $found = !$_[1];
 foreach $p (@blacklist_protos) {
-	printf "<option value='%s' %s>%s\n",
+	printf "<option value='%s' %s>%s</option>\n",
 		$p, $p eq $_[1] ? "selected" : "",
 		$p eq '' ? "&lt;$text{'list_any'}&gt;" : uc($p);
 	$found++ if ($p eq $_[1]);
 	}
-printf "<option value='*' %s>%s\n",
+printf "<option value='*' %s>%s</option>\n",
 	$found ? "" : "selected", $text{'list_other'};
 print "</select>\n";
 printf "<input name=pother size=5 value='%s'></td> </tr>\n",
@@ -1684,6 +1753,57 @@ return ( $in{'name'}, $in{'number'}, $in{'mark'},
 	 $in{'copy'} || "-" );
 }
 
+############################## route_rules ################################
+
+sub route_rules_row
+{
+return ( $_[0] eq "-" ? $text{'list_any'} : $_[0],
+	 $_[1] eq "-" ? $text{'list_any'} : $_[1],
+	 $_[2], $_[3], $_[4] );
+}
+
+sub route_rules_form
+{
+print "<tr> <td><b>$text{'route_rules_src'}</b></td>\n";
+print "<td>",&ui_opt_textbox("src", $_[0] eq "-" ? "" : $_[0],
+			     20, $text{'list_any'}, $text{'route_rules_ip'}),
+      "</td> </tr>\n";
+
+print "<tr> <td><b>$text{'route_rules_dst'}</b></td>\n";
+print "<td>",&ui_opt_textbox("dst", $_[1] eq "-" ? "" : $_[1],
+			     20, $text{'list_any'}, $text{'route_rules_ip'}),
+      "</td> </tr>\n";
+
+local @ptable = &read_table_file("providers", \&standard_parser);
+print "<tr> <td><b>$text{'route_rules_prov'}</b></td>\n";
+print "<td>",&ui_select("prov", $_[2] eq "254" ? "main" : $_[2],
+		[ [ "main", $text{'route_rules_main'} ],
+		  map { $_->[0] } @ptable ]),"</td> </tr>\n";
+
+print "<tr> <td><b>$text{'route_rules_pri'}</b></td>\n";
+print "<td>",&ui_textbox("pri", $_[3], 10),"</td> </tr>\n";
+
+print "<tr> <td><b>$text{'route_rules_mark'}</b></td>\n";
+print "<td>",&ui_opt_textbox("mark", $_[4] eq "-" ? $_[4] : "", 10,
+			     $text{'route_rules_nomark'}),"</td> </tr>\n";
+}
+
+sub route_rules_validate
+{
+$in{'src_def'} || $in{'src'} =~ /^\S+$/ || &error($text{'route_rules_esrc'});
+$in{'dst_def'} || $in{'dst'} =~ /^\S+$/ || &error($text{'route_rules_edst'});
+$in{'pri'} =~ /^\d+$/ || &error($text{'route_rules_epri'});
+$in{'mark_def'} || $in{'mark'} =~ /^\d+(\/\d+)?$/ ||
+	&error($text{'route_rules_emark'});
+return ( $in{'src_def'} ? "-" : $in{'src'},
+	 $in{'dst_def'} ? "-" : $in{'dst'},
+	 $in{'prov'},
+	 $in{'pri'},
+         $in{'mark_def'} ? ( ) : ( $in{'mark'} ) );
+}
+
+
+
 ################################ shorewall.conf ##################################
 
 sub conf_form
@@ -1781,6 +1901,27 @@ if ($config{'after_apply_cmd'}) {
 	}
 }
 
+# run_before_refresh_command()
+# Runs the before-refresh command, if any. If it fails, returns the error
+# message output
+sub run_before_refresh_command
+{
+if ($config{'before_refresh_cmd'}) {
+	local $out = &backquote_logged("($config{'before_refresh_cmd'}) </dev/null 2>&1");
+	return $out if ($?);
+	}
+return undef;
+}
+
+# run_after_refresh_command()
+# Runs the after-refresh command, if any
+sub run_after_refresh_command
+{
+if ($config{'after_refresh_cmd'}) {
+	&system_logged("($config{'after_refresh_cmd'}) </dev/null >/dev/null 2>&1");
+	}
+}
+
 # list_standard_actions()
 # Returns a list of standard Shorewall actions
 sub list_standard_actions
@@ -1819,7 +1960,7 @@ foreach my $a ($config{'config_dir'}, $config{'macros'}) {
 		}
 	closedir(DIR);
 	}
-return &unique(@rv);
+return &unique(sort(@rv));
 }
 
 $BETA_STR = "-Beta";
@@ -1889,4 +2030,3 @@ print "</table>\n";
 }
 
 1;
-

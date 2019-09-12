@@ -1,10 +1,12 @@
 #!/usr/local/bin/perl
 # create_job.cgi
 # Create a new at job
-
-require 'timelocal.pl';
+use strict;
+use warnings;
+our (%access, %text, %in);
 
 require './at-lib.pl';
+use Time::Local;
 &ReadParse();
 &error_setup($text{'create_err'});
 
@@ -15,6 +17,7 @@ defined(getpwnam($in{'user'})) || &error($text{'create_euser'});
 $in{'hour'} =~ /^\d+$/ && $in{'min'} =~ /^\d+$/ &&
 	$in{'day'} =~ /^\d+$/ && $in{'year'} =~ /^\d+$/ ||
 		&error($text{'create_edate'});
+my $date;
 eval { $date = timelocal(0, $in{'min'}, $in{'hour'},
 		         $in{'day'}, $in{'month'}, $in{'year'}-1900) };
 $@ && &error($text{'create_edate'});

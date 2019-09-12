@@ -3,8 +3,8 @@ index_econfig=The majordomo config file $1 does not exist. Maybe your <a href='$
 index_eprograms=The majordomo directory $1 does not exist. Maybe your <a href='$2'>module configuration</a> is incorrect, or majordomo is not installed.
 index_eversion=Your majordomo version is not supported by Webmin. Only versions 1.94 and above are supported.
 index_eversion2=The Majordomo version file $1 was not found under the programs directory $2. Maybe your <a href='$3'>module configuration</a> is incorrect, or majordomo is not installed.
-index_ehomedir=The <tt>$homedir</tt> variable in your majordomo config file is set to $1, which does not exist.
-index_elistdir=The <tt>$listdir</tt> variable in your majordomo config file is set to $1, which does not exist.
+index_emdomdir=The <tt>$1</tt> variable in your majordomo config file is set to <tt>$2</tt>, which does not exist.
+index_esendmail=The <tt>$1</tt> seting of your modul configuration is set to <tt>$2</tt>, which does not exist. Maybe your <a href='$3'>module configuration</a> is incorrect, or no mailer deamon is installed.
 index_esendmail2=Sendmail is either not installed or not properly set up on your system. Check the <a href=$2>Sendmail module</a> configuration.
 index_epostfix=Postfix is either not installed or not properly set up on your system. Check the <a href='$1'>Postfix module</a> configuration.
 index_esendmail3=The Sendmail Webmin module needed to manage aliases is not installed.
@@ -18,6 +18,11 @@ index_global=Edit Majordomo Options
 index_globaldesc=Edit global Majordomo options that apply to all mailing lists
 index_return=mailing lists
 index_version=Majordomo version $1
+index_name=List name
+index_info=List info
+index_mail=Mail adress
+index_moderated=Moderated
+index_count=# of users
 
 global_title=Global Options
 global_ecannot=You are not allowed to edit global options
@@ -31,6 +36,7 @@ global_ewhereami=Missing or invalid mail server hostname
 global_ewhoami=Missing or invalid Majordomo address
 global_eowner=Missing or invalid owner's address
 global_esendmail=Sendmail command '$1' does not exist
+global_saved=(saved)
 
 create_ecannot=You are not allowed to create new lists
 create_title=Create Mailing List
@@ -55,6 +61,7 @@ create_archive=Archive mailing list?
 create_archiveyear=In yearly file
 create_archivemonth=In monthly file
 create_archiveday=In daily file
+create_minimum=Minimum required information
 
 cdigest_ecannot=You are not allowed to create new digest lists
 cdigest_title=Create Digest List
@@ -178,7 +185,7 @@ access_res1=List members
 access_res2=Addresses in file
 access_tbody=Taboo body regexps
 access_theader=Taboo header regexps
-access_taboo=Note: all taboo and address regexps must begin and end with <tt>/</tt> , like <tt>/foobar.com/</tt> or <tt>/obscene/</tt>.
+access_taboo=All taboo and address regexps must begin and end with <tt>/</tt> , like <tt>/foobar.com/</tt> or <tt>/obscene/</tt><br>For purpose of SPAM rejection enter e.g. <tt>/^X-Spam-Flag: YES/i</tt> or <tt>/^X-Spam-Level: \*\*\*\*\*/i</tt> as taboo header regex.
 
 head_title=Headers and Footers
 head_header=Resent email headers and footers
@@ -235,3 +242,12 @@ acl_edit=Can edit list membership?
 alias_err=Failed to setup aliases
 alias_eowner=Missing owner email address
 
+check_title=Check Majordomo Config
+check_test=Test for ...
+check_result=Result / additional check
+check_status=Status
+check_perm=Permissions
+check_exec=world executable!
+check_write=world writeable!
+check_read=world readable!
+check_possible=Possible problem

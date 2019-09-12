@@ -7,6 +7,7 @@ use WebminCore;
 %access = &get_module_acl();
 $access{'ipnodes'} = $access{'hosts'};
 
+# XXX detect this automatically rather than using a bunch of links?
 if (-r "$module_root_directory/$gconfig{'os_type'}-$gconfig{'os_version'}-lib.pl") {
 	do "$gconfig{'os_type'}-$gconfig{'os_version'}-lib.pl";
 	}
@@ -19,6 +20,10 @@ elsif ($gconfig{'os_type'} eq 'slackware-linux' &&
        $gconfig{'os_version'} >= 9.1) {
 	# Special case for Slackware 9.1+
 	do "$gconfig{'os_type'}-9.1-ALL-lib.pl";
+	}
+elsif ($gconfig{'os_type'} eq 'debian-linux' && -d "/etc/netplan") {
+	# Special case for newer Ubuntu versions
+	do "netplan-lib.pl";
 	}
 else {
 	do "$gconfig{'os_type'}-lib.pl";
@@ -34,14 +39,19 @@ local $line="";
 
 &open_readfile(HOSTS, $config{'hosts_file'});
 while($line=<HOSTS>) {
+	local $comment = 0;
 	$line =~ s/\r|\n//g;
+	if ($line =~ s/^\s*#+\s*//) {
+		$comment = 1;
+		}
 	$line =~ s/#.*$//g;
 	$line =~ s/\s+$//g;
-	local(@f)=split(/\s+/, $line);
-	local($ipaddr)=shift(@f);
+	local @f = split(/\s+/, $line);
+	local $ipaddr = shift(@f);
 	if (check_ipaddress_any($ipaddr)) {
 		push(@rv, { 'address' => $ipaddr,
 			    'hosts' => [ @f ],
+			    'active' => !$comment,
 			    'line', $lnum,
 			    'index', scalar(@rv) });
 		}
@@ -51,12 +61,22 @@ close(HOSTS);
 return @rv;
 }
 
+# make_host_line(&host)
+# Internal function to return a line for the hosts file
+sub make_host_line
+{
+local ($host) = @_;
+return ($host->{'active'} ? "" : "# ").
+       $host->{'address'}."\t".join(" ",@{$host->{'hosts'}})."\n";
+}
+
 # create_host(&host)
 # Add a new host to /etc/hosts
 sub create_host
 {
+local ($host) = @_;
 &open_tempfile(HOSTS, ">>$config{'hosts_file'}");
-&print_tempfile(HOSTS, $_[0]->{'address'},"\t",join(" ",@{$_[0]->{'hosts'}}),"\n");
+&print_tempfile(HOSTS, &make_host_line($host));
 &close_tempfile(HOSTS);
 }
 
@@ -64,16 +84,17 @@ sub create_host
 # Update the address and hosts of a line in /etc/hosts
 sub modify_host
 {
+local ($host) = @_;
 &replace_file_line($config{'hosts_file'},
-		   $_[0]->{'line'},
-		   $_[0]->{'address'}."\t".join(" ",@{$_[0]->{'hosts'}})."\n");
+		   $_[0]->{'line'}, &make_host_line($host));
 }
 
 # delete_host(&host)
 # Delete a host from /etc/hosts
 sub delete_host
 {
-&replace_file_line($config{'hosts_file'}, $_[0]->{'line'});
+local ($host) = @_;
+&replace_file_line($config{'hosts_file'}, $host->{'line'});
 }
 
 # list_ipnodes()
@@ -136,9 +157,12 @@ return join(".", (hex($1), hex($2), hex($3), hex($4)));
 # Returns HTML for a javascript button for choosing an interface or interfaces
 sub interfaces_chooser_button
 {
-  local $form = @_ > 2 ? $_[2] : 0;
-  local $w = $_[1] ? 500 : 300;
-  return "<input type=button onClick='ifield = document.forms[$form].$_[0]; chooser = window.open(\"$gconfig{'webprefix'}/net/interface_chooser.cgi?multi=$_[1]&interface=\"+escape(ifield.value), \"chooser\", \"toolbar=no,menubar=no,scrollbars=yes,width=$w,height=200\"); chooser.ifield = ifield' value=\"...\">\n";
+&load_theme_library();
+return &theme_interfaces_chooser_button(@_)
+	if (defined(&theme_interfaces_chooser_button));
+local $form = @_ > 2 ? $_[2] : 0;
+local $w = $_[1] ? 500 : 300;
+return "<input type=button onClick='ifield = document.forms[$form].$_[0]; chooser = window.open(\"$gconfig{'webprefix'}/net/interface_chooser.cgi?multi=$_[1]&interface=\"+escape(ifield.value), \"chooser\", \"toolbar=no,menubar=no,scrollbars=yes,width=$w,height=200\"); chooser.ifield = ifield' value=\"...\">\n";
 }
 
 # prefix_to_mask(prefix)
@@ -403,12 +427,31 @@ else {
 	}
 }
 
-# supports_address6([&iface])
-# Returns 1 if managing IPv6 interfaces is supported
-sub supports_address6
+# canonicalize_ip6(address)
+# Converts an address to its full long form. Ie. 2001:db8:0:f101::20 to
+# 2001:0db8:0000:f101:0000:0000:0000:0020
+sub canonicalize_ip6
 {
-local ($iface) = @_;
-return 0;
+my ($addr) = @_;
+return $addr if (!&check_ip6address($addr));
+my @w = split(/:/, $addr);
+my $idx = &indexof("", @w);
+if ($idx >= 0) {
+	# Expand ::
+	my $mis = 8 - scalar(@w);
+	my @nw = @w[0..$idx];
+	for(my $i=0; $i<$mis; $i++) {
+		push(@nw, 0);
+		}
+	push(@nw, @w[$idx+1 .. $#w]);
+	@w = @nw;
+	}
+foreach my $w (@w) {
+	while(length($w) < 4) {
+		$w = "0".$w;
+		}
+	}
+return lc(join(":", @w));
 }
 
 1;

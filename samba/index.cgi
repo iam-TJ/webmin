@@ -180,72 +180,93 @@ if ($donefirst) {
 	print &ui_form_end([ [ "delete", $text{'index_delete'} ] ]);
 	}
 
-@gc_acl = qw(conf_net conf_smb conf_pass conf_print conf_misc conf_bind
-			  ACLfs_global ACLps_global manual swat winbind);
-@gc_progs = ("conf_net.cgi", "conf_smb.cgi", "conf_pass.cgi",
-	     "conf_print.cgi", "conf_misc.cgi", "conf_bind.cgi",
-	     "edit_fshare.cgi?share=global", "edit_pshare.cgi?share=global",
-	     "edit_manual.cgi");
-@gc_names = ($text{'global_unixnetwork'}, $text{'global_winnetwork'},
-	     $text{'global_auth'}, $text{'global_printing'},
-	     $text{'global_misc'}, $text{'global_bind'},
-	     $text{'global_filedefault'},
-	     $text{'global_prndefault'},
-	     $text{'manual_title'});
-@gc_icons = ("images/icon_0.gif", "images/icon_1.gif", "images/icon_2.gif",
-	     "images/icon_3.gif", "images/icon_4.gif",
-	     "images/icon_10.gif", "images/icon_5.gif", "images/icon_6.gif",
-	     "images/manual.gif");
+# Generate table of accessible global configuration icons
+if ($access{'conf_net'}) {
+	push(@gc_progs, "conf_net.cgi");
+	push(@gc_names, $text{'global_unixnetwork'});
+        push(@gc_icons, "images/icon_0.gif");
+	}
+if ($access{'conf_smb'}) {
+	push(@gc_progs, "conf_smb.cgi");
+	push(@gc_names, $text{'global_winnetwork'});
+	push(@gc_icons, "images/icon_1.gif");
+	}
+if ($access{'conf_pass'}) {
+        push(@gc_progs, "conf_pass.cgi");
+        push(@gc_names, $text{'global_auth'});
+        push(@gc_icons, "images/icon_2.gif");
+	}
+if ($access{'conf_print'}) {
+        push(@gc_progs, "conf_print.cgi");
+        push(@gc_names, $text{'global_printing'});
+        push(@gc_icons, "images/icon_3.gif");
+	}
+if ($access{'conf_misc'}) {
+        push(@gc_progs, "conf_misc.cgi");
+        push(@gc_names, $text{'global_misc'});
+        push(@gc_icons, "images/icon_4.gif");
+	}
+if ($access{'conf_bind'}) {
+        push(@gc_progs, "conf_bind.cgi");
+        push(@gc_names, $text{'global_bind'});
+        push(@gc_icons, "images/icon_10.gif");
+	}
+if ($access{'conf_fs'}) {
+        push(@gc_progs, "edit_fshare.cgi?share=global");
+        push(@gc_names, $text{'global_filedefault'});
+        push(@gc_icons, "images/icon_5.gif");
+	}
+if ($access{'conf_ps'}) {
+        push(@gc_progs, "edit_pshare.cgi?share=global");
+        push(@gc_names, $text{'global_prndefault'});
+        push(@gc_icons, "images/icon_6.gif");
+	}
+if ($access{'manual'}) {
+        push(@gc_progs, "edit_manual.cgi");
+        push(@gc_names, $text{'manual_title'});
+        push(@gc_icons, "images/manual.gif");
+	}
 if (&has_command($config{'swat_path'})) {
 	push(@gc_progs, "swat.cgi");
-	push(@gc_names, "SWAT");
+	push(@gc_names, $text{'swat_title'});
 	push(@gc_icons, "images/icon_9.gif");
 	}
 
-foreach $i (0..$#gc_acl) {
-	next unless ($access{$gc_acl[$i]} && $gc_progs[$i]);
-	next if ($gc_acl[$i] eq "conf_winbind" && $samba_version < 3);
-	push(@gc_progs1, $gc_progs[$i]);
-	push(@gc_names1, $gc_names[$i]);
-	push(@gc_icons1, $gc_icons[$i]);
-	$disp++;
-	}
-
-if ($disp) {
+if (@gc_progs) {
 	print &ui_hr();
 	print &ui_subheading($text{'global_title'});
-	&icons_table(\@gc_progs1, \@gc_names1, \@gc_icons1, 4);
+	&icons_table(\@gc_progs, \@gc_names, \@gc_icons, 4);
 	}
 
 # Generate table of accessible user and group editing icons
 if ($access{'view_users'}) {
-	push(@utitles, $text{'global_edit'});
+	push(@utitles, $text{'smbuser_title'});
 	push(@ulinks, "edit_epass.cgi");
 	push(@uicons, "images/editepass.gif");
 	}
 if ($access{'maint_makepass'}) {
-	push(@utitles, $text{'global_convert'});
+	push(@utitles, $text{'convert_title'});
 	push(@ulinks, "ask_epass.cgi");
 	push(@uicons, "images/askepass.gif");
 	}
 if ($access{'maint_sync'}) {
-	push(@utitles, $text{'global_sync'});
+	push(@utitles, $text{'esync_title'});
 	push(@ulinks, "edit_sync.cgi");
 	push(@uicons, "images/editsync.gif");
 	}
 if ($samba_version >= 3) {
 	if ($access{'maint_groups'}) {
-		push(@utitles, $text{'global_gedit'});
+		push(@utitles, $text{'groups_title'});
 		push(@ulinks, "list_groups.cgi");
 		push(@uicons, "images/listgroups.gif");
 		}
 	if ($access{'maint_gsync'}) {
-		push(@utitles, $text{'global_gsync'});
+		push(@utitles, $text{'gsync_title'});
 		push(@ulinks, "edit_gsync.cgi");
 		push(@uicons, "images/editgsync.gif");
 		}
 	if ($access{'winbind'} && $has_net) {
-		push(@utitles, $text{'global_winbind'});
+		push(@utitles, $text{'winbind_title'});
 		push(@ulinks, "edit_winbind.cgi");
 		push(@uicons, "images/winbind.gif");
 		}
@@ -255,7 +276,7 @@ if (@utitles) {
 	# We have some icons to show
 	print &ui_hr();
 	print &ui_subheading($text{'global_users'});
-	&icons_table(\@ulinks, \@utitles, \@uicons, 3);
+	&icons_table(\@ulinks, \@utitles, \@uicons, 4);
 	}
 
 if ($access{'apply'}) {
@@ -297,4 +318,3 @@ if ($access{'apply'}) {
 	}
 
 &ui_print_footer("/", $text{'index'});
-

@@ -27,7 +27,9 @@ print &ui_table_start($text{'smtp_title'}, "width=100%", 4);
 &option_radios_freefield("fallback_relay", 60, $default);
 
 &option_yesno("ignore_mx_lookup_error", 'help');
-&option_yesno("smtp_skip_4xx_greeting", 'help');
+if (&compare_version_numbers($postfix_version, 2) <= 0) {
+	&option_yesno("smtp_skip_4xx_greeting", 'help');
+	}
 
 &option_yesno("smtp_skip_quit_response", 'help');
 
@@ -47,11 +49,31 @@ print &ui_table_start($text{'smtp_title'}, "width=100%", 4);
 &option_freefield("smtp_data_done_timeout", 15);
 &option_freefield("smtp_quit_timeout", 15);
 
+&option_yesno("smtp_use_tls");
+&option_freefield("smtp_sasl_security_options", 60);
+
+# TLS enforcement options
+if (&compare_version_numbers($postfix_version, 2.3) >= 0) {
+	$level = &get_current_value("smtp_tls_security_level");
+	print &ui_table_row($text{'opts_smtp_use_tls'},
+		&ui_select("smtp_tls_security_level", $level, 
+			   [ [ "", $text{'default'} ],
+			     [ "none", $text{'sasl_level_none'} ],
+			     [ "may", $text{'sasl_level_may'} ],
+			     [ "encrypt", $text{'sasl_level_encrypt'} ],
+			     [ "dane", $text{'sasl_level_dane'} ],
+			     [ "dane-only", $text{'sasl_level_dane_only'} ],
+			     [ "fingerprint", $text{'sasl_level_fingerprint'} ],
+			     [ "verify", $text{'sasl_level_verify'} ],
+			     [ "secure", $text{'sasl_level_secure'} ],
+			   ]));
+	}
+else {
+	&option_yesno("smtp_enforce_tls");
+	}
+
 print &ui_table_end();
 print &ui_form_end([ [ undef, $text{'opts_save'} ] ]);
 
 &ui_print_footer("", $text{'index_return'});
-
-
-
 

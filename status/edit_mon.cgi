@@ -9,6 +9,7 @@ $access{'edit'} || &error($text{'mon_ecannot'});
 @handlers = &list_handlers();
 if ($in{'type'}) {
 	# Create a new monitor
+	$in{'type'} =~ /^[a-zA-Z0-9\_\-\.\:]+$/ || &error($text{'mon_etype'});
 	$type = $in{'type'};
 	$title = $text{'mon_create'};
 	if ($in{'clone'}) {
@@ -76,13 +77,8 @@ if (!$in{'type'}) {
 		$stable .= "<td>".
 		      ($stat->{'desc'} && $stat->{'up'} == 0 ?
 			 "<font color=#ff0000>$stat->{'desc'}</font>" :
-		       $stat->{'desc'} ? $stat->{'desc'} :
-		       $stat->{'up'} == 1 ? $text{'mon_up'} :
-		       $stat->{'up'} == -1 ? $text{'mon_not'} :
-		       $stat->{'up'} == -2 ? $text{'mon_webmin'} :
-		       $stat->{'up'} == -3 ? $text{'mon_timeout'} :
-		       $stat->{'up'} == -4 ? $text{'mon_skip'} :
-			 "<font color=#ff0000>$text{'mon_down'}</font>").
+		       $stat->{'desc'} ? $stat->{'desc'}
+				       : &status_to_string($stat->{'up'})).
 			"</td>\n";
 		$stable .= "</tr>\n";
 		}
@@ -225,11 +221,13 @@ if ($type =~ /^(\S+)::(\S+)$/) {
 	# From another module
 	($mod, $mtype) = ($1, $2);
 	&foreign_require($mod, "status_monitor.pl");
-	print &ui_table_start($text{'mon_header3'}, "width=100%", 4,
-			      \@tds);
 	&foreign_call($mod, "load_theme_library");
-	print &foreign_call($mod, "status_monitor_dialog", $mtype, $serv);
-	print &ui_table_end();
+	if (&foreign_defined($mod, "status_monitor_dialog")) {
+		print &ui_table_start($text{'mon_header3'}, "width=100%", 4,
+				      \@tds);
+		print &foreign_call($mod, "status_monitor_dialog", $mtype, $serv);
+		print &ui_table_end();
+		}
 	}
 else {
 	# From this module
@@ -241,6 +239,94 @@ else {
 		&$func($serv);
 		print &ui_table_end();
 		}
+	}
+
+# Show history, in a hidden section
+if (!$in{'type'}) {
+	@history = &list_history($serv,
+				 $in{'all'} ? undef : $config{'history_show'});
+	}
+if (@history) {
+	print &ui_hidden_table_start($text{'mon_header4'}, "width=100%", 2,
+		"history", defined($in{'all'}) || defined($in{'changes'}));
+
+	# Build links to switch to changes-only mode or show all history
+	@links = ( );
+	if ($in{'changes'}) {
+		push(@links, "<a href='edit_mon.cgi?id=$in{'id'}&changes=0&".
+			     "all=$in{'all'}'>$text{'mon_changes0'}</a>");
+		}
+	else {
+		push(@links, "<a href='edit_mon.cgi?id=$in{'id'}&changes=1&".
+			     "all=$in{'all'}'>$text{'mon_changes1'}</a>");
+		}
+	if (!$in{'all'}) {
+		push(@links, "<a href='edit_mon.cgi?id=$in{'id'}&changes=".
+			     "$in{'changes'}&all=1'>$text{'mon_all'}</a>");
+		}
+	if ($in{'changes'}) {
+		@history = grep { $_->{'old'} ne $_->{'new'} } @history;
+		}
+
+	# Check if any history events have a value
+	$anyvalue = 0;
+	foreach $h (@history) {
+		foreach my $hv (split(/\//, $h->{'value'})) {
+			my ($vhost, $v) = split(/=/, $hv, 2);
+			if ($v ne '') {
+				$anyvalue++;
+				last;
+				}
+			}
+		}
+
+	# Show history table
+	$links = &ui_links_row(\@links);
+	$table = &ui_columns_start([
+		$text{'mon_hwhen'},
+		$text{'mon_hold'},
+		$text{'mon_hnew'},
+		$anyvalue ? ( $text{'mon_hvalue'} ) : ( ) ]);
+	foreach $h (reverse(@history)) {
+		my @cols = ( &make_date($h->{'time'}) );
+		foreach my $s ($h->{'old'}, $h->{'new'}) {
+			my @ups;
+			my @statuses = split(/\s+/, $s);
+			foreach my $rs (@statuses) {
+				my ($host, $up) = split(/=/, $rs, 2);
+				$img = "<img src=".&get_status_icon($up).">";
+				if ($host ne "*") {
+					$img = $host.$img;
+					}
+				elsif (@statuses > 1) {
+					$img = &get_display_hostname().$img;
+					}
+				push(@ups, $img);
+				}
+			push(@cols, join(" ", @ups));
+			}
+		if ($anyvalue) {
+			my @vlist;
+			my @values = split(/\//, $h->{'value'});
+			my @nice_values = split(/\//, $h->{'nice_value'});
+			for(my $i=0; $i<@values; $i++) {
+				my ($vhost, $v) = split(/=/, $values[$i], 2);
+				my (undef, $nv) = split(/=/, $nice_values[$i], 2);
+				push(@vlist, $nv || $v);
+				}
+			push(@cols, join(" ", @vlist));
+			}
+		$table .= &ui_columns_row(\@cols);
+		}
+	$table .= &ui_columns_end();
+	if (@history) {
+		print &ui_table_row(undef, $links.$table, 2);
+		}
+	else {
+		print &ui_table_row(undef, $links.
+			&text('mon_nochanges', $config{'history_show'}), 2);
+		}
+	print &ui_hidden_table_end();
 	}
 
 # Show create/delete buttons

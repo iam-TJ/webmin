@@ -3,25 +3,43 @@
 
 $pop3_port = 110;
 $imap_port = 143;
-$cache_directory = $user_module_config_directory || $module_config_directory;
 
 @index_fields = ( "subject", "from", "to", "date", "size",
 		  "x-spam-status", "message-id" );
 $create_cid_count = 0;
+
+# get_folder_cache_directory(&folder)
+# Returns a directory used to cache IMAP or POP3 files for some folder
+sub get_folder_cache_directory
+{
+my ($folder) = @_;
+if ($user_module_config_directory) {
+	return $user_module_config_directory."/".$folder->{'id'}.".cache";
+	}
+else {
+	my $rv = $module_config_directory."/".$folder->{'id'}.".cache";
+	if (!-d $rv) {
+		$rv = $module_var_directory."/".$folder->{'id'}.".cache";
+		}
+	return $rv;
+	}
+}
 
 # mailbox_list_mails(start, end, &folder, [headersonly], [&error])
 # Returns an array whose size is that of the entire folder, with messages
 # in the specified range filled in.
 sub mailbox_list_mails
 {
+my @mail;
+&switch_to_folder_user($_[2]);
 if ($_[2]->{'type'} == 0) {
 	# List a single mbox formatted file
-	return &list_mails($_[2]->{'file'}, $_[0], $_[1]);
+	@mail = &list_mails($_[2]->{'file'}, $_[0], $_[1]);
 	}
 elsif ($_[2]->{'type'} == 1) {
 	# List a qmail maildir
 	local $md = $_[2]->{'file'};
-	return &list_maildir($md, $_[0], $_[1], $_[3]);
+	@mail = &list_maildir($md, $_[0], $_[1], $_[3]);
 	}
 elsif ($_[2]->{'type'} == 2) {
 	# Get mail headers/body from a remote POP3 server
@@ -43,11 +61,11 @@ elsif ($_[2]->{'type'} == 2) {
 
 	# Work out what range we want
 	local ($start, $end) = &compute_start_end($_[0], $_[1], scalar(@uidl));
-	local @rv = map { undef } @uidl;
+	@mail = map { undef } @uidl;
 
 	# For each message in the range, get the headers or body
 	local ($i, $f, %cached, %sizeneed);
-	local $cd = "$cache_directory/$_[2]->{'id'}.cache";
+	local $cd = &get_folder_cache_directory($_[2]);
 	if (opendir(CACHE, $cd)) {
 		while($f = readdir(CACHE)) {
 			if ($f =~ /^(\S+)\.body$/) {
@@ -70,7 +88,7 @@ elsif ($_[2]->{'type'} == 2) {
 		elsif ($cached{$u} == 1 || !$_[3]) {
 			# We need to get the entire mail
 			&pop3_command($h, "retr ".($i+1));
-			open(CACHE, ">$cd/$u.body");
+			open(CACHE, ">", "$cd/$u.body");
 			while(<$h>) {
 				s/\r//g;
 				last if ($_ eq ".\n");
@@ -83,7 +101,7 @@ elsif ($_[2]->{'type'} == 2) {
 		else {
 			# We just need the headers
 			&pop3_command($h, "top ".($i+1)." 0");
-			open(CACHE, ">$cd/$u.headers");
+			open(CACHE, ">", "$cd/$u.headers");
 			while(<$h>) {
 				s/\r//g;
 				last if ($_ eq ".\n");
@@ -104,7 +122,7 @@ elsif ($_[2]->{'type'} == 2) {
 			}
 		$mail->{'idx'} = $i;
 		$mail->{'id'} = $uidl[$i];
-		$rv[$i] = $mail;
+		$mail[$i] = $mail;
 		}
 
 	# Get sizes for mails if needed
@@ -115,9 +133,9 @@ elsif ($_[2]->{'type'} == 2) {
 			last if ($_ eq ".\n");
 			if (/^(\d+)\s+(\d+)/ && $sizeneed{$1-1}) {
 				# Add size to the mail cache
-				$rv[$1-1]->{'size'} = $2;
+				$mail[$1-1]->{'size'} = $2;
 				local $u = &safe_uidl($uidl[$1-1]);
-				open(CACHE, ">>$cd/$u.headers");
+				open(CACHE, ">>", "$cd/$u.headers");
 				print CACHE $2,"\n";
 				close(CACHE);
 				}
@@ -131,13 +149,11 @@ elsif ($_[2]->{'type'} == 2) {
 						: "$cd/$f.body");
 			}
 		}
-
-	return @rv;
 	}
 elsif ($_[2]->{'type'} == 3) {
 	# List an MH directory
 	local $md = $_[2]->{'file'};
-	return &list_mhdir($md, $_[0], $_[1], $_[3]);
+	@mail = &list_mhdir($md, $_[0], $_[1], $_[3]);
 	}
 elsif ($_[2]->{'type'} == 4) {
 	# Get headers and possibly bodies from an IMAP server
@@ -161,7 +177,7 @@ elsif ($_[2]->{'type'} == 4) {
 
 	# Work out what range we want
 	local ($start, $end) = &compute_start_end($_[0], $_[1], $count);
-	local @mail = map { undef } (0 .. $count-1);
+	@mail = map { undef } (0 .. $count-1);
 
 	# Get the headers or body of messages in the specified range
 	local @rv;
@@ -187,12 +203,9 @@ elsif ($_[2]->{'type'} == 4) {
 			$mail[$start+$i] = $mail;
 			}
 		}
-
-	return @mail;
 	}
 elsif ($_[2]->{'type'} == 5) {
 	# A composite folder, which combined two or more others.
-	local @mail;
 
 	# Work out exactly how big the total is
 	local ($sf, %len, $count);
@@ -229,8 +242,6 @@ elsif ($_[2]->{'type'} == 5) {
 		push(@mail, @submail);
 		$pos += $len{$sf};
 		}
-
-	return @mail;
 	}
 elsif ($_[2]->{'type'} == 6) {
 	# A virtual folder, which just contains ids of mails in other folders
@@ -249,7 +260,7 @@ elsif ($_[2]->{'type'} == 6) {
 
 	# For each sub-folder, get the IDs we need, and put them into the
 	# return array at the right place
-	local @mail = map { undef } (0 .. @$mems-1);
+	@mail = map { undef } (0 .. @$mems-1);
 	local $changed = 0;
 	foreach my $sfn (keys %wantmap) {
 		local $sf = $namemap{$sfn};
@@ -293,8 +304,14 @@ elsif ($_[2]->{'type'} == 6) {
 
 	# Filter out messages that don't exist anymore
 	@mail = grep { $_ ne 'GONE' } @mail;
-	return @mail;
 	}
+elsif ($_[2]->{'type'} == 7) {
+	# MBX format folder
+	print DEBUG "listing MBX $_[2]->{'file'}\n";
+	@mail = &list_mbxfile($_[2]->{'file'}, $_[0], $_[1]);
+	}
+&switch_from_folder_user($_[2]);
+return @mail;
 }
 
 # mailbox_select_mails(&folder, &ids, headersonly)
@@ -302,17 +319,19 @@ elsif ($_[2]->{'type'} == 6) {
 sub mailbox_select_mails
 {
 local ($folder, $ids, $headersonly) = @_;
+my @mail;
+&switch_to_folder_user($_[0]);
 if ($folder->{'type'} == 0) {
 	# mbox folder
-	return &select_mails($folder->{'file'}, $ids, $headersonly);
+	@mail = &select_mails($folder->{'file'}, $ids, $headersonly);
 	}
 elsif ($folder->{'type'} == 1) {
 	# Maildir folder
-	return &select_maildir($folder->{'file'}, $ids, $headersonly);
+	@mail = &select_maildir($folder->{'file'}, $ids, $headersonly);
 	}
 elsif ($folder->{'type'} == 3) {
 	# MH folder
-	return &select_mhdir($folder->{'file'}, $ids, $headersonly);
+	@mail = &select_mhdir($folder->{'file'}, $ids, $headersonly);
 	}
 elsif ($folder->{'type'} == 2) {
 	# POP folder
@@ -337,8 +356,7 @@ elsif ($folder->{'type'} == 2) {
 
 	# Work out what we have cached
 	local ($i, $f, %cached, %sizeneed);
-	local @rv;
-	local $cd = "$cache_directory/$_[2]->{'id'}.cache";
+	local $cd = &get_folder_cache_directory($_[2]);
 	if (opendir(CACHE, $cd)) {
 		while($f = readdir(CACHE)) {
 			if ($f =~ /^(\S+)\.body$/) {
@@ -364,7 +382,7 @@ elsif ($folder->{'type'} == 2) {
 		elsif ($cached{$u} == 1 || !$headersonly) {
 			# We need to get the entire mail
 			&pop3_command($h, "retr ".$uidlmap{$i});
-			open(CACHE, ">$cd/$u.body");
+			open(CACHE, ">", "$cd/$u.body");
 			while(<$h>) {
 				s/\r//g;
 				last if ($_ eq ".\n");
@@ -377,7 +395,7 @@ elsif ($folder->{'type'} == 2) {
 		else {
 			# We just need the headers
 			&pop3_command($h, "top ".$uidlmap{$i}." 0");
-			open(CACHE, ">$cd/$u.headers");
+			open(CACHE, ">", "$cd/$u.headers");
 			while(<$h>) {
 				s/\r//g;
 				last if ($_ eq ".\n");
@@ -398,7 +416,7 @@ elsif ($folder->{'type'} == 2) {
 			}
 		$mail->{'idx'} = $uidlmap{$i}-1;
 		$mail->{'id'} = $i;
-		push(@rv, $mail);
+		push(@mail, $mail);
 		}
 
 	# Get sizes for mails if needed
@@ -412,14 +430,12 @@ elsif ($folder->{'type'} == 2) {
 				local ($ns) = $sizeneed{$1};
 				$ns->{'size'} = $2;
 				local $u = &safe_uidl($uidl[$1-1]);
-				open(CACHE, ">>$cd/$u.headers");
+				open(CACHE, ">>", "$cd/$u.headers");
 				print CACHE $2,"\n";
 				close(CACHE);
 				}
 			}
 		}
-
-	return @rv;
 	}
 elsif ($folder->{'type'} == 4) {
 	# IMAP folder
@@ -450,7 +466,7 @@ elsif ($folder->{'type'} == 4) {
 
 	# Fetch each mail by ID. This is done in blocks of 1000, to avoid
 	# hitting a the IMAP server's max request limit
-	local @rv = map { undef } @$ids;
+	@mail = map { undef } @$ids;
 	local $wanted = $headersonly ? "(RFC822.SIZE UID FLAGS RFC822.HEADER)"
 				     : "(UID FLAGS BODY.PEEK[])";
 	if (@$ids) {
@@ -464,14 +480,12 @@ elsif ($folder->{'type'} == 4) {
 				local $mail = &parse_imap_mail($idxrv);
 				if ($mail) {
 					$mail->{'idx'} = $mail->{'imapidx'}-1;
-					$rv[$wantpos{$mail->{'id'}}] = $mail;
+					$mail[$wantpos{$mail->{'id'}}] = $mail;
 					}
 				}
 			}
 		}
-	print DEBUG "imap rv = ",scalar(@rv),"\n";
-
-	return @rv;
+	print DEBUG "imap rv = ",scalar(@mail),"\n";
 	}
 elsif ($folder->{'type'} == 5 || $folder->{'type'} == 6) {
 	# Virtual or composite folder .. for each ID, work out the folder and
@@ -504,12 +518,12 @@ elsif ($folder->{'type'} == 5 || $folder->{'type'} == 6) {
 			local $sfn = &folder_name($sf);
 			$namemap{$sfn} = $sf;
 			}
-		@allids = &mailbox_idlist($folder); 
+		@allids = &mailbox_idlist($folder);
 		}
 
 	# For each sub-folder, get the IDs we need, and put them into the
         # return array at the right place
-	local @mail = map { undef } @$ids;
+	@mail = map { undef } @$ids;
 	foreach my $sfn (keys %wantmap) {
 		local $sf = $namemap{$sfn};
 		local @wantids = map { $_->[0] } @{$wantmap{$sfn}};
@@ -540,8 +554,13 @@ elsif ($folder->{'type'} == 5 || $folder->{'type'} == 6) {
 		$folder->{'members'} = $mems;
 		&save_folder($folder, $folder);
 		}
-	return @mail;
 	}
+elsif ($folder->{'type'} == 7) {
+	# MBX folder
+	@mail = &select_mbxfile($folder->{'file'}, $ids, $headersonly);
+	}
+&switch_from_folder_user($_[0]);
+return @mail;
 }
 
 # mailbox_get_mail(&folder, id, headersonly)
@@ -573,16 +592,17 @@ return $mail;
 sub mailbox_idlist
 {
 local ($folder) = @_;
+&switch_to_folder_user($_[0]);
+my @idlist;
 if ($folder->{'type'} == 0) {
 	# mbox, for which IDs are mail positions
 	print DEBUG "starting to get IDs from $folder->{'file'}\n";
-	local @idlist = &idlist_mails($folder->{'file'});
+	@idlist = &idlist_mails($folder->{'file'});
 	print DEBUG "got ",scalar(@idlist)," ids\n";
-	return @idlist;
 	}
 elsif ($folder->{'type'} == 1) {
 	# maildir, for which IDs are filenames
-	return &idlist_maildir($folder->{'file'});
+	@idlist = &idlist_maildir($folder->{'file'});
 	}
 elsif ($folder->{'type'} == 2) {
 	# pop3, for which IDs are uidls
@@ -593,12 +613,11 @@ elsif ($folder->{'type'} == 2) {
 		else { &error(&text('save_elogin', $rv[1])); }
 		}
 	local $h = $rv[1];
-	local @uidl = &pop3_uidl($h);
-	return @uidl;
+	@idlist = &pop3_uidl($h);
 	}
 elsif ($folder->{'type'} == 3) {
 	# MH directory, for which IDs are file numbers
-	return &idlist_mhdir($folder->{'file'});
+	@idlist = &idlist_mhdir($folder->{'file'});
 	}
 elsif ($folder->{'type'} == 4) {
 	# IMAP, for which IDs are IMAP UIDs
@@ -615,22 +634,18 @@ elsif ($folder->{'type'} == 4) {
         $folder->{'lastchange'} = $irv[3] if ($irv[3]);
 
 	@rv = &imap_command($h, "FETCH 1:$count UID");
-	local @uids;
 	foreach my $uid (@{$rv[1]}) {
 		if ($uid =~ /UID\s+(\d+)/) {
-			push(@uids, $1);
+			push(@idlist, $1);
 			}
 		}
-	return @uids;
 	}
 elsif ($folder->{'type'} == 5) {
 	# Composite, IDs come from sub-folders
-	local @rv;
 	foreach my $sf (@{$folder->{'subfolders'}}) {
 		local $sfn = &folder_name($sf);
-		push(@rv, map { $sfn."\t".$_ } &mailbox_idlist($sf));
+		push(@idlist, map { $sfn."\t".$_ } &mailbox_idlist($sf));
 		}
-	return @rv;
 	}
 elsif ($folder->{'type'} == 6) {
 	# Virtual, IDs come from sub-folders (where they exist)
@@ -642,18 +657,18 @@ elsif ($folder->{'type'} == 6) {
 		push(@{$wantmap{$sfn}}, $sid);
 		$namemap{$sfn} = $sf;
 		}
-	local @rv;
 	foreach my $sfn (keys %wantmap) {
 		local %wantids = map { $_, 1 } @{$wantmap{$sfn}};
 		local $sf = $namemap{$sfn};
 		foreach my $sfid (&mailbox_idlist($sf)) {
 			if ($wantids{$sfid}) {
-				push(@rv, $sfn."\t".$sfid);
+				push(@idlist, $sfn."\t".$sfid);
 				}
 			}
 		}
-	return @rv;
 	}
+&switch_from_folder_user($_[0]);
+return @idlist;
 }
 
 # compute_start_end(start, end, count)
@@ -686,6 +701,7 @@ else {
 sub mailbox_list_mails_sorted
 {
 local ($start, $end, $folder, $headersonly, $error, $field, $dir) = @_;
+print DEBUG "mailbox_list_mails_sorted from $start to $end\n";
 if (!$field) {
 	# Default to current ordering
 	($field, $dir) = &get_sort_field($folder);
@@ -952,8 +968,9 @@ if ($folder->{'type'} != 4 &&
 			local $iff = $if->[0];
 			local ($neg) = ($iff =~ s/^\!//);
 			next if ($kf ne $iff);
-			if (!$neg && $v =~ /\Q$if->[1]\E/i ||
-			    $neg && $v !~ /\Q$if->[1]\E/i) {
+			local $re = $if->[2] ? $if->[1] : "\Q$if->[1]\E";
+			if (!$neg && $v =~ /$re/i ||
+			    $neg && $v !~ /$re/i) {
 				push(@{$idxmatches{"$if->[0]/$if->[1]"}}, $ki);
 				}
 			}
@@ -1027,14 +1044,21 @@ elsif ($folder->{'type'} == 4) {
 	# Do the search to get back a list of matching numbers
 	local @search;
 	foreach $f (@{$_[0]}) {
-		local $field = $f->[0];
+		local $field = $f->[0] eq "date" ? "on" :
+			       $f->[0] eq "all" ? "body" : $f->[0];
 		local $neg = ($field =~ s/^\!//);
 		local $what = $f->[1];
 		if ($field ne "size") {
 			$what = "\"".$what."\""
 			}
 		$field = "LARGER" if ($field eq "size");
-		local $search = uc($field)." ".$what."";
+		local $search;
+		if ($field =~ /^X-/i) {
+			$search = "header ".uc($field)." ".$what."";
+			}
+		else {
+			$search = uc($field)." ".$what."";
+			}
 		$search = "NOT $search" if ($neg);
 		push(@searches, $search);
 		}
@@ -1052,7 +1076,7 @@ elsif ($folder->{'type'} == 4) {
 			}
 		}
 	@rv = &imap_command($h, "UID SEARCH $searches");
-	&error(&text('save_esearch', $rv[3])) if (!$rv[0]); 
+	&error(&text('save_esearch', $rv[3])) if (!$rv[0]);
 
 	# Get back the IDs we want
 	local ($srch) = grep { $_ =~ /^\*\s+SEARCH/i } @{$rv[1]};
@@ -1120,6 +1144,7 @@ sub mailbox_delete_mail
 {
 return undef if (&is_readonly_mode());
 local $f = shift(@_);
+&switch_to_folder_user($f);
 if ($userconfig{'delete_mode'} == 1 && !$f->{'trash'} && !$f->{'spam'} &&
     !$f->{'notrash'}) {
 	# Copy to trash folder first .. if we have one
@@ -1152,7 +1177,7 @@ elsif ($f->{'type'} == 2) {
 	local $h = $rv[1];
 	local @uidl = &pop3_uidl($h);
 	local $m;
-	local $cd = "$cache_directory/$f->{'id'}.cache";
+	local $cd = &get_folder_cache_directory($f);
 	foreach $m (@_) {
 		local $idx = &indexof($m->{'id'}, @uidl);
 		if ($idx >= 0) {
@@ -1178,10 +1203,10 @@ elsif ($f->{'type'} == 4) {
 	foreach $m (@_) {
 		@rv = &imap_command($h, "UID STORE ".$m->{'id'}.
 					" +FLAGS (\\Deleted)");
-		&error(&text('save_edelete', $rv[3])) if (!$rv[0]); 
+		&error(&text('save_edelete', $rv[3])) if (!$rv[0]);
 		}
 	@rv = &imap_command($h, "EXPUNGE");
-	&error(&text('save_edelete', $rv[3])) if (!$rv[0]); 
+	&error(&text('save_edelete', $rv[3])) if (!$rv[0]);
 	}
 elsif ($f->{'type'} == 5 || $f->{'type'} == 6) {
 	# Delete from underlying folder(s), and from virtual index
@@ -1205,6 +1230,7 @@ elsif ($f->{'type'} == 5 || $f->{'type'} == 6) {
 		&save_folder($f, $f);
 		}
 	}
+&switch_from_folder_user($f);
 
 # Always force a re-check of the index when deleting, as we may not detect
 # the change (especially for IMAP, where UIDNEXT may not change). This isn't
@@ -1220,6 +1246,7 @@ sub mailbox_empty_folder
 {
 return undef if (&is_readonly_mode());
 local $f = $_[0];
+&switch_to_folder_user($f);
 if ($f->{'type'} == 0) {
 	# mbox format mail file
 	&empty_mail($f->{'file'});
@@ -1258,10 +1285,10 @@ elsif ($f->{'type'} == 4) {
 	for($i=1; $i<=$count; $i++) {
 		@rv = &imap_command($h, "STORE ".$i.
 					" +FLAGS (\\Deleted)");
-		&error(&text('save_edelete', $rv[3])) if (!$rv[0]); 
+		&error(&text('save_edelete', $rv[3])) if (!$rv[0]);
 		}
 	@rv = &imap_command($h, "EXPUNGE");
-	&error(&text('save_edelete', $rv[3])) if (!$rv[0]); 
+	&error(&text('save_edelete', $rv[3])) if (!$rv[0]);
 	}
 elsif ($f->{'type'} == 5) {
 	# Empty each sub-folder
@@ -1282,6 +1309,7 @@ elsif ($f->{'type'} == 6) {
 		&save_folder($f);
 		}
 	}
+&switch_from_folder_user($f);
 
 # Trash the folder index
 if ($folder->{'sortable'}) {
@@ -1297,37 +1325,45 @@ sub mailbox_copy_folder
 local ($src, $dest) = @_;
 if ($src->{'type'} == 0 && $dest->{'type'} == 0) {
 	# mbox to mbox .. just read and write the files
-	&open_readfile(SOURCE, $src->{'file'});
-	&open_tempfile(DEST, ">>$dest->{'file'}");
-	while(read(SOURCE, $buf, 1024) > 0) {
-		&print_tempfile(DEST, $buf);
+	&switch_to_folder_user($src);
+	&open_as_mail_user(SOURCE, $src->{'file'});
+	&switch_from_folder_user($src);
+	&switch_to_folder_user($dest);
+	&open_as_mail_user(DEST, ">>$dest->{'file'}");
+	while(read(SOURCE, $buf, 32768) > 0) {
+		print DEST $buf;
 		}
-	&close_tempfile(DEST);
+	close(DEST);
 	close(SOURCE);
+	&switch_from_folder_user($dest);
 	}
 elsif ($src->{'type'} == 1 && $dest->{'type'} == 1) {
 	# maildir to maildir .. just copy the files
 	local @files = &get_maildir_files($src->{'file'});
 	foreach my $f (@files) {
 		local $fn = &unique_maildir_filename($dest);
-		&copy_source_dest($f, "$dest->{'file'}/$fn");
+		&copy_source_dest_as_mail_user($f, "$dest->{'file'}/$fn");
 		}
 	&mailbox_fix_permissions($dest);
 	}
 elsif ($src->{'type'} == 1 && $dest->{'type'} == 0) {
 	# maildir to mbox .. append all the files
-	local @files = &get_maildir_files($src->{'file'});
-	&open_tempfile(DEST, ">>$dest->{'file'}");
+	&switch_to_folder_user($dest);
+	&open_as_mail_user(DEST, ">>$dest->{'file'}");
+	&switch_from_folder_user($dest);
 	local $fromline = &make_from_line("webmin\@example.com")."\n";
+	&switch_to_folder_user($src);
+	local @files = &get_maildir_files($src->{'file'});
 	foreach my $f (@files) {
-		&open_readfile(SOURCE, $f);
-		&print_tempfile("DEST", $fromline);
+		&open_as_mail_user(SOURCE, $f);
+		print DEST $fromline;
 		while(read(SOURCE, $buf, 1024) > 0) {
-			&print_tempfile(DEST, $buf);
+			print DEST $buf;
 			}
 		close(SOURCE);
 		}
-	&close_tempfile(DEST);
+	close(DEST);
+	&switch_from_folder_user($src);
 	}
 else {
 	# read in all mail and write out, in 100 message blocks
@@ -1351,28 +1387,40 @@ local $src = shift(@_);
 local $dst = shift(@_);
 local $now = time();
 local $hn = &get_system_hostname();
-&create_folder_maildir($dst);
 local $fix_index;
 if (($src->{'type'} == 1 || $src->{'type'} == 3) && $dst->{'type'} == 1) {
 	# Can just move mail files to Maildir names
-	local $dd = $dst->{'file'};
+	if ($src->{'user'} eq $dst->{'user'}) {
+		&switch_to_folder_user($dst);
+		}
 	&create_folder_maildir($dst);
-	foreach $m (@_) {
-		rename($m->{'file'}, "$dd/cur/$now.$$.$hn");
+	local $dd = $dst->{'file'};
+	foreach my $m (@_) {
+		&rename_as_mail_user($m->{'file'}, "$dd/cur/$now.$$.$hn");
 		$now++;
 		}
 	&mailbox_fix_permissions($dst);
+	if ($src->{'user'} eq $dst->{'user'}) {
+		&switch_from_folder_user($dst);
+		}
 	$fix_index = 1;
 	}
 elsif (($src->{'type'} == 1 || $src->{'type'} == 3) && $dst->{'type'} == 3) {
 	# Can move and rename to MH numbering
+	if ($src->{'user'} eq $dst->{'user'}) {
+		&switch_to_folder_user($dst);
+		}
+	&create_folder_maildir($dst);
 	local $dd = $dst->{'file'};
 	local $num = &max_mhdir($dst->{'file'}) + 1;
-	foreach $m (@_) {
-		rename($m->{'file'}, "$dd/$num");
+	foreach my $m (@_) {
+		&rename_as_mail_user($m->{'file'}, "$dd/$num");
 		$num++;
 		}
 	&mailbox_fix_permissions($dst);
+	if ($src->{'user'} eq $dst->{'user'}) {
+		&switch_from_folder_user($dst);
+		}
 	$fix_index = 1;
 	}
 else {
@@ -1380,6 +1428,8 @@ else {
 	my @mdel;
 	my $r;
 	my $save_read = &get_product_name() eq "usermin";
+	&switch_to_folder_user($dst);
+	&create_folder_maildir($dst);
 	foreach my $m (@_) {
 		$r = &get_mail_read($src, $m) if ($save_read);
 		my $mcopy = { %$m };
@@ -1388,6 +1438,7 @@ else {
 		push(@mdel, $m);
 		}
 	local $src->{'notrash'} = 1;	# Prevent saving to trash
+	&switch_from_folder_user($dst);
 	&mailbox_delete_mail($src, @mdel);
 	}
 }
@@ -1398,8 +1449,10 @@ else {
 sub mailbox_fix_permissions
 {
 local ($f, $st) = @_;
+return 0 if ($< != 0);			# Only makes sense when running as root
+return 0 if ($main::mail_open_user);	# File ops are already done as the
+					# correct user
 $st ||= [ stat($f->{'file'}) ];
-return 0 if ($< != 0);		# Only makes sense when running as root
 if ($f->{'type'} == 0) {
 	# Set perms on a single file
 	&set_ownership_permissions($st->[4], $st->[5], $st->[2], $f->{'file'});
@@ -1418,13 +1471,14 @@ return 0;
 # Moves all mail from one folder to another, possibly converting the type
 sub mailbox_move_folder
 {
-return undef if (&is_readonly_mode());
 local ($src, $dst) = @_;
+return undef if (&is_readonly_mode());
+&switch_to_folder_user($dst);
 if ($src->{'type'} == $dst->{'type'} && !$src->{'remote'}) {
 	# Can just move the file or dir
-	local @st = stat($dst->{'file'});
-	system("rm -rf ".quotemeta($dst->{'file'}));
-	system("mv ".quotemeta($src->{'file'})." ".quotemeta($dst->{'file'}));
+	local @st = stat($src->{'file'});
+	&unlink_file($dst->{'file'});
+	&rename_as_mail_user($src->{'file'}, $dst->{'file'});
 	if (@st) {
 		&mailbox_fix_permissions($dst, \@st);
 		}
@@ -1433,17 +1487,18 @@ elsif (($src->{'type'} == 1 || $src->{'type'} == 3) && $dst->{'type'} == 0) {
 	# For Maildir or MH to mbox moves, just append files
 	local @files = $src->{'type'} == 1 ? &get_maildir_files($src->{'file'})
 					   : &get_mhdir_files($src->{'file'});
-	&open_tempfile(DEST, ">>$dst->{'file'}");
+	&open_as_mail_user(DEST, ">>$dst->{'file'}");
 	local $fromline = &make_from_line("webmin\@example.com");
 	foreach my $f (@files) {
-		&open_readfile(SOURCE, $f);
-		&print_tempfile("DEST", $fromline);
-		while(read(SOURCE, $buf, 1024) > 0) {
-			&print_tempfile(DEST, $buf);
+		&open_as_mail_user(SOURCE, $f);
+		print DEST $fromline;
+		while(read(SOURCE, $buf, 32768) > 0) {
+			print DEST $buf;
 			}
-		&unlink_file($f);
+		close(SOURCE);
+		&unlink_as_mail_user($f);
 		}
-	&close_tempfile(DEST);
+	close(DEST);
 	}
 else {
 	# Need to read in and write out. But do it in 1000-message blocks
@@ -1458,6 +1513,7 @@ else {
 		}
 	&mailbox_empty_folder($src);
 	}
+&switch_from_folder_user($dst);
 
 # Delete source folder index
 if ($src->{'sortable'}) {
@@ -1473,7 +1529,6 @@ return undef if (&is_readonly_mode());
 local $src = shift(@_);
 local $dst = shift(@_);
 local $now = time();
-&create_folder_maildir($dst);
 if ($src->{'type'} == 6 && $dst->{'type'} == 6) {
 	# Copying from one virtual folder to another, so just copy the
 	# reference
@@ -1495,32 +1550,54 @@ else {
 	# only if in Usermin.
 	my $r;
 	my $save_read = &get_product_name() eq "usermin";
+	&switch_to_folder_user($dst);
+	&create_folder_maildir($dst);
 	foreach my $m (@_) {
 		$r = &get_mail_read($src, $m) if ($save_read);
 		my $mcopy = { %$m };
 		&write_mail_folder($mcopy, $dst);
 		&set_mail_read($dst, $mcopy, $r) if ($save_read);
 		}
+	&switch_from_folder_user($dst);
 	}
 }
 
 # folder_type(file_or_dir)
+# Returns a numeric folder type based on the contents
 sub folder_type
 {
-return -d "$_[0]/cur" ? 1 : -d $_[0] ? 3 : 0;
+my ($f) = @_;
+if (-d "$f/cur") {
+	# Maildir directory
+	return 1;
+	}
+elsif (-d $f) {
+	# MH directory
+	return 3;
+	}
+else {
+	# Check for MBX format
+	open(MBXTEST, "<", $f);
+	my $first;
+	read(MBXTEST, $first, 5);
+	close(MBXTEST);
+	return $first eq "*mbx*" ? 7 : 0;
+	}
 }
 
 # create_folder_maildir(&folder)
 # Ensure that a maildir folder has the needed new, cur and tmp directories
 sub create_folder_maildir
 {
-mkdir($folders_dir, 0700);
+if ($folders_dir) {
+	mkdir($folders_dir, 0700);
+	}
 if ($_[0]->{'type'} == 1) {
 	local $id = $_[0]->{'file'};
-	mkdir($id, 0700);
-	mkdir("$id/cur", 0700);
-	mkdir("$id/new", 0700);
-	mkdir("$id/tmp", 0700);
+	&mkdir_as_mail_user($id, 0700);
+	&mkdir_as_mail_user("$id/cur", 0700);
+	&mkdir_as_mail_user("$id/new", 0700);
+	&mkdir_as_mail_user("$id/tmp", 0700);
 	}
 }
 
@@ -1529,6 +1606,7 @@ if ($_[0]->{'type'} == 1) {
 sub write_mail_folder
 {
 return undef if (&is_readonly_mode());
+&switch_to_folder_user($_[1]);
 &create_folder_maildir($_[1]);
 local $needid;
 if ($_[1]->{'type'} == 1) {
@@ -1569,7 +1647,7 @@ elsif ($_[1]->{'type'} == 4) {
 	$text =~ s/^From.*\r?\n//;	# Not part of IMAP format
 	@rv = &imap_command($h, sprintf "APPEND \"%s\" {%d}\r\n%s",
 			$_[1]->{'mailbox'} || "INBOX", length($text), $text);
-	&error(&text('save_eappend', $rv[3])) if (!$rv[0]); 
+	&error(&text('save_eappend', $rv[3])) if (!$rv[0]);
 	$needid = 1;
 	}
 elsif ($_[1]->{'type'} == 5) {
@@ -1583,6 +1661,7 @@ elsif ($_[1]->{'type'} == 6) {
 	# XXX not done
 	&error("Cannot add mail to virtual folders");
 	}
+&switch_from_folder_user($_[1]);
 if ($needid) {
 	# Get the ID of the new mail
 	local @idlist = &mailbox_idlist($_[1]);
@@ -1596,8 +1675,8 @@ if ($needid) {
 sub mailbox_modify_mail
 {
 local ($oldmail, $mail, $folder, $textonly) = @_;
-
 return undef if (&is_readonly_mode());
+&switch_to_folder_user($_[2]);
 if ($folder->{'type'} == 1) {
 	# Just replace the existing file
 	&modify_maildir($oldmail, $mail, $textonly);
@@ -1624,6 +1703,7 @@ elsif ($folder->{'type'} == 5 || $folder->{'type'} == 6) {
 else {
 	&error("Cannot modify mail in this type of folder!");
 	}
+&switch_from_folder_user($_[2]);
 
 # Delete the message being modified from its index, to force re-generation
 # with new details
@@ -1637,17 +1717,20 @@ if ($folder->{'sortable'}) {
 # Returns the number of messages in some folder
 sub mailbox_folder_size
 {
-if ($_[0]->{'type'} == 0) {
+local ($f, $est) = @_;
+&switch_to_folder_user($f);
+local $rv;
+if ($f->{'type'} == 0) {
 	# A mbox formatted file
-	return &count_mail($_[0]->{'file'});
+	$rv = &count_mail($f->{'file'});
 	}
-elsif ($_[0]->{'type'} == 1) {
+elsif ($f->{'type'} == 1) {
 	# A qmail maildir
-	return &count_maildir($_[0]->{'file'});
+	$rv = &count_maildir($f->{'file'});
 	}
-elsif ($_[0]->{'type'} == 2) {
+elsif ($f->{'type'} == 2) {
 	# A POP3 server
-	local @rv = &pop3_login($_[0]);
+	local @rv = &pop3_login($f);
 	if ($rv[0] != 1) {
 		if ($rv[0] == 0) { &error($rv[1]); }
 		else { &error(&text('save_elogin', $rv[1])); }
@@ -1661,44 +1744,44 @@ elsif ($_[0]->{'type'} == 2) {
 		&error($st[1]);
 		}
 	}
-elsif ($_[0]->{'type'} == 3) {
+elsif ($f->{'type'} == 3) {
 	# An MH directory
-	return &count_mhdir($_[0]->{'file'});
+	$rv = &count_mhdir($f->{'file'});
 	}
-elsif ($_[0]->{'type'} == 4) {
+elsif ($f->{'type'} == 4) {
 	# An IMAP server
-	local @rv = &imap_login($_[0]);
+	local @rv = &imap_login($f);
 	if ($rv[0] != 1) {
 		if ($rv[0] == 0) { &error($rv[1]); }
 		elsif ($rv[0] == 3) { &error(&text('save_emailbox', $rv[1])); }
 		elsif ($rv[0] == 2) { &error(&text('save_elogin2', $rv[1])); }
 		}
-        $_[0]->{'lastchange'} = $rv[3];
-	return $rv[2];
+        $f->{'lastchange'} = $rv[3];
+	$rv = $rv[2];
 	}
-elsif ($_[0]->{'type'} == 5) {
+elsif ($f->{'type'} == 5) {
 	# A composite folder - the size is just that of the sub-folders
-	my $rv = 0;
-	foreach my $sf (@{$_[0]->{'subfolders'}}) {
+	$rv = 0;
+	foreach my $sf (@{$f->{'subfolders'}}) {
 		$rv += &mailbox_folder_size($sf);
 		}
-	return $rv;
 	}
-elsif ($_[0]->{'type'} == 6 && !$_[1]) {
+elsif ($f->{'type'} == 6 && !$est) {
 	# A virtual folder .. we need to exclude messages that no longer
 	# exist in the parent folders
-	my $rv = 0;
-	foreach my $msg (@{$_[0]->{'members'}}) {
+	$rv = 0;
+	foreach my $msg (@{$f->{'members'}}) {
 		if (&mailbox_get_mail($msg->[0], $msg->[1])) {
 			$rv++;
 			}
 		}
-	return $rv;
 	}
-elsif ($_[0]->{'type'} == 6 && $_[1]) {
+elsif ($f->{'type'} == 6 && $est) {
 	# A virtual folder .. but we can just use the last member count
-	return scalar(@{$_[0]->{'members'}});
+	$rv = scalar(@{$f->{'members'}});
 	}
+&switch_from_folder_user($f);
+return $rv;
 }
 
 # mailbox_folder_unread(&folder)
@@ -1781,27 +1864,32 @@ if ($folder->{'type'} == 4) {
 		local $pm = $f->[0] ? "+" : "-";
 		@rv = &imap_command($h, "UID STORE ".$mail->{'id'}.
 					" ".$pm."FLAGS (".$f->[1].")");
-		&error(&text('save_eflag', $rv[3])) if (!$rv[0]); 
+		&error(&text('save_eflag', $rv[3])) if (!$rv[0]);
 		}
 	}
 elsif ($folder->{'type'} == 1) {
 	# Add flag to special characters at end of filename
-	local ($base, %flags);
-	if ($mail->{'file'} =~ /^(.*):2,([A-Z]*)$/) {
+	my $file = $mail->{'file'} || $mail->{'id'};
+	my $path;
+	if (!$mail->{'file'}) {
+		$path = "$folder->{'file'}/";
+		}
+	my ($base, %flags);
+	if ($file =~ /^(.*):2,([A-Z]*)$/) {
 		$base = $1;
 		%flags = map { $_, 1 } split(//, $2);
 		}
 	else {
-		$base = $mail->{'file'};
+		$base = $file;
 		}
 	$flags{'S'} = $read;
 	$flags{'F'} = $special;
 	$flags{'R'} = $replied if (defined($replied));
-	local $newfile = $base.":2,".
-			 join("", grep { $flags{$_} } keys %flags);
-	if ($newfile ne $mail->{'file'}) {
+	my $newfile = $base.":2,".
+			 join("", grep { $flags{$_} } sort(keys %flags));
+	if ($newfile ne $file) {
 		# Need to rename file
-		rename($mail->{'file'}, $newfile);
+		rename("$path$file", "$path$newfile");
 		$newfile =~ s/^(.*)\/((cur|tmp|new)\/.*)$/$2/;
 		$mail->{'id'} = $newfile;
 		&flush_maildir_cachefile($folder->{'file'});
@@ -1920,14 +2008,17 @@ foreach $f (keys %imap_login_handle) {
 # unread, and the number special.
 sub imap_login
 {
-local $h = $imap_login_handle{$_[0]->{'id'}};
+local ($folder) = @_;
+local $key = join("/", $folder->{'server'}, $folder->{'port'},
+		       $folder->{'user'});
+local $h = $imap_login_handle{$key};
 local @rv;
 if (!$h) {
 	# Need to open socket
 	$h = "IMAP".time().++$imap_login_count;
 	local $error;
-	print DEBUG "Connecting to IMAP server $_[0]->{'server'}:$_[0]->{'port'}\n";
-	&open_socket($_[0]->{'server'}, $_[0]->{'port'} || $imap_port,
+	print DEBUG "Connecting to IMAP server $folder->{'server'}:$folder->{'port'}\n";
+	&open_socket($folder->{'server'}, $folder->{'port'} || $imap_port,
 		     $h, \$error);
 	print DEBUG "IMAP error=$error\n" if ($error);
 	return (0, $error) if ($error);
@@ -1936,18 +2027,19 @@ if (!$h) {
 	# Login normally
 	@rv = &imap_command($h);
 	return (0, $rv[3]) if (!$rv[0]);
-	local $user = $_[0]->{'user'} eq '*' ? $remote_user : $_[0]->{'user'};
-	local $pass = $_[0]->{'pass'};
+	local $user = $folder->{'user'} eq '*' ? $remote_user
+					       : $folder->{'user'};
+	local $pass = $folder->{'pass'};
 	$pass =~ s/\\/\\\\/g;
 	$pass =~ s/"/\\"/g;
 	@rv = &imap_command($h,"login \"$user\" \"$pass\"");
 	return (2, $rv[3]) if (!$rv[0]);
 
-	$imap_login_handle{$_[0]->{'id'}} = $h;
+	$imap_login_handle{$key} = $h;
 	}
 
 # Select the right folder (if one was given)
-@rv = &imap_command($h, "select \"".($_[0]->{'mailbox'} || "INBOX")."\"");
+@rv = &imap_command($h, "select \"".($folder->{'mailbox'} || "INBOX")."\"");
 return (3, $rv[3]) if (!$rv[0]);
 local $count = $rv[2] =~ /\*\s+(\d+)\s+EXISTS/i ? $1 : undef;
 local $uidnext = $rv[2] =~ /UIDNEXT\s+(\d+)/ ? $1 : undef;
@@ -1961,6 +2053,10 @@ return (1, $h, $count, $uidnext);
 sub imap_command
 {
 local ($h, $c) = @_;
+if (!$h) {
+	local $err = "Invalid IMAP handle";
+	return (0, [ $err ], $err, $err);
+	}
 local @rv;
 
 # Send the command, and read lines until a non-* one is found
@@ -2030,7 +2126,7 @@ if ($lline =~ /^(\S+)\s+OK\s*(.*)/) {
 	}
 else {
 	# Command failed!
-	return (0, \@rv, $j, $lline =~ /^(\S+)\s+(\S+)\s*(.*)/ ? $3 : undef);
+	return (0, \@rv, $j, $lline =~ /^(\S+)\s+(\S+)\s*(.*)/ ? $3 : $lline);
 	}
 }
 
@@ -2182,9 +2278,9 @@ elsif ($_[1] == 3) {
 	if ($textbody) {
 		$body = $textbody;
 		}
-	else {
+	elsif ($htmlbody) {
 		local $text = &html_to_text($htmlbody->{'data'});
-		$body = $textbody = 
+		$body = $textbody =
 			{ 'data' => $text };
 		}
 	}
@@ -2240,7 +2336,7 @@ if ($url =~ /^#/) {
 	return $before.$url.$after;
 	}
 elsif ($url =~ /^cid:/i) {
-	# Definately safe (CIDs are harmless)
+	# Definitely safe (CIDs are harmless)
 	return $before.$url.$after;
 	}
 elsif ($url =~ /^(http:|https:)/) {
@@ -2292,7 +2388,7 @@ local ($h2, $lynx);
 if (($h2 = &has_command("html2text")) || ($lynx = &has_command("lynx"))) {
 	# Can use a commonly available external program
 	local $temp = &transname().".html";
-	open(TEMP, ">$temp");
+	open(TEMP, ">", $temp);
 	print TEMP $_[0];
 	close(TEMP);
 	open(OUT, ($lynx ? "$lynx -dump $temp" : "$h2 $temp")." 2>/dev/null |");
@@ -2347,7 +2443,6 @@ foreach my $f (@$folders) {
 	}
 return &ui_select($name, $byid ? &folder_name($folder) : $folder->{'index'},
 		  \@opts, 1, 0, 0, 0, $auto ? "onChange='form.submit()'" : "");
-return $sel;
 }
 
 # folder_size(&folder, ...)
@@ -2356,7 +2451,7 @@ sub folder_size
 {
 local ($f, $total);
 foreach $f (@_) {
-	if ($f->{'type'} == 0) {
+	if ($f->{'type'} == 0 || $f->{'type'} == 7) {
 		# Single mail file - size is easy
 		local @st = stat($f->{'file'});
 		$f->{'size'} = $st[7];
@@ -2364,7 +2459,11 @@ foreach $f (@_) {
 	elsif ($f->{'type'} == 1) {
 		# Maildir folder size is that of all files in it, except
 		# sub-folders.
-		$f->{'size'} = &recursive_disk_usage($f->{'file'}, '^\\.');
+		$f->{'size'} = 0;
+		foreach my $sd ("cur", "new", "tmp") {
+			$f->{'size'} += &recursive_disk_usage(
+					$f->{'file'}."/".$sd, '^\\.');
+			}
 		}
 	elsif ($f->{'type'} == 3) {
 		# MH folder size is that of all mail files
@@ -2459,8 +2558,9 @@ foreach $f (@files) {
 		 $f eq "maildirfolder" || $f eq "maildirsize" ||
 		 $f eq "maildircache" || $f eq ".subscriptions" ||
                  $f eq ".usermin-maildircache" || $f =~ /^dovecot\.index/ ||
-		 $f =~ /^dovecot-uidvalidity.*$/ || $f eq "subscriptions" ||
-		 $f =~ /\.webmintmp(\.\d+)$/ || $f eq "dovecot-keywords");
+		 $f =~ /^dovecot-uidvalidity/ || $f eq "subscriptions" ||
+		 $f =~ /\.webmintmp\.\d+$/ || $f eq "dovecot-keywords" ||
+		 $f =~ /^dovecot\.mailbox/);
 	local $p = "$_[0]/$f";
 	local $added = 0;
 	if ($_[1] || !-d $p || -d "$p/cur") {
@@ -2627,11 +2727,11 @@ foreach my $a (@$attach) {
 return @rv;
 }
 
-# quoted_message(&mail, quote-mode, sig, 0=any,1=text,2=html)
+# quoted_message(&mail, quote-mode, sig, 0=any,1=text,2=html, sig-at-top?)
 # Returns the quoted text, html-flag and body attachment
 sub quoted_message
 {
-local ($mail, $qu, $sig, $bodymode) = @_;
+local ($mail, $qu, $sig, $bodymode, $sigtop) = @_;
 local $mode = $bodymode == 1 ? 1 :
 	      $bodymode == 2 ? 2 :
 	      %userconfig ? $userconfig{'view_html'} :
@@ -2667,7 +2767,13 @@ if (($cfg->{'html_edit'} == 2 ||
 			$quote = &html_escape($writer)."\n".
 				 "<blockquote type=cite>\n".
 				 &safe_html($htmlbody->{'data'}).
-				 "</blockquote>".$sig."<br>\n";
+				 "</blockquote>";
+			if ($sigtop) {
+				$quote = $sig."<br>\n".$quote;
+				}
+			else {
+				$quote = $quote.$sig."<br>\n";
+				}
 			}
 		elsif ($qu && $qm == 1) {
 			# Quoted HTML below line
@@ -2677,8 +2783,13 @@ if (($cfg->{'html_edit'} == 2 ||
 			}
 		else {
 			# Un-quoted HTML
-			$quote = &safe_html($htmlbody->{'data'}).
-				 $sig."<br>\n";
+			$quote = &safe_html($htmlbody->{'data'});
+			if ($sigtop) {
+				$quote = $sig."<br>\n".$quote;
+				}
+			else {
+				$quote = $quote.$sig."<br>\n";
+				}
 			}
 		}
 	elsif ($plainbody) {
@@ -2691,7 +2802,13 @@ if (($cfg->{'html_edit'} == 2 ||
 			$quote = &html_escape($writer)."\n".
 				 "<blockquote type=cite>\n".
 				 "<pre>$pd</pre>".
-				 "</blockquote>".$sig."<br>\n";
+				 "</blockquote>";
+			if ($sigtop) {
+				$quote = $sig."<br>\n".$quote;
+				}
+			else {
+				$quote = $quote.$sig."<br>\n";
+				}
 			}
 		elsif ($qu && $qm == 1) {
 			# Quoted plain text as HTML below line
@@ -2701,8 +2818,13 @@ if (($cfg->{'html_edit'} == 2 ||
 			}
 		else {
 			# Un-quoted plain text as HTML
-			$quote = "<pre>$pd</pre>".
-				 $sig."<br>\n";
+			$quote = "<pre>$pd</pre>";
+			if ($sigtop) {
+				$quote = $sig."<br>\n".$quote;
+				}
+			else {
+				$quote = $quote.$sig."<br>\n";
+				}
 			}
 		}
 	$html_edit = 1;
@@ -2722,7 +2844,12 @@ else {
 			&wrap_lines($quote, 78));
 		}
 	$quote = $writer."\n".$quote if ($quote && $qu);
-	$quote .= "$sig\n" if ($sig);
+	if ($sig && $sigtop) {
+		$quote = $sig."\n".$quote;
+		}
+	elsif ($sig && !$sigtop) {
+		$quote = $quote.$sig."\n";
+		}
 	}
 return ($quote, $html_edit, $body);
 }
@@ -2828,24 +2955,25 @@ return undef;
 # Finds a folder by ID, filename, server name or displayed name
 sub find_named_folder
 {
+local ($name, $folders, $cache) = @_;
 local $rv;
-if ($_[2] && exists($_[2]->{$_[0]})) {
+if ($cache && exists($cache->{$name})) {
 	# In cache
-	$rv = $_[2]->{$_[0]};
+	$rv = $cache->{$name};
 	}
 else {
 	# Need to lookup
-	($rv) = grep { $_->{'id'} eq $_[0] } @{$_[1]} if (!$rv);
+	($rv) = grep { &folder_name($_) eq $name } @$folders if (!$rv);
 	($rv) = grep { my $escfile = $_->{'file'};
 		       $escfile =~ s/\s/_/g;
-		       $escfile eq $_[0] ||
-		       $_->{'file'} eq $_[0] ||
-		       $_->{'server'} eq $_[0] } @{$_[1]} if (!$rv);
+		       $escfile eq $name ||
+		       $_->{'file'} eq $name ||
+		       $_->{'server'} eq $name } @$folders if (!$rv);
 	($rv) = grep { my $escname = $_->{'name'};
 		       $escname =~ s/\s/_/g;
-		       $escname eq $_[0] ||
-		       $_->{'name'} eq $_[0] } @{$_[1]} if (!$rv);
-	$_[2]->{$_[0]} = $rv if ($_[2]);
+		       $escname eq $name ||
+		       $_->{'name'} eq $name } @$folders if (!$rv);
+	$cache->{$name} = $rv if ($cache);
 	}
 return $rv;
 }
@@ -2924,15 +3052,16 @@ foreach my $folder (@$folders) {
 	}
 }
 
-# mail_preview(&mail)
+# mail_preview(&mail, [characters])
 # Returns a short text preview of a message body
 sub mail_preview
 {
-local ($mail) = @_;
+local ($mail, $chars) = @_;
+$chars ||= 100;
 local ($textbody, $htmlbody, $body) = &find_body($mail, 0);
 local $data = $body->{'data'};
 $data =~ s/\r?\n/ /g;
-$data = substr($data, 0, 100);
+$data = substr($data, 0, $chars);
 if ($data =~ /\S/) {
 	return $data;
 	}
@@ -3039,9 +3168,16 @@ if (ref($mails) ne 'ARRAY') {
 
 # Open cache DBM
 if (!%hasattach) {
-	local $hasattach_file = $module_info{'usermin'} ?
-		"$user_module_config_directory/attach" :
-		"$module_config_directory/attach";
+	local $hasattach_file;
+	if ($module_info{'usermin'}) {
+		$hasattach_file = "$user_module_config_directory/attach";
+		}
+	else {
+		$hasattach_file = "$module_config_directory/attach";
+		if (!glob($hasattach_file."*")) {
+			$hasattach_file = "$module_var_directory/attach";
+			}
+		}
 	&open_dbm_db(\%hasattach, $hasattach_file, 0600);
 	}
 
@@ -3179,13 +3315,13 @@ foreach my $a (@$attach) {
 		}
 	elsif ($a->{'filename'}) {
 		# Known filename
-		push(@files, &decode_mimewords($a->{'filename'}));
 		$fn = &decode_mimewords($a->{'filename'});
+		push(@files, $fn);
 		push(@detach, [ $a->{'idx'}, $fn ]);
 		}
 	else {
 		# No filename
-		push(@files, "<i>$text{'view_anofile'}</i>");
+		push(@files, $text{'view_anofile'});
 		$fn = "file.".&type_to_extension($a->{'type'});
 		push(@detach, [ $a->{'idx'}, $fn ]);
 		}
@@ -3214,7 +3350,7 @@ foreach my $a (@$attach) {
 		push(@links, $detachfile."&attach=$a->{'idx'}");
 		}
 	push(@a, "<a href='$links[$#links]'>$text{'view_aview'}</a>");
-	push(@a, "<a href='$links[$#links]' target=_new>$text{'view_aopen'}</a>");
+	push(@a, "<a href='$links[$#links]' target=_blank>$text{'view_aopen'}</a>");
 	if ($a->{'type'}) {
 		push(@a, "<a href='$detachfile&attach=$a->{'idx'}&save=1'>$text{'view_asave'}</a>");
 		}
@@ -3238,7 +3374,7 @@ for(my $i=0; $i<@files; $i++) {
 	local $type = $attach[$i]->{'type'} || "message/rfc822";
 	local $typedesc = $typemap{lc($type)} || $type;
 	local @cols = (
-		"<a href='$links[$i]'>$files[$i]</a>",
+		"<a href='$links[$i]'>".&html_escape($files[$i])."</a>",
 		$typedesc,
 		$sizes[$i],
 		&ui_links_row($actions[$i]),
@@ -3307,18 +3443,18 @@ local ($mail, $body, $textbody, $htmlbody) = @_;
 # Display the headers
 print &ui_table_start($text{'view_headers'}, "width=100%", 2);
 print &ui_table_row($text{'mail_from'},
-	&eucconv_and_escape($mail->{'header'}->{'from'}));
+	&convert_header_for_display($mail->{'header'}->{'from'}));
 print &ui_table_row($text{'mail_to'},
-	&eucconv_and_escape($mail->{'header'}->{'to'}));
+	&convert_header_for_display($mail->{'header'}->{'to'}));
 if ($mail->{'header'}->{'cc'}) {
 	print &ui_table_row($text{'mail_cc'},
-		&eucconv_and_escape($mail->{'header'}->{'cc'}));
+		&convert_header_for_display($mail->{'header'}->{'cc'}));
 	}
 print &ui_table_row($text{'mail_date'},
-	&eucconv_and_escape($mail->{'header'}->{'date'}));
+	&convert_header_for_display($mail->{'header'}->{'date'}));
 print &ui_table_row($text{'mail_subject'},
-	&eucconv_and_escape(&decode_mimewords(
-		$mail->{'header'}->{'subject'})));
+	&convert_header_for_display(
+		$mail->{'header'}->{'subject'}));
 print &ui_table_end(),"<br>\n";
 
 # Just display the mail body for printing
@@ -3348,37 +3484,50 @@ local ($count, $server_attach) = @_;
 # Work out if any attachments are supported
 my $any_attach = $server_attach || !$main::no_browser_uploads;
 
-my ($uploader, $ssider);
 if ($any_attach && &supports_javascript()) {
 	# Javascript to increase attachments fields
-	$uploader = &ui_upload("NAME", 80, 0, "style='width:100%'");
-	$uploader =~ s/\r|\n//g;
-	$uploader =~ s/"/\\"/g;
-	$ssider = &ui_textbox("NAME", undef, 60, 0, undef, "style='width:95%'").
-		  &file_chooser_button("NAME");
-	$ssider =~ s/\r|\n//g;
-	$ssider =~ s/"/\\"/g;
 	print <<EOF;
 <script>
 function add_attachment()
 {
 var block = document.getElementById("attachblock");
-var uploader = "$uploader";
 if (block) {
 	var count = 0;
+	var first_input = document.forms[0]["attach0"];
 	while(document.forms[0]["attach"+count]) { count++; }
-	block.innerHTML += uploader.replace("NAME", "attach"+count)+"<br>\\n";
+	var new_input = document.createElement('input');
+	new_input.setAttribute('name', "attach"+count);
+	new_input.setAttribute('type', 'file');
+	if (first_input) {
+		new_input.setAttribute('size',
+			first_input.getAttribute('size'));
+		new_input.setAttribute('class',
+			first_input.getAttribute('class'));
+		}
+	block.appendChild(new_input);
+	var new_br = document.createElement('br');
+	block.appendChild(new_br);
 	}
 return false;
 }
 function add_ss_attachment()
 {
 var block = document.getElementById("ssattachblock");
-var uploader = "$ssider";
 if (block) {
 	var count = 0;
+	var first_input = document.forms[0]["file0"];
 	while(document.forms[0]["file"+count]) { count++; }
-	block.innerHTML += uploader.replace("NAME", "file"+count)+"<br>\\n";
+	var new_input = document.createElement('input');
+	new_input.setAttribute('name', "file"+count);
+	if (first_input) {
+		new_input.setAttribute('size',
+			first_input.getAttribute('size'));
+		new_input.setAttribute('class',
+			first_input.getAttribute('class'));
+		}
+	block.appendChild(new_input);
+	var new_br = document.createElement('br');
+	block.appendChild(new_br);
 	}
 return false;
 }
@@ -3398,7 +3547,7 @@ if (!$main::no_browser_uploads) {
 	my $atable = "<div>\n";
 	for(my $i=0; $i<$count; $i++) {
 		$atable .= &ui_upload("attach$i", 80, 0,
-				      "style='width:100%'")."<br>";
+				      "style='width:100%'", 1)."<br>";
 		}
 	$atable .= "</div> <div id=attachblock></div>\n";
 	print &ui_hidden("attachcount", int($i)),"\n";
@@ -3495,6 +3644,7 @@ if (!fork()) {
 close(INr);
 close(OUTw);
 local $indent = "&nbsp;" x 4;
+local $SIG{'PIPE'} = 'IGNORE';
 local @errs;
 foreach $line (split(/\n+/, $plainbody)) {
 	next if ($line !~ /\S/);
@@ -3559,5 +3709,32 @@ else {
 	}
 }
 
-1;
+# switch_to_folder_user(&folder)
+# If a folder has a user, switch the UID and GID used for writes to it
+sub switch_to_folder_user
+{
+my ($folder) = @_;
+if ($folder->{'user'} && $switch_to_folder_count == 0) {
+	&set_mail_open_user($folder->{'user'});
+	}
+$switch_to_folder_count++;
+}
 
+# switch_from_folder_user(&folder)
+# Undoes the change made by switch_to_folder_user
+sub switch_from_folder_user
+{
+my ($folder) = @_;
+if ($switch_to_folder_count) {
+	$switch_to_folder_count--;
+	if ($switch_to_folder_count == 0) {
+		&clear_mail_open_user();
+		}
+	}
+else {
+	print STDERR "switch_from_folder_user called more often ",
+		     "than switch_to_folder_user!\n";
+	}
+}
+
+1;

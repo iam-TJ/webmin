@@ -297,6 +297,7 @@ else {
 }
 
 # read_opts_file(file)
+# Read the file containing possible menu options for a command
 sub read_opts_file
 {
 local @rv;
@@ -310,6 +311,7 @@ if ($file !~ /^\// && $file !~ /\|\s*$/) {
 open(FILE, $file);
 while(<FILE>) {
 	s/\r|\n//g;
+	next if (/^#/);
 	if (/^"([^"]*)"\s+"([^"]*)"$/) {
 		push(@rv, [ $1, $2 ]);
 		}
@@ -371,6 +373,12 @@ $cmd->{'args'} = [ ];
 my ($i, $name);
 for($i=0; defined($name = $in{"name_$i"}); $i++) {
 	if ($name) {
+		if ($in{"type_$i"} == 9 || $in{"type_$i"} == 12 ||
+		    $in{"type_$i"} == 13 || $in{"type_$i"} == 14) {
+			$in{"opts_$i"} =~ /\|$/ || -r $in{"opts_$i"} ||
+				&error(&text('save_eopts', $i+1));
+			}
+		$in{"opts_$i"} =~ /:/ && &error(&text('save_eopts2', $i+1));
 		push(@{$cmd->{'args'}}, { 'name' => $name,
 					  'desc' => $in{"desc_$i"},
 					  'type' => $in{"type_$i"},
@@ -423,18 +431,23 @@ foreach my $a (@{$cmd->{'args'}}) {
 		$rv = $setin->{$n};
 		}
 	elsif ($a->{'type'} == 10) {
-		$setin->{$n} || &error($text{'run_eupload'});
-		if ($setin->{$n."_filename"} =~ /([^\/\\]+$)/ && $1) {
-			$rv = &transname("$1");
+		if ($setin->{$n}) {
+			if ($setin->{$n."_filename"} =~ /([^\/\\]+$)/ && $1) {
+				$rv = &transname("$1");
+				}
+			else {
+				$rv = &transname();
+				}
+			&open_tempfile(TEMP, ">$rv");
+			&print_tempfile(TEMP, $setin->{$n});
+			&close_tempfile(TEMP);
+			chown($uinfo->[2], $uinfo->[3], $rv);
+			push(@unlink, $rv);
 			}
 		else {
-			$rv = &transname();
+			$a->{'must'} && &error($text{'run_eupload'});
+			$rv = undef;
 			}
-		&open_tempfile(TEMP, ">$rv");
-		&print_tempfile(TEMP, $setin->{$n});
-		&close_tempfile(TEMP);
-		chown($uinfo->[2], $uinfo->[3], $rv);
-		push(@unlink, $rv);
 		}
 	elsif ($a->{'type'} == 12 || $a->{'type'} == 13 || $a->{'type'} == 14) {
 		local @vals;
@@ -458,6 +471,9 @@ foreach my $a (@{$cmd->{'args'}}) {
 		$rv = $setin->{$n."_year"}."-".
 		      $setin->{$n."_month"}."-".
 		      $setin->{$n."_day"};
+		}
+	elsif ($a->{'type'} == 16) {
+		$rv = $setin->{$n} ? 1 : 0;
 		}
 	if ($rv eq '' && $a->{'must'} && $a->{'type'} != 7) {
 		&error(&text('run_emust', $a->{'desc'}));
@@ -539,11 +555,12 @@ else {
 			     !$cmd->{'raw'} && !$cmd->{'format'}, 0,
 			     $cmd->{'timeout'});
 	}
+local $ex = $?;
 &reset_environment() if ($cmd->{'clear'});
 close(OUTTEMP);
 local $rv = &read_file_contents($outtemp);
 unlink($outtemp);
-return ($got, $rv, $proc::safe_process_exec_timeout ? 1 : 0);
+return ($got, $rv, $proc::safe_process_exec_timeout ? 1 : 0, $ex);
 }
 
 # show_parameter_input(&arg, formno)
@@ -619,6 +636,9 @@ elsif ($a->{'type'} == 15) {
 	return &ui_date_input($day, $month, $year,
 			      $n."_day", $n."_month", $n."_year")."&nbsp;".
 	       &date_chooser_button($n."_day", $n."_month", $n."_year");
+	}
+elsif ($a->{'type'} == 16) {
+	return &ui_submit($v || $a->{'name'}, $a->{'name'}); 
 	}
 else {
 	return "Unknown parameter type $a->{'type'}";

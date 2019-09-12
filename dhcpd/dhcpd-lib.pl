@@ -302,14 +302,17 @@ sub opt_input
 {
 local($v, $rv);
 $v = &find($_[1], $_[2]);
-$rv = "<td><b>$_[0]</b></td> <td nowrap";
+$rv = "<td valign=middle><b>$_[0]</b></td><td valign=middle nowrap";
 $rv .= $_[4] > 30 ? " colspan=3>\n" : ">\n";
-$rv .= sprintf "<input type=radio name=$_[1]_def value=1 %s> $_[3]\n",
-	$v ? "" : "checked";
-$rv .= sprintf "<input type=radio name=$_[1]_def value=0 %s> ",
-	$v ? "checked" : "";
-$rv .= sprintf "<input name=$_[1] size=$_[4] value=\"%s\"> $_[5]</td>\n",
-	$v ? $v->{'value'} : "";
+$rv .= &ui_radio($_[1]."_def", ( $v ? 0 : 1 ), [ [ 1, $_[3] ], [ 0, "&nbsp;" ] ]);
+$rv .= &ui_textbox($_[1], ( $v ? $v->{'value'} : "" ), $_[4])."&nbsp;".$_[5];
+$rv .= "</td>";
+#$rv .= sprintf "<input type=radio name=$_[1]_def value=1 %s> $_[3]\n",
+#	$v ? "" : "checked";
+#$rv .= sprintf "<input type=radio name=$_[1]_def value=0 %s> ",
+#	$v ? "checked" : "";
+#$rv .= sprintf "<input name=$_[1] size=$_[4] value=\"%s\"> $_[5]</td>\n",
+#	$v ? $v->{'value'} : "";
 return $rv;
 }
 
@@ -623,7 +626,7 @@ return @rv;
 %obj_names2types = qw(host hst group grp subnet sub shared-network sha);
 
 # get_branch(objtype, [addmode]) 
-# usefull for edit_*.cgi and save_*.cgi scripts
+# useful for edit_*.cgi and save_*.cgi scripts
 # $objtype = one of 'hst' 'grp' 'sub' 'sha'
 sub get_branch
 {
@@ -802,7 +805,7 @@ return &save_module_acl($_[1]);
 
 # find_recursive(name, &config, [parent])
 # Returns a list of all config entries with some name, no matter where they
-# are in the heirarchy
+# are in the hierarchy
 sub find_recursive
 {
 local ($c, @rv);
@@ -894,7 +897,7 @@ return "<pre>".&html_escape($out)."</pre>".$conftext;
 sub stop_dhcpd
 {
 if ($config{'stop_cmd'}) {
-	local $out = &backquote_logged("$config{'stop_cmd'} 2>&1");
+	local $out = &backquote_logged("($config{'stop_cmd'} 2>&1)");
 	return $? ? "<pre>$out</pre>" : undef;
 	}
 else {
@@ -922,7 +925,7 @@ if (!-r $config{'lease_file'}) {
 	}
 local $out;
 if ($config{'start_cmd'}) {
-	$out = &backquote_logged("$config{'start_cmd'} 2>&1");
+	$out = &backquote_logged("($config{'start_cmd'} 2>&1)");
 	}
 else {
 	$out = &backquote_logged("$config{'dhcpd_path'} -cf $config{'dhcpd_conf'} -lf $config{'lease_file'} $config{'interfaces'} 2>&1");
@@ -961,17 +964,13 @@ return $file || $config{'pid_file'};
 sub expand_ip_range
 {
 local ($s, $e) = @_;
-local @rs = split(/\./, $s);
-local @re = split(/\./, $e);
+&foreign_require("net");
+local $si = &net::ip_to_integer($s);
+local $ei = &net::ip_to_integer($e);
+return ( ) if ($si > $ei);
 local @rv;
-for(my $i=$rs[0]; $i<=$re[0]; $i++) {
-	for(my $j=$rs[1]; $j<=$re[1]; $j++) {
-		for(my $k=$rs[2]; $k<=$re[2]; $k++) {
-			for(my $l=$rs[3]; $l<=$re[3]; $l++) {
-				push(@rv, "$i.$j.$k.$l");
-				}
-			}
-		}
+for(my $i=$si; $i<=$ei; $i++) {
+	push(@rv, &net::integer_to_ip($i));
 	}
 return @rv;
 }
@@ -987,6 +986,29 @@ if ($pidfile) {
 else {
 	local ($pid) = &find_byname("dhcpd");
 	return $pid;
+	}
+}
+
+sub get_all_config_files
+{
+my $conf = &get_config();
+my @rv = ( $config{'dhcpd_conf'} );
+push(@rv, map { $_->{'file'} } @$conf);
+push(@rv, $config{'add_file'}) if ($config{'add_file'});
+return &unique(@rv);
+}
+
+sub lock_all_files
+{
+foreach my $f (&get_all_config_files()) {
+	&lock_file($f);
+	}
+}
+
+sub unlock_all_files
+{
+foreach my $f (reverse(&get_all_config_files())) {
+	&unlock_file($f);
 	}
 }
 

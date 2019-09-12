@@ -23,6 +23,7 @@ if ($module_info{'usermin'}) {
 	else {
 		@can_dirs = ( "/" );
 		}
+	@can_dirs = &expand_root_variables(@can_dirs);
 	$can_mode = 3;
 
 	$download_dir = $userconfig{'ddir'};
@@ -139,7 +140,7 @@ for($i=0; $_[0]->{"url_$i"}; $i++) {
 		}
 	&switch_uid_to($_[0]->{'uid'}, $_[0]->{'gid'});
 	$down->{'upto'} = $progress_callback_count;
-	if ($_[0]->{"proto_$i"} eq "http") {
+	if ($_[0]->{"proto_$i"} eq "http" || $_[0]->{"proto_$i"} eq "https") {
 		&http_download($_[0]->{"host_$i"},
 			       $_[0]->{"port_$i"},
 			       $_[0]->{"page_$i"},
@@ -283,6 +284,23 @@ if ($module_info{'usermin'}) {
 else {
 	return &command_as_user($user, $env, @args);
 	}
+}
+
+# expand_root_variables(dir, ...)
+# Replaces $USER and $HOME in a list of dirs
+sub expand_root_variables
+{
+local @rv;
+local %hash = ( 'user' => $remote_user_info[0],
+                'home' => $remote_user_info[7],
+                'uid' => $remote_user_info[2],
+                'gid' => $remote_user_info[3] );
+my @ginfo = getgrgid($remote_user_info[3]);
+$hash{'group'} = $ginfo[0];
+foreach my $dir (@_) {
+        push(@rv, &substitute_template($dir, \%hash));
+        }
+return @rv;
 }
 
 1;

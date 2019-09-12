@@ -6,7 +6,7 @@ require './proc-lib.pl';
 
 &index_links("user");
 @procs = sort { $b->{'cpu'} <=> $a->{'cpu'} } &list_processes();
-@procs = grep { &can_view_process($_->{'user'}) } @procs;
+@procs = grep { &can_view_process($_) } @procs;
 @users = &unique(map { $_->{'user'} } @procs);
 foreach $u (@users) {
 	if (&supports_users()) {
@@ -23,14 +23,14 @@ foreach $u (@users) {
 		$p = $pr->{'pid'};
 		local @cols;
 		if (&can_edit_process($pr->{'user'})) {
-			push(@cols, "<a href=\"edit_proc.cgi?$p\">$p</a>");
+			push(@cols, &ui_link("edit_proc.cgi?".$p, $p) );
 			}
 		else {
 			push(@cols, $p);
 			}
 		push(@cols, $pr->{'cpu'});
 		if ($info_arg_map{'_stime'}) {
-			push(@cols, $pr->{'_stime'});
+			push(@cols, &format_stime($pr));
 			}
 		push(@cols, &html_escape(&cut_string($pr->{'args'})));
 		print &ui_columns_row(\@cols);

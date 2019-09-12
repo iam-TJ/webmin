@@ -14,11 +14,21 @@ if ($in{'mode'} == 0) {
 	}
 elsif ($in{'mode'} == 1) {
 	$mconfig{'send_mode'} = '127.0.0.1';
+	delete($mconfig{'smtp_port'});
+	$mconfig{'smtp_ssl'} = 0;
 	}
 else {
-	&to_ipaddress($in{'smtp'}) && &to_ip6address($in{'smtp'}) ||
+	&to_ipaddress($in{'smtp'}) || &to_ip6address($in{'smtp'}) ||
 		&error($text{'sendmail_esmtp'});
 	$mconfig{'send_mode'} = $in{'smtp'};
+	if ($in{'port_def'}) {
+		delete($mconfig{'smtp_port'});
+		}
+	else {
+		$in{'port'} =~ /^\d+$/ || &error($text{'sendmail_eport'});
+		$mconfig{'smtp_port'} = $in{'port'};
+		}
+	$mconfig{'smtp_ssl'} = $in{'ssl'};
 	}
 
 # Save login and password
@@ -46,15 +56,15 @@ $mconfig{'smtp_auth'} = $in{'auth'};
 
 # Save from address
 if ($in{'from_def'}) {
-	delete($mconfig{'webmin_addr'});
+	delete($mconfig{'webmin_from'});
 	}
 else {
-	$in{'from'} =~ /^\S+\@\S+$/ || &error($text{'sendmail_efrom'});
-	$mconfig{'webmin_addr'} = $in{'from'};
+	$in{'from'} =~ /^\S+$/ || &error($text{'sendmail_efrom'});
+	$mconfig{'webmin_from'} = $in{'from'};
 	}
 
 &save_module_config(\%mconfig, "mailboxes");
 &unlock_file($mailboxes::module_config_file);
 &webmin_log("sendmail");
-&redirect("");
+&redirect("edit_sendmail.cgi");
 

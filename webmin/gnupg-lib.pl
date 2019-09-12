@@ -4,6 +4,7 @@
 BEGIN { push(@INC, ".."); };
 use strict;
 use warnings;
+no warnings 'redefine';
 use WebminCore;
 our ($module_name, %config, $user_module_config_directory, %text);
 
@@ -24,10 +25,13 @@ sub list_keys
 my (@rv, %kmap);
 &clean_language();
 open(GPG, "$gpgpath --list-keys 2>/dev/null |");
+
 while(<GPG>) {
-	if (/^pub\s+(\S+)\/(\S+)\s+(\S+)\s+(.*)\s+<(\S+)>/ ||
+	if (/^pub\s+([a-z0-9]+)(\s+)([\d]{4}-[\d]{2}-[\d]{2})/ ||
+	    /^pub\s+(\S+)\/(\S+)\s+(\S+)\s+(.*)\s+<(\S+)>/ ||
 	    /^pub\s+(\S+)\/(\S+)\s+(\S+)\s+(.*)/) {
-		my $k = { 'size' => $1,
+
+		my $k = {'size' => $1,
 			     'key' => $2,
 			     'date' => $3,
 			     'name' => $4 ? [ $4 ] : [ ],
@@ -47,10 +51,15 @@ while(<GPG>) {
 			if (/^sub\s+(\S+)\/(\S+)\s+/) {
 				push(@{$k->{'key2'}}, $2);
 				}
-			elsif (/^uid\s+(.*)\s+<(\S+)>/ ||
+			elsif (/^uid\s+\[[^\]]+\]\s+(.*)\s+<(\S+)>/ ||
+			       /^uid\s+(.*)\s+<(\S+)>/ ||
 			       /^uid\s+(.*)/) {
 				push(@{$k->{'name'}}, $1);
 				push(@{$k->{'email'}}, $2);
+				}
+			elsif (/^\s+([A-F0-9]{0,40})/) {
+				$k->{'key'} = $1;
+				$kmap{$1} = $k;
 				}
 			}
 		push(@rv, $k);
@@ -59,7 +68,8 @@ while(<GPG>) {
 close(GPG);
 open(GPG, "$gpgpath --list-secret-keys 2>/dev/null |");
 while(<GPG>) {
-	if (/^sec\s+(\S+)\/(\S+)\s+(\S+)\s+(.*)/ && $kmap{$2}) {
+	if ((/^sec\s+(\S+)\/(\S+)\s+(\S+)\s+(.*)/ || 
+	    /^(\s+)([A-F0-9]{0,40})/) && $kmap{$2}) {
 		$kmap{$2}->{'secret'}++;
 		}
 	}
@@ -89,7 +99,7 @@ sub key_fingerprint
 my $fp;
 local $_;
 &clean_language();
-open(GPG, "$gpgpath --fingerprint \"$_[0]->{'name'}->[0]\" |");
+open(GPG, "$gpgpath --fingerprint \"$_[0]->{'name'}->[0]\" 2>/dev/null |");
 while(<GPG>) {
 	if (/fingerprint\s+=\s+(.*)/) {
 		$fp = $1;
@@ -298,7 +308,7 @@ else {
 #close($fh);
 #local $out = $wait_for_input;
 &clean_language();
-my $out = &backquote_command("$cmd 2>&1 </dev/null");
+my $out = &backquote_command("$cmd 2>&1 </dev/null") || "";
 &reset_environment();
 unlink($datafile);
 unlink($sigfile) if ($sigfile);
@@ -409,14 +419,14 @@ return undef;
 
 # fetch_gpg_key(id)
 # Imports a key by ID from the configured keyserver. Returns 0 on success,
-# 1 on failure, 2 if there was no change, 3 if the import appeared to success
+# 1 on failure, 2 if there was no change, 3 if the import appeared to succeed
 # but the key isn't visible.
 sub fetch_gpg_key
 {
 my ($id) = @_;
 my $out = &backquote_command(
 	"$gpgpath --keyserver ".quotemeta($config{'keyserver'}).
-	" --recv-key ".quotemeta($id)." 2>&1 </dev/null");
+	" --recv-key ".quotemeta($id)." 2>&1 </dev/null") || "";
 my @keys = &list_keys();
 my ($key) = grep { lc($_->{'key'}) eq lc($id) } @keys;
 if ($?) {
@@ -491,5 +501,15 @@ close($fh);
 return @rv;
 }
 
-1;
+# returns current version of gpg command
+sub get_gpg_version
+{
+my ($gpg) = @_;
+$gpg = "gpg" if (!$gpg);
+$gpg = quotemeta($gpg);
+$gpg = `$gpg --version`;
+$gpg =~ /(\*|\d+(\.\d+){0,2})/;
+return $1;
+}
 
+1;

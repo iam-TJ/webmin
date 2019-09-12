@@ -49,6 +49,7 @@ containing : blocks-total, blocks-free, files-total, files-free
 sub free_space
 {
 local(@out, @rv);
+&clean_language();
 $out = &backquote_command("df -k $_[0]");
 $out =~ /Mounted on\n\S+\s+(\d+)\s+\d+\s+(\d+)/;
 if ($_[1]) {
@@ -60,13 +61,15 @@ else {
 $out = &backquote_command("df -i $_[0]");
 $out =~ /Mounted on\n\S+\s+(\d+)\s+\d+\s+(\d+)/;
 push(@rv, $1, $2);
+&reset_environment();
 return @rv;
 }
 
 =head2 quota_can(&mnttab, &fstab)
 
-Can this filesystem type support quotas? Takes array refs from mounted and
-mountable filesystems, and returns one of the following :
+Can this filesystem support quotas, based on mount options in fstab?
+Takes array refs from mounted and mountable filesystems, and returns one of
+the following :
 
 =item 0 - No quota support (or not turned on in /etc/fstab).
 
@@ -79,10 +82,19 @@ mountable filesystems, and returns one of the following :
 =cut
 sub quota_can
 {
-return ($_[1]->[3] =~ /usrquota|usrjquota/ ||
-	$_[0]->[3] =~ /usrquota|usrjquota/ ? 1 : 0) +
-       ($_[1]->[3] =~ /grpquota|grpjquota/ ||
-        $_[0]->[3] =~ /grpquota|grpjquota/ ? 2 : 0);
+my %exclude_mounts;
+if (&has_command("findmnt")) {
+	%exclude_mounts = map { $_ => 1 } split( /\n/m, backquote_command('findmnt -r | grep -oP \'^(\S+)(?=.*\[\/)\'') );
+	}
+    
+# Not possible on bind mounts
+if ($_[0]->[2] =~ /^bind/ ||
+    exists($exclude_mounts{$_[0]->[0]}) && $_[0]->[2] !~ /^simfs/) {
+	return 0;
+	}
+
+return ( $_[1]->[3] =~ /usrquota|usrjquota/ || $_[0]->[3] =~ /usrquota|usrjquota/ ? 1 : 0 ) +
+       ( $_[1]->[3] =~ /grpquota|grpjquota/      || $_[0]->[3] =~ /grpquota|grpjquota/ ? 2 : 0 );
 }
 
 =head2 quota_now(&mnttab, &fstab)
@@ -103,16 +115,20 @@ sub quota_now
 local $rv = 0;
 local $dir = $_[0]->[0];
 local %opts = map { $_, 1 } split(/,/, $_[0]->[3]);
+local $ufile = $_[1]->[3] =~ /(usrquota|usrjquota)=([^, ]+)/ ? $2 : undef;
+local $gfile = $_[1]->[3] =~ /(grpquota|grpjquota)=([^, ]+)/ ? $2 : undef;
 if ($_[0]->[2] eq "xfs") {
-	# For XFS, assume enabled if setup in fstab
+	# For XFS, assume enabled if setup in mtab
 	$rv += 1 if ($opts{'quota'} || $opts{'usrquota'} ||
-		     $opts{'uqnoenforce'});
-	$rv += 2 if ($opts{'grpquota'} || $opts{'gqnoenforce'});
+		     $opts{'uqnoenforce'} || $opts{'uquota'});
+	$rv += 2 if ($opts{'grpquota'} || $opts{'gqnoenforce'} ||
+		     $opts{'gquota'});
 	return $rv + 4;
 	}
 if ($_[0]->[4]%2 == 1) {
 	# test user quotas
-	if (-r "$dir/quota.user" || -r "$dir/aquota.user") {
+	if (-r "$dir/quota.user" || -r "$dir/aquota.user" ||
+	    $ufile && -r "$dir/$ufile") {
 		local $stout = &supports_status($dir, "user");
 		if ($stout =~ /is\s+(on|off|enabled|disabled)/) {
 			# Can use output from -p mode
@@ -144,7 +160,8 @@ if ($_[0]->[4]%2 == 1) {
 	}
 if ($_[0]->[4] > 1) {
 	# test group quotas
-	if (-r "$dir/quota.group" || -r "$dir/aquota.group") {
+	if (-r "$dir/quota.group" || -r "$dir/aquota.group" ||
+	    $gfile && -r "$dir/$gfile") {
 		local $stout = &supports_status($dir, "group");
 		if ($stout =~ /is\s+(on|off|enabled|disabled)/) {
 			# Can use output from -p mode
@@ -175,6 +192,51 @@ if ($_[0]->[4] > 1) {
 		}
 	}
 return $rv;
+}
+
+=head2 quota_possible(&fstab)
+
+If quotas cannot be currently enabled, returns 3 if user and group quotas can
+be turned on with an /etc/fstab change, 2 for group only, 1 for user only, or
+0 if not possible at all.
+
+=cut
+sub quota_possible
+{
+if ($_[0]->[2] =~ /^ext/) {
+	return 3;
+	}
+return 0;
+}
+
+=head2 quota_make_possible(dir, mode)
+
+Edit /etc/fstab to make quotas possible for some dir
+
+=cut
+sub quota_make_possible
+{
+my ($dir, $mode) = @_;
+
+# Update /etc/fstab
+my @fstab = &mount::list_mounts();
+my ($idx, $f);
+for($idx=0; $idx<@fstab; $idx++) {
+	if ($fstab[$idx]->[0] eq $dir) {
+		$f = $fstab[$idx];
+		last;
+		}
+	}
+return "No /etc/fstab entry found for $dir" if (!$f);
+my @opts = grep { $_ ne "defaults" && $_ ne "-" } split(/,/, $f->[3]);
+push(@opts, "usrquota", "grpquota");
+$f->[3] = join(",", @opts);
+&mount::change_mount($idx, @$f);
+
+# Attempt to change live mount options
+&mount::os_remount_dir(@$f);
+
+return undef;
 }
 
 =head2 supports_status(dir, mode)
@@ -346,7 +408,13 @@ best demonstrates how this function should be used:
 =cut
 sub user_filesystems
 {
-return &parse_quota_output("$config{'user_quota_command'} ".quotemeta($_[0]));
+my ($user) = @_;
+my $n = 0;
+if (&has_command("xfs_quota")) {
+	$n = &parse_xfs_quota_output("xfs_quota -xc 'quota -b -i -u $user'");
+	}
+return &parse_quota_output($config{'user_quota_command'}." ".
+			   quotemeta($user), $n);
 }
 
 =head2 group_filesystems(user)
@@ -358,27 +426,41 @@ as documented in the user_filesystems function.
 =cut
 sub group_filesystems
 {
-return &parse_quota_output("$config{'group_quota_command'} ".quotemeta($_[0]));
+my ($group) = @_;
+my $n = 0;
+if (&has_command("xfs_quota")) {
+	$n = &parse_xfs_quota_output("xfs_quota -xc 'quota -b -i -g $group'");
+	}
+return &parse_quota_output($config{'group_quota_command'}." ".
+			   quotemeta($group), $n);
 }
 
-=head2 parse_quota_output(command)
+=head2 parse_quota_output(command, [start-at])
 
 Internal function to parse the output of the quota command.
 
 =cut
 sub parse_quota_output
 {
-local($n, $_, %mtab);
-%mtab = &get_mtab_map();
-open(QUOTA, "$_[0] 2>/dev/null |");
-$n=0; while(<QUOTA>) {
+my ($cmd, $n) = @_;
+$n ||= 0;
+my %mtab = &get_mtab_map();
+local $_;
+my %done;
+for(my $i=0; $i<$n; $i++) {
+	$done{$filesys{$i,'filesys'}}++;
+	}
+open(QUOTA, "$cmd 2>/dev/null |");
+while(<QUOTA>) {
 	chop;
 	if (/^(Disk|\s+Filesystem)/) { next; }
 	if (/^(\S+)$/) {
 		# Bogus wrapped line
 		my $dev = $1;
-		$filesys{$n,'filesys'} = $mtab{&resolve_and_simplify($dev)};
-		local $nl = <QUOTA>;
+		my $mount = $mtab{&resolve_and_simplify($dev)};
+		my $nl = <QUOTA>;
+		next if ($done{$mount}++);
+		$filesys{$n,'filesys'} = $mount;
 		$nl =~/^\s+(\S+)\s+(\S+)\s+(\S+)(.{8}\s+)(\S+)\s+(\S+)\s+(\S+)(.*)/ ||
 		      $nl =~ /^.{15}.(.{7}).(.{7}).(.{7})(.{8}.)(.{7}).(.{7}).(.{7})(.*)/;
 		$filesys{$n,'ublocks'} = int($1);
@@ -396,6 +478,9 @@ $n=0; while(<QUOTA>) {
 	elsif (/^\s*(\S+)\s+(\S+)\s+(\S+)\s+(\S+)(.{8}\s+)(\S+)\s+(\S+)\s+(\S+)(.*)/ ||
 	       /^(.{15}).(.{7}).(.{7}).(.{7})(.{8}.)(.{7}).(.{7}).(.{7})(.*)/) {
 		# Single quota line
+		my $dev = $1; $dev =~ s/\s+$//g; $dev =~ s/^\s+//g;
+		my $mount = $mtab{&resolve_and_simplify($dev)};
+		next if ($done{$mount}++);
 		$filesys{$n,'ublocks'} = int($2);
 		$filesys{$n,'sblocks'} = int($3);
 		$filesys{$n,'hblocks'} = int($4);
@@ -404,14 +489,45 @@ $n=0; while(<QUOTA>) {
 		$filesys{$n,'sfiles'} = int($7);
 		$filesys{$n,'hfiles'} = int($8);
 		$filesys{$n,'gfiles'} = $9;
-		my $dev = $1; $dev =~ s/\s+$//g; $dev =~ s/^\s+//g;
-		$filesys{$n,'filesys'} = $mtab{&resolve_and_simplify($dev)};
+		$filesys{$n,'filesys'} = $mount;
 		$filesys{$n,'gblocks'} = &trunc_space($filesys{$n,'gblocks'});
 		$filesys{$n,'gfiles'} = &trunc_space($filesys{$n,'gfiles'});
 		$n++;
 		}
 	}
 close(QUOTA);
+return $n;
+}
+
+=head2 parse_xfs_quota_output(command)
+
+Internal command to parse all quotas for some user
+
+=cut
+sub parse_xfs_quota_output
+{
+my ($cmd) = @_;
+my $rep = &backquote_command("$cmd 2>/dev/null");
+my @rep = split(/\r?\n/, $rep);
+my $n = 0;
+foreach my $l (@rep) {
+	if ($l =~ /^(\/\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s+\d+\s+\[([^\]]+)\]\s+(\d+)\s+(\d+)\s+(\d+)\s+\d+\s+\[([^\]]+)\]\s+(\S+)/) {
+		$filesys{$n,'ublocks'} = int($2);
+                $filesys{$n,'sblocks'} = int($3);
+                $filesys{$n,'hblocks'} = int($4);
+                $filesys{$n,'gblocks'} = $5;
+                $filesys{$n,'ufiles'} = int($6);
+                $filesys{$n,'sfiles'} = int($7);
+                $filesys{$n,'hfiles'} = int($8);
+                $filesys{$n,'gfiles'} = $9;
+		$filesys{$n,'filesys'} = $10;
+		$filesys{$n,'gblocks'} = undef
+			if ($filesys{$n,'gblocks'} =~ /^\-+$/);
+		$filesys{$n,'gfiles'} = undef
+			if ($filesys{$n,'gfiles'} =~ /^\-+$/);
+		$n++;
+		}
+	}
 return $n;
 }
 
@@ -432,8 +548,15 @@ how this can be used :
 =cut
 sub filesystem_users
 {
-return &parse_repquota_output(
-	$config{'user_repquota_command'}, \%user, "user", $_[0]);
+my ($fs) = @_;
+if (&is_xfs_fs($fs)) {
+	return &parse_xfs_report_output(
+		"xfs_quota -xc 'report -u -b -i -n'", \%user, 'user', $fs);
+	}
+else {
+	return &parse_repquota_output(
+		$config{'user_repquota_command'}, \%user, "user", $fs);
+	}
 }
 
 =head2 filesystem_groups(filesystem)
@@ -445,8 +568,15 @@ documented in the filesystem_users function.
 =cut
 sub filesystem_groups
 {
-return &parse_repquota_output(
-	$config{'group_repquota_command'}, \%group, "group", $_[0]);
+my ($fs) = @_;
+if (&is_xfs_fs($fs)) {
+	return &parse_xfs_report_output(
+		"xfs_quota -xc 'report -g -b -i -n'", \%group, 'group', $fs);
+	}
+else {
+	return &parse_repquota_output(
+		$config{'group_repquota_command'}, \%group, "group", $fs);
+	}
 }
 
 =head2 parse_repquota_output(command, hashname, dir)
@@ -498,6 +628,9 @@ for($n=0; $n<@rep; $n++) {
 		if (!$st && $what->{$nn,$mode} !~ /^\d+$/ &&
 			    !$hasu{$what->{$nn,$mode}}) {
 			# User/group name was truncated! Try to find him..
+			local $has = $mode eq "user" ? getpwnam($nn)
+						     : getgrnam($nn);
+			$hasu{$what->{$nn,$mode}} = $has ? 1 : 0;
 			foreach $u (keys %hasu) {
 				if (substr($u, 0, length($what->{$nn,$mode})) eq
 				    $what->{$nn,$what}) {
@@ -510,6 +643,47 @@ for($n=0; $n<@rep; $n++) {
 		next if ($already{$what->{$nn,$mode}}++); # skip dupe users
 		$what->{$nn,'gblocks'} = &trunc_space($what->{$nn,'gblocks'});
 		$what->{$nn,'gfiles'} = &trunc_space($what->{$nn,'gfiles'});
+		$nn++;
+		}
+	}
+return $nn;
+}
+
+=head2 parse_xfs_report_output(command, &hash, key, fs)
+
+Internal function to parse the output of an xfs_quota report command
+
+=cut
+sub parse_xfs_report_output
+{
+my ($cmd, $what, $mode, $fs) = @_;
+%$what = ( );
+my $rep = &backquote_command("$cmd $fs 2>&1");
+if ($?) { return -1; }
+my @rep = split(/\r?\n/, $rep);
+my $nn = 0;
+foreach my $l (@rep) {
+	if ($l =~ /^(\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s+\d+\s+\[([^\]]+)\]\s+(\d+)\s+(\d+)\s+(\d+)\s+\d+\s+\[([^\]]+)\]/) {
+		$what->{$nn,$mode} = $1;
+		$what->{$nn,'ublocks'} = int($2);
+		$what->{$nn,'sblocks'} = int($3);
+		$what->{$nn,'hblocks'} = int($4);
+		$what->{$nn,'gblocks'} = $5;
+		$what->{$nn,'ufiles'} = int($6);
+		$what->{$nn,'sfiles'} = int($7);
+		$what->{$nn,'hfiles'} = int($8);
+		$what->{$nn,'gfiles'} = $9;
+		$what->{$nn,'gblocks'} = undef
+			if ($what->{$nn,'gblocks'} =~ /^\-+$/);
+		$what->{$nn,'gfiles'} = undef
+			if ($what->{$nn,'gfiles'} =~ /^\-+$/);
+		if ($what->{$nn,$mode} =~ /^#(\d+)$/) {
+			my $u = $mode eq "user" ? getpwuid("$1")
+						: getgrgid("$1");
+			if ($u) {
+				$what->{$nn,$mode} = $u;
+				}
+			}
 		$nn++;
 		}
 	}
@@ -600,7 +774,7 @@ failure.
 =cut
 sub copy_user_quota
 {
-for($i=1; $i<@_; $i++) {
+for(my $i=1; $i<@_; $i++) {
 	$out = &backquote_logged("$config{'user_copy_command'} ".
 				quotemeta($_[0])." ".quotemeta($_[$i])." 2>&1");
 	if ($?) { return $out; }
@@ -617,7 +791,7 @@ failure.
 =cut
 sub copy_group_quota
 {
-for($i=1; $i<@_; $i++) {
+for(my $i=1; $i<@_; $i++) {
 	$out = &backquote_logged("$config{'group_copy_command'} ".
 				quotemeta($_[0])." ".quotemeta($_[$i])." 2>&1");
 	if ($?) { return $out; }
@@ -756,17 +930,15 @@ Consult the dumpe2fs command where possible.
 sub fs_block_size
 {
 if ($_[2] =~ /^ext\d+$/) {
+	# Quota block size on ext filesystems is always 1k
 	return 1024;
-	# This code isn't needed, because the quota block size is
-	# not the same as the filesystem block size!!
-	#if (&has_command("dumpe2fs")) {
-	#	local $out = `dumpe2fs -h $_[1] 2>&1`;
-	#	if (!$? && $out =~ /block size:\s+(\d+)/i) {
-	#		return $1;
-	#		}
-	#	}
 	}
-elsif ($_[0] eq "xfs") {
+elsif ($_[2] eq "xfs") {
+	# Quota block size on XFS filesystems is always 1k
+	return 1024;
+	}
+elsif ($_[1] eq "/dev/simfs") {
+	# Size is also 1k on OpenVZ
 	return 1024;
 	}
 return undef;
@@ -783,7 +955,7 @@ foreach $k (keys %name_to_unit) {
 
 =head2 get_mtab_map
 
-Returns a hash mapping mount points to devices. For internal use.
+Returns a hash mapping devices to mount points. For internal use.
 
 =cut
 sub get_mtab_map
@@ -799,7 +971,75 @@ foreach $m (&foreign_call($mm, "list_mounted", 1)) {
 		$mtab{&resolve_and_simplify($m->[1])} ||= $m->[0];
 		}
 	}
+$mtab{"/dev/root"} = "/";
 return %mtab;
+}
+
+=head2 is_xfs_fs
+
+Internal function to check if XFS tools should be used on some FS
+
+=cut
+sub is_xfs_fs
+{
+my ($fs) = @_;
+if (!$get_fs_cache{$fs}) {
+	foreach my $m (&mount::list_mounted()) {
+		$get_fs_cache{$m->[0]} = $m->[2];
+		}
+	}
+return $get_fs_cache{$fs} eq "xfs";
+}
+
+=head2 can_set_user_quota(fs)
+
+Returns 1 for XFS, because different quota setting commands are needed
+
+=cut
+sub can_set_user_quota
+{
+my ($fs) = @_;
+return &is_xfs_fs($fs);
+}
+
+=head2 set_user_quota(user, fs, sblocks, hblocks, sfiles, hfiles)
+
+Set XFS quotas for some user and FS
+
+=cut
+sub set_user_quota
+{
+my ($user, $fs, $sblocks, $hblocks, $sfiles, $hfiles) = @_;
+my $out = &backquote_logged("xfs_quota -x -c 'limit -u bsoft=${sblocks}k bhard=${hblocks}k isoft=$sfiles ihard=$hfiles $user' $fs 2>&1");
+&error($out) if ($?);
+}
+
+sub can_set_group_quota
+{
+return &can_set_user_quota($fs);
+}
+
+=head2 set_group_quota(group, fs, sblocks, hblocks, sfiles, hfiles)
+
+Set XFS quotas for some group and FS
+
+=cut
+sub set_group_quota
+{
+my ($group, $fs, $sblocks, $hblocks, $sfiles, $hfiles) = @_;
+my $out = &backquote_logged("xfs_quota -x -c 'limit -g bsoft=${sblocks}k bhard=${hblocks}k isoft=$sfiles ihard=$hfiles $group' $fs 2>&1");
+&error($out) if ($?);
+}
+
+=head2 can_quotacheck(fs)
+
+Returns 1 if some FS supports quota checking
+
+=cut
+sub can_quotacheck
+{
+my ($fs) = @_;
+return !&is_xfs_fs($fs);
 }
 
 1;

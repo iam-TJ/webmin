@@ -6,6 +6,8 @@
 # Find install directory
 LANG=
 export LANG
+LANGUAGE=
+export LANGUAGE
 cd `dirname $0`
 if [ -x /bin/pwd ]; then
 	wadir=`/bin/pwd`
@@ -34,7 +36,7 @@ echo "systems and common Unix services to be easily administered."
 echo ""
 
 # Only root can run this
-id | grep "uid=0(" >/dev/null
+id | grep -i "uid=0(" >/dev/null
 if [ $? != "0" ]; then
 	uname -a | grep -i CYGWIN >/dev/null
 	if [ $? != "0" ]; then
@@ -74,6 +76,7 @@ PERLLIB=$wadir
 if [ "$perllib" != "" ]; then
 	PERLLIB="$PERLLIB:$perllib"
 fi
+export PERLLIB
 
 # Validate source directory
 allmods=`cd "$srcdir"; echo */module.info | sed -e 's/\/module.info//g'`
@@ -116,7 +119,7 @@ if [ ! -d $config_dir ]; then
 		exit 2
 	fi
 fi
-if [ -r "$config_dir/config" ]; then
+if [ -r "$config_dir/config" -a -r "$config_dir/var-path" -a -r "$config_dir/perl-path" ]; then
 	echo "Found existing Webmin configuration in $config_dir"
 	echo ""
 	upgrading=1
@@ -280,10 +283,10 @@ else
 		echo ""
 		exit 6
 	fi
-	$perl -e 'exit ($] < 5.002 ? 1 : 0)'
+	$perl -e 'exit ($] < 5.008 ? 1 : 0)'
 	if [ $? = "1" ]; then
 		echo "ERROR: Detected old perl version. Webmin requires"
-		echo "perl 5.002 or better to run"
+		echo "perl 5.8 or better to run"
 		echo ""
 		exit 7
 	fi
@@ -299,8 +302,8 @@ else
 		$perl -e 'use Crypt::UnixCrypt' >/dev/null 2>&1
 	fi
 	if [ $? != "0" ]; then
-		echo "ERROR: Perl crypt function does not work. Maybe Perl has"
-		echo "not been properly installed on your system"
+		echo "ERROR: Perl crypt function does not work, and the"
+		echo "Crypt::UnixCrypt module is not installed."
 		echo ""
 		exit 8
 	fi
@@ -361,11 +364,13 @@ else
 		echo ""
 		exit 12
 	fi
-	$perl -e 'use Socket; socket(FOO, PF_INET, SOCK_STREAM, getprotobyname("tcp")); setsockopt(FOO, SOL_SOCKET, SO_REUSEADDR, pack("l", 1)); bind(FOO, pack_sockaddr_in($ARGV[0], INADDR_ANY)) || exit(1); exit(0);' $port
-	if [ $? != "0" ]; then
-		echo "ERROR: TCP port $port is already in use by another program"
-		echo ""
-		exit 13
+	if [ "$noportcheck" = "" ]; then
+		$perl -e 'use Socket; socket(FOO, PF_INET, SOCK_STREAM, getprotobyname("tcp")); setsockopt(FOO, SOL_SOCKET, SO_REUSEADDR, pack("l", 1)); bind(FOO, pack_sockaddr_in($ARGV[0], INADDR_ANY)) || exit(1); exit(0);' $port
+		if [ $? != "0" ]; then
+			echo "ERROR: TCP port $port is already in use by another program"
+			echo ""
+			exit 13
+		fi
 	fi
 	printf "Login name (default admin): "
 	if [ "$login" = "" ]; then
@@ -448,6 +453,7 @@ else
 			read atbootyn
 			if [ "$atbootyn" = "y" -o "$atbootyn" = "Y" ]; then
 				atboot=1
+				makeboot=1
 			fi
 		else
 			echo "Webmin does not support being started at boot time on your system."
@@ -477,8 +483,16 @@ else
 	echo "errorlog=$var_dir/miniserv.error" >> $cfile
 	echo "pidfile=$var_dir/miniserv.pid" >> $cfile
 	echo "logtime=168" >> $cfile
-	echo "ppath=$ppath" >> $cfile
 	echo "ssl=$ssl" >> $cfile
+	echo "no_ssl2=1" >> $cfile
+	echo "no_ssl3=1" >> $cfile
+	openssl version 2>&1 | grep "OpenSSL 1" >/dev/null
+	if [ "$?" = "0" ]; then
+		echo "no_tls1=1" >> $cfile
+		echo "no_tls1_1=1" >> $cfile
+	fi
+	echo "ssl_honorcipherorder=1" >> $cfile
+	echo "no_sslcompression=1" >> $cfile
 	echo "env_WEBMIN_CONFIG=$config_dir" >> $cfile
 	echo "env_WEBMIN_VAR=$var_dir" >> $cfile
 	echo "atboot=$atboot" >> $cfile
@@ -493,6 +507,7 @@ else
 	echo "blockhost_failures=5" >> $cfile
 	echo "blockhost_time=60" >> $cfile
 	echo "syslog=1" >> $cfile
+	echo "ipv6=1" >> $cfile
 	if [ "$allow" != "" ]; then
 		echo "allow=$allow" >> $cfile
 	fi
@@ -532,7 +547,7 @@ else
 	if [ "$?" = "0" ]; then
 		# We can generate a new SSL key for this host
 		host=`hostname`
-		openssl req -newkey rsa:512 -x509 -nodes -out $tempdir/cert -keyout $tempdir/key -days 1825 >/dev/null 2>&1 <<EOF
+		openssl req -newkey rsa:2048 -x509 -nodes -out $tempdir/cert -keyout $tempdir/key -days 1825 -sha256 >/dev/null 2>&1 <<EOF
 .
 .
 .
@@ -596,9 +611,9 @@ echo "PERLLIB=$PERLLIB" >>$config_dir/start
 echo "export PERLLIB" >>$config_dir/start
 uname -a | grep -i 'HP/*UX' >/dev/null
 if [ $? = "0" ]; then
-	echo "exec '$wadir/miniserv.pl' $config_dir/miniserv.conf &" >>$config_dir/start
+	echo "exec '$wadir/miniserv.pl' \$* $config_dir/miniserv.conf &" >>$config_dir/start
 else
-	echo "exec '$wadir/miniserv.pl' $config_dir/miniserv.conf" >>$config_dir/start
+	echo "exec '$wadir/miniserv.pl' \$* $config_dir/miniserv.conf" >>$config_dir/start
 fi
 
 echo "#!/bin/sh" >>$config_dir/stop
@@ -630,19 +645,7 @@ if [ "$upgrading" != 1 ]; then
 	echo "os_version=$os_version" >> $config_dir/config
 	echo "real_os_type=$real_os_type" >> $config_dir/config
 	echo "real_os_version=$real_os_version" >> $config_dir/config
-	if [ -r /etc/system.cnf ]; then
-		# Found a caldera system config file .. get the language
-		source /etc/system.cnf
-		if [ "$CONF_LST_LANG" = "us" ]; then
-			CONF_LST_LANG=en
-		elif [ "$CONF_LST_LANG" = "uk" ]; then
-			CONF_LST_LANG=en
-		fi
-		grep "lang=$CONF_LST_LANG," "$wadir/lang_list.txt" >/dev/null 2>&1
-		if [ "$?" = 0 ]; then
-			echo "lang=$CONF_LST_LANG" >> $config_dir/config
-		fi
-	fi
+	echo "lang=en.UTF-8" >> $config_dir/config
 
 	# Turn on logging by default
 	echo "log=1" >> $config_dir/config
@@ -714,6 +717,13 @@ if [ "$themelist" != "" ]; then
 	echo "preroot=$themelist" >> $config_dir/miniserv.conf
 fi
 
+# If the old blue-theme is still in use, change it
+oldtheme=`grep "^theme=" $config_dir/config | sed -e 's/theme=//g'`
+if [ "$oldtheme" = "blue-theme" ]; then
+   echo "theme=gray-theme" >> $config_dir/config
+   echo "preroot=gray-theme" >> $config_dir/miniserv.conf
+fi
+
 # Set the product field in the global config
 grep product= $config_dir/config >/dev/null
 if [ "$?" != "0" ]; then
@@ -777,7 +787,7 @@ if [ "$nochown" = "" ]; then
 	chmod -R og-w "$wadir"
 	chmod -R a+rx "$wadir"
 fi
-if [ $var_dir != "/var" ]; then
+if [ $var_dir != "/var" -a "$upgrading" != 1 ]; then
 	# Make log directory non-world-readable or writable
 	chown -R root $var_dir
 	chgrp -R bin $var_dir

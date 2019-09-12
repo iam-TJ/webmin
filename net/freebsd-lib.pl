@@ -48,6 +48,17 @@ foreach $l (@lines) {
 		}
 	push(@rv, \%ifc);
 
+	# Add v6 addresses
+	local (@address6, @netmask6, @scope6);
+	while($l =~ s/inet6\s+([0-9a-f:]+)(%\S+)?\s+prefixlen\s+(\d+)(\s+scopeid\s+(\S+))?//) {
+		push(@address6, $1);
+		push(@netmask6, $3);
+		push(@scope6, $5);
+		}
+	$ifc{'address6'} = \@address6;
+	$ifc{'netmask6'} = \@netmask6;
+	$ifc{'scope6'} = \@scope6;
+
 	# Add aliases as virtual interfaces. Try to match boot-time interface
 	# numbers where possible
 	local %vtaken = map { $_->{'virtual'}, 1 }
@@ -81,11 +92,29 @@ return @rv;
 # Create or modify an interface
 sub activate_interface
 {
-local %act;
-map { $act{$_->{'fullname'}} = $_ } &active_interfaces();
+local %act = map { $_->{'fullname'}, $_ } &active_interfaces();
 local $old = $act{$_[0]->{'fullname'}};
 $act{$_[0]->{'fullname'}} = $_[0];
 &interface_sync(\%act, $_[0]->{'name'}, $_[0]->{'fullname'});
+
+if ($_[0]->{'virtual'} eq '') {
+	# Remove old IPv6 addresses
+	local $l = &backquote_command("ifconfig $_[0]->{'name'}");
+	while($l =~ s/inet6\s*(\S+)\s+prefixlen\s+(\d+)//) {
+		local $cmd = "ifconfig $_[0]->{'name'} inet6 $1 -alias 2>&1";
+		$out = &backquote_logged($cmd);
+		&error("Failed to remove old IPv6 address : $out") if ($?);
+		}
+
+	# Add IPv6 addresses
+	for(my $i=0; $i<@{$_[0]->{'address6'}}; $i++) {
+		local $cmd = "ifconfig $_[0]->{'name'} inet6 ".
+			     $_[0]->{'address6'}->[$i].
+			     " prefixlen ".$_[0]->{'netmask6'}->[$i]." 2>&1";
+		$out = &backquote_logged($cmd);
+		&error("Failed to add IPv6 address : $out") if ($?);
+		}
+	}
 }
 
 # deactivate_interface(&details)
@@ -104,7 +133,10 @@ map { $act{$_->{'fullname'}} = $_ } @act;
 &interface_sync(\%act, $_[0]->{'name'}, $_[0]->{'fullname'});
 }
 
-# interface_sync(interfaces, name, changee)
+# interface_sync(&interfaces-hash, name, changee)
+# Given a hash from interface name to details, make them live. This is needed
+# because on FreeBSD, alias interfaces are just IPs on the main interface, 
+# rather than separate eth0:N interfaces like on Linux.
 sub interface_sync
 {
 # Remove all IP addresses except for the primary one (unless it is being edited)
@@ -144,6 +176,7 @@ foreach $a (sort { $a->{'fullname'} cmp $b->{'fullname'} }
 		&error($out) if ($?);
 		}
 	}
+
 }
 
 # boot_interfaces()
@@ -152,7 +185,7 @@ sub boot_interfaces
 {
 local %rc = &get_rc_conf();
 local @rv;
-foreach $r (keys %rc) {
+foreach my $r (keys %rc) {
 	local $v = $rc{$r};
 	local %ifc;
 	if ($r =~ /^ifconfig_([a-z0-9]+)$/) {
@@ -171,7 +204,9 @@ foreach $r (keys %rc) {
 	if ($v =~ /^inet\s+(\S+)/ || /^([0-9\.]+)/) {
 		$ifc{'address'} = $1;
 		}
-	else { next; }
+	elsif ($v eq 'DHCP') {
+		$ifc{'dhcp'} = 1;
+		}
 	local @a = split(/\./, $ifc{'address'});
 	if ($v =~ /netmask\s+(0x\S+)/) {
 		$ifc{'netmask'} = &parse_hex($1);
@@ -203,6 +238,33 @@ foreach $r (keys %rc) {
 	$ifc{'edit'} = 1;
 	$ifc{'index'} = scalar(@rv);
 	$ifc{'file'} = "/etc/rc.conf";
+
+	# Check for IPv6 params
+	local $v6 = $rc{'ipv6_ifconfig_'.$ifc{'fullname'}};
+	if ($v6 =~ /^inet6\s+(\S+)/ || $v6 =~ /^([0-9a-f:]+)/) {
+		$ifc{'address6'} = [ $1 ];
+		}
+	elsif (!$v6 && $rc{'ipv6_enable'}) {
+		$ifc{'auto6'} = 1;
+		}
+	if ($v6 =~ /prefixlen\s+(\d+)/) {
+		$ifc{'netmask6'} = [ $1 ];
+		}
+
+	# Add IPv6 aliases
+	foreach my $rr (sort { $a cmp $b } keys %rc) {
+		if ($rr =~ /^ipv6_ifconfig_(\S+)_alias\d+$/ &&
+		    $1 eq $ifc{'fullname'}) {
+			local $v6 = $rc{$rr};
+			if ($v6 =~ /^inet6\s+(\S+)/ || $v6 =~ /^([0-9a-f:]+)/) {
+				push(@{$ifc{'address6'}}, $1);
+				}
+			if ($v6 =~ /prefixlen\s+(\d+)/) {
+				push(@{$ifc{'netmask6'}}, $1);
+				}
+			}
+		}
+
 	push(@rv, \%ifc);
 	}
 return @rv;
@@ -212,9 +274,15 @@ return @rv;
 # Create or update a boot-time interface
 sub save_interface
 {
-local $str = "inet $_[0]->{'address'}";
-$str .= " netmask $_[0]->{'netmask'}" if ($_[0]->{'netmask'});
-$str .= " broadcast $_[0]->{'broadcast'}" if ($_[0]->{'broadcast'});
+local $str;
+if ($_[0]->{'dhcp'}) {
+	$str = "DHCP";
+	}
+else {
+	$str = "inet $_[0]->{'address'}";
+	$str .= " netmask $_[0]->{'netmask'}" if ($_[0]->{'netmask'});
+	$str .= " broadcast $_[0]->{'broadcast'}" if ($_[0]->{'broadcast'});
+	}
 &lock_file("/etc/rc.conf");
 if ($_[0]->{'virtual'} eq '') {
 	&save_rc_conf('ifconfig_'.$_[0]->{'name'}, $str);
@@ -238,6 +306,41 @@ else {
 	&save_rc_conf('ifconfig_'.$_[0]->{'name'}.'_alias'.$_[0]->{'virtual'},
 		      $str);
 	}
+
+# Update IPv6 settings
+if ($_[0]->{'virtual'} eq '') {
+	local @a = @{$_[0]->{'address6'}};
+	local @n = @{$_[0]->{'netmask6'}};
+	if (@a || $_[0]->{'auto6'}) {
+		&save_rc_conf('ipv6_enable', 'YES');
+		}
+	if (@a) {
+		&save_rc_conf('ipv6_ifconfig_'.$_[0]->{'name'},
+			      $a[0].' prefixlen '.$n[0]);
+		}
+	else {
+		&save_rc_conf('ipv6_ifconfig_'.$_[0]->{'name'});
+		}
+
+	# Delete any IPv6 aliases
+	local %rc = &get_rc_conf();
+	foreach my $r (keys %rc) {
+		if ($r =~ /^ipv6_ifconfig_(\S+)_alias\d+$/ &&
+		    $1 eq $_[0]->{'fullname'}) {
+			&save_rc_conf($r);
+			}
+		}
+
+	# Re-create IPv6 aliases
+	shift(@a);
+	shift(@n);
+	for(my $i=0; $i<@a; $i++) {
+		&save_rc_conf(
+			"ipv6_ifconfig_".$_[0]->{'fullname'}."_alias".$i,
+			$a[$i]." prefixlen ".$n[$i]);
+		}
+	}
+
 &unlock_file("/etc/rc.conf");
 }
 
@@ -249,6 +352,8 @@ sub delete_interface
 if ($_[0]->{'virtual'} eq '') {
 	# Remove the real interface
 	&save_rc_conf('ifconfig_'.$_[0]->{'name'});
+	&save_rc_conf('ipv6_ifconfig_'.$_[0]->{'name'});
+	# XXX ipv6 too
 	}
 else {
 	# Remove a virtual interface, and shift down all aliases above it
@@ -283,7 +388,7 @@ return	$_[0] =~ /^tun/ ? "Loopback tunnel" :
 	$_[0] =~ /^(wlan|athi|ral)/ ? "Wireless ethernet" :
 	$_[0] =~ /^(bge|em|myk)/ ? "Gigabit ethernet" :
 	$_[0] =~ /^(ax|mx|nve|pn|rl|tx|wb|nfe|sis)/ ? "Fast ethernet" :
-	$_[0] =~ /^(cs|dc|de|ed|el|ex|fe|fxp|ie|le|lnc|tl|vr|vx|xl|ze|zp)/ ? "Ethernet" : $text{'ifcs_unknown'};
+	$_[0] =~ /^(cs|dc|de|ed|el|ex|fe|fxp|ie|le|lnc|tl|vr|vx|xl|ze|zp|re)/ ? "Ethernet" : $text{'ifcs_unknown'};
 }
 
 # iface_hardware(name)
@@ -297,7 +402,7 @@ return 0;
 # Can some boot-time interface parameter be edited?
 sub can_edit
 {
-return $_[0] =~ /netmask|broadcast/;
+return $_[0] =~ /netmask|broadcast|dhcp/;
 }
 
 # valid_boot_address(address)
@@ -484,6 +589,14 @@ print &ui_table_row($text{'routes_default'},
 	&ui_opt_textbox("defr", $defr eq 'NO' ? '' : $defr, 20,
 			$text{'routes_none'}));
 
+if (&supports_address6()) {
+	# IPv6 efault router
+	local $defr = $rc{'ipv6_defaultrouter'};
+	print &ui_table_row($text{'routes_default6'},
+		&ui_opt_textbox("defr6", $defr eq 'NO' ? '' : $defr, 20,
+				$text{'routes_none'}));
+	}
+
 # Act as router?
 local $gw = $rc{'gateway_enable'};
 print &ui_table_row($text{'routes_forward'},
@@ -503,6 +616,12 @@ sub parse_routing
 $in{'defr_def'} || &check_ipaddress($in{'defr'}) ||
 	&error(&text('routes_edefault', $in{'defr'}));
 &save_rc_conf('defaultrouter', $in{'defr_def'} ? 'NO' : $in{'defr'});
+if (&supports_address6()) {
+	$in{'defr6_def'} || &check_ip6address($in{'defr6'}) ||
+		&error(&text('routes_edefault6', $in{'defr6'}));
+	&save_rc_conf('ipv6_defaultrouter',
+		      $in{'defr6_def'} ? 'NO' : $in{'defr6'});
+	}
 &save_rc_conf('gateway_enable', $in{'gw'});
 &save_rc_conf('router_enable', $in{'rd'});
 &unlock_file("/etc/rc.conf");
@@ -571,18 +690,66 @@ foreach my $i (&active_interfaces()) {
 chdir($oldpwd);
 }
 
-sub os_feedback_files
-{
-return ( "/etc/rc.conf", "/etc/resolv.conf", "/etc/host.conf",
-	 "/etc/resolv.conf" );
-}
-
 # supports_address6([&iface])
 # Returns 1 if managing IPv6 interfaces is supported
 sub supports_address6
 {
 local ($iface) = @_;
-return 0;
+return $gconfig{'os_version'} >= 8;
+}
+
+# list_routes()
+# Returns a list of active routes
+sub list_routes
+{
+local @rv;
+&open_execute_command(ROUTES, "netstat -rn", 1, 1);
+while(<ROUTES>) {
+	s/\s+$//;
+	if (/^([0-9\.]+|default)(\/\d+)?\s+([0-9\.]+|link\S+)\s+\S+\s+\S+\s+\S+\s+(\S+)/) {
+		my $r = { 'dest' => $1,
+			  'gateway' => $3,
+			  'netmask' => $2,
+			  'iface' => $4 };
+		if ($r->{'gateway'} =~ /^link/) {
+			$r->{'gateway'} = '0.0.0.0';
+			}
+		if ($r->{'dest'} eq 'default' &&
+		    &check_ip6address($r->{'gateway'})) {
+			$r->{'dest'} = '::';
+			}
+		elsif ($r->{'dest'} eq 'default') {
+			$r->{'dest'} = '0.0.0.0';
+			}
+		if ($r->{'netmask'} =~ /^\/(\d+)$/) {
+			$r->{'netmask'} = &prefix_to_mask($1);
+			}
+		push(@rv, $r);
+		}
+	}
+close(ROUTES);
+return @rv;
+}
+
+# get_default_gateway()
+# Returns the default gateway IP (if one is set) and device (if set) boot time
+# settings.
+sub get_default_gateway
+{
+local %rc = &get_rc_conf();
+return ( $rc{'defaultrouter'} eq 'NO' ? undef : $rc{'defaultrouter'},
+	 undef );
+}
+
+# set_default_gateway(gateway, device)
+# Sets the default gateway to the given IP accessible via the given device,
+# in the boot time settings.
+sub set_default_gateway
+{
+local ($gw, $gwdev) = @_;
+&lock_file("/etc/rc.conf");
+&save_rc_conf('defaultrouter', $gw || "NO");
+&unlock_file("/etc/rc.conf");
 }
 
 1;

@@ -10,12 +10,12 @@ $access{'types'} eq '*' && $access{'virts'} eq '*' ||
 
 $conf = &get_config();
 @files = grep { -f $_ } &unique(map { $_->{'file'} } @$conf);
-$in{'file'} = $files[0] if (!$in{'file'});
+$in{'file'} = $files[0] if ($in{'file'} eq '');
 print "<form action=allmanual_form.cgi>\n";
 print "<input type=submit value='$text{'manual_file'}'>\n";
 print "<select name=file>\n";
 foreach $f (@files) {
-	printf "<option %s>%s\n",
+	printf "<option %s>%s</option>\n",
 		$f eq $in{'file'} ? 'selected' : '', $f;
 	$found++ if ($f eq $in{'file'});
 	}
@@ -29,5 +29,4 @@ print &ui_textarea("data", $data, 20, 80, undef, undef,
 		   "style='width:100%'"),"<br>\n";
 print &ui_form_end([ [ "save", $text{'save'} ] ]);
 
-&ui_print_footer("", $text{'index_return'});
-
+&ui_print_footer("index.cgi?mode=global", $text{'index_return2'});

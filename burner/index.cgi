@@ -29,8 +29,7 @@ if (@profiles) {
 				  $text{'index_files'} ], 100, 0, \@tds);
 	foreach $p (@profiles) {
 		local @cols;
-		push(@cols, "<a href='edit_profile.cgi?id=$p->{'id'}'>".
-			    "$p->{'name'}</a>");
+		push(@cols, &ui_link("edit_profile.cgi?id=$p->{'id'}","$p->{'name'}"));
 		push(@cols, $text{'index_type'.$p->{'type'}});
 		if ($p->{'type'} == 1) {
 			push(@cols, $p->{'iso'});
@@ -76,10 +75,10 @@ if ($access{'create'}) {
 	print "<form action=edit_profile.cgi>\n";
 	print "<input type=submit value='$text{'index_add'}'>\n";
 	print "<select name=type>\n";
-	print "<option value=1 checked> $text{'index_type1'}\n";
-	print "<option value=2> $text{'index_type2'}\n";
-	print "<option value=3> $text{'index_type3'}\n";
-	print "<option value=4> $text{'index_type4'}\n";
+	print "<option value=1 checked>$text{'index_type1'}</option>\n";
+	print "<option value=2>$text{'index_type2'}</option>\n";
+	print "<option value=3>$text{'index_type3'}</option>\n";
+	print "<option value=4>$text{'index_type4'}</option>\n";
 	print "</select></form>\n";
 	}
 }

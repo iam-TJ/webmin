@@ -17,7 +17,7 @@ index_find=Find users where username
 index_equals=equals
 index_contains=contains
 index_eperl=The Perl module $1 needed for the selected SMTP authentication mode is not installed or is missing a dependent module. <a href='$2'>Click here</a> to install it now.
-index_file=Read Mail in File:
+index_file=Read Mail in File or Maildir:
 index_nousers=No users were found!
 index_nousersmail=No users with email were found.
 
@@ -111,6 +111,7 @@ mail_esystem=An error occurred contacting the mail system : $1. This must be fix
 mail_selread=Select read.
 mail_selunread=Select unread.
 mail_selspecial=Select special.
+mail_specialsync=Sync Special
 
 view_title=Read Email
 view_desc=Message $1 in $2
@@ -120,6 +121,7 @@ view_sent=Message $1 in sent mail list
 view_qdesc=Queued message $1
 view_headers=Mail headers
 view_body=Message contents
+view_nobody=This message has no body contents.
 view_allheaders=View all headers
 view_noheaders=View basic headers
 view_attach=Attachments
@@ -149,7 +151,7 @@ view_markas1=Read
 view_markas2=Special
 view_return=original email
 view_sub=Attached Email
-view_sub2=Attached email from <i>$1</i>
+view_sub2=Attached email from $1
 view_egone=This message no longer exists
 view_eugone=This user does not exist
 
@@ -303,6 +305,7 @@ search_results5=$1 mail messages where $2 matches $3
 search_msg2=Search results for $1
 search_msg4=Search results
 search_msg5=Search results for spam with score $1
+search_msg6=Search results for $1 in $2 field
 search_local=In local folders
 search_all=In all folders
 search_limit=(from last $1 messages)
@@ -436,4 +439,16 @@ delall_ok=Delete Now
 slide_title=Attached Images
 slide_prev=Previous
 slide_next=Next
+
+left_mail=Mail
+left_search=Search:
+left_folders=Manage Folders
+left_addresses=Address Book
+left_prefs=Mail Preferences
+left_forward=Forward Email
+left_autoreply=Automatic Reply
+left_filter=Email Filters
+left_pass=Change Password
+left_sig=Edit Signature
+
 __norefs=1

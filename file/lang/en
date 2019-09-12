@@ -1,5 +1,5 @@
-index_title=File Manager
-index_nojava=This module requires java to function, but your browser does not support java
+index_title=Java File Manager
+index_nojava=This module requires Java to function, but your browser does not support Java
 index_eremote=There is no Unix user matching the Webmin login $1.
 index_index=Return to <a href='$1'>Webmin index</a>.
 switch_euser=Unix user does not exist!
@@ -76,7 +76,9 @@ info_setgid3=Execute as group
 info_apply=Apply changes to
 info_apply1=This directory only
 info_apply2=This directory and its files
-info_apply3=This directory and all subdirectories
+info_apply3=This directory and all subdirectories and files
+info_apply4=Files under this directory and subdirectories
+info_apply5=This directory and all subdirectories
 info_efailed=Failed to update $1 : $2
 info_read=Read
 info_write=Write
@@ -168,6 +170,7 @@ view_ecmd=The command $1 needed to create an archive is not installed
 view_ecomp=Failed to create archive : $1
 view_earchive=You are not allowed to download archives
 view_earchmax=The selected directory is larger than the maximum allowed for archiving ($1 bytes)
+view_epathinfo=Path contains invalid characters
 
 paste_ecopy=You must cut or copy before pasting
 paste_egone=Copied file $1 no longer exists

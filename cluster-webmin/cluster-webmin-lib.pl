@@ -36,6 +36,7 @@ foreach $h (readdir(DIR)) {
 			&read_file("$hdir/$h/$f", \%user);
 			$user{'modules'} = [ split(/\s+/, $user{'modules'}) ];
 			$user{'ownmods'} = [ split(/\s+/, $user{'ownmods'}) ];
+			$user{'olds'} = [ split(/\s+/, $user{'olds'}) ];
 			push(@{$host{'users'}}, \%user);
 			}
 		elsif ($f =~ /^(\S+)\.group$/) {
@@ -84,6 +85,7 @@ foreach $m (@{$_[0]->{'users'}}) {
 	local %u = %$m;
 	$u{'modules'} = join(" ", @{$u{'modules'}});
 	$u{'ownmods'} = join(" ", @{$u{'ownmods'}});
+	$u{'olds'} = join(" ", @{$u{'olds'}});
 	&write_file("$hdir/$_[0]->{'id'}/$u{'name'}.user", \%u);
 	delete($oldfile{"$u{'name'}.user"});
 	}
@@ -124,7 +126,8 @@ return ( &servers::this_server(), grep { $_->{'user'} } @servers );
 # server_name(&server)
 sub server_name
 {
-return $_[0]->{'desc'} ? $_[0]->{'desc'} : $_[0]->{'host'};
+return ($_[0]->{'id'} == 0 ? &get_system_hostname() : $_[0]->{'host'}).
+       ($_[0]->{'desc'} ? " (".$_[0]->{'desc'}.")" : "");
 }
 
 # all_modules(&hosts)
@@ -181,16 +184,16 @@ if ($_[3]) {
 else {
 	print "<select name=server>\n";
 	}
-print "<option value=-1>$text{'user_all'}\n";
-print "<option value=-2>$text{'user_donthave'}\n" if (!$_[1]);
-print "<option value=-3>$text{'user_have'}\n" if (!$_[2]);
+print "<option value=-1>$text{'user_all'}</option>\n";
+print "<option value=-2>$text{'user_donthave'}</option>\n" if (!$_[1]);
+print "<option value=-3>$text{'user_have'}</option>\n" if (!$_[2]);
 local @groups = &servers::list_all_groups(\@servers);
 local $h;
 foreach $h (@hosts) {
         local ($s) = grep { $_->{'id'} == $h->{'id'} } @servers;
 	if ($s) {
 		print "<option value='$s->{'id'}'>",
-			$s->{'desc'} ? $s->{'desc'} : $s->{'host'},"\n";
+			$s->{'desc'} ? $s->{'desc'} : $s->{'host'},"</option>\n";
 		$gothost{$s->{'host'}}++;
 		}
         }
@@ -201,7 +204,7 @@ foreach $g (@groups) {
                 ($found++, last) if ($gothost{$m});
                 }
         print "<option value='group_$g->{'name'}'>",
-                &text('user_ofgroup', $g->{'name'}),"\n" if ($found);
+                &text('user_ofgroup', $g->{'name'}),"</option>\n" if ($found);
         }
 print "</select>\n";
 if ($_[0]) {

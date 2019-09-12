@@ -7,24 +7,36 @@ use WebminCore;
 @base_types = ("passwd", "shadow", "group", "hosts", "networks", "netmasks",
 	       "services", "protocols", "aliases", "netgroup");
 
+# get_ldap_config_file()
+# Returns the first config file that exists
+sub get_ldap_config_file
+{
+my @confs = split(/\s+/, $config{'auth_ldap'});
+foreach my $c (@$confs) {
+	return $c if (-e $c);
+	}
+return $confs[0];
+}
+
 # get_config()
 # Parses the NSS LDAP config file into a list of names and values
 sub get_config
 {
-local $file = $_[0] || $config{'auth_ldap'};
+local $file = $_[0] || &get_ldap_config_file();
 if (!scalar(@get_config_cache)) {
 	local $lnum = 0;
 	@get_config_cache = ( );
 	&open_readfile(CONF, $file);
 	while(<CONF>) {
 		s/\r|\n//g;
-                s/#.*$//;
 		if (/^(#?)(\S+)\s*(.*)/) {
-			push(@get_config_cache, { 'name' => lc($2),
-						  'value' => $3,
-						  'enabled' => !$1,
-						  'line' => $lnum,
-						  'file' => $file });
+			my $dir = { 'name' => lc($2),
+				    'value' => $3,
+				    'enabled' => !$1,
+				    'line' => $lnum,
+				    'file' => $file };
+			$dir->{'value'} =~ s/\s+#.*$//;   # Trailing comments
+			push(@get_config_cache, $dir);
 			}
 		$lnum++;
 		}
@@ -33,7 +45,8 @@ if (!scalar(@get_config_cache)) {
 return \@get_config_cache;
 }
 
-# find(name, &conf, disabled-mode)
+# find(name, &conf, disabled-mode(0=enabled, 1=disabled, 2=both))
+# Returns the directive objects with some name
 sub find
 {
 local ($name, $conf, $dis) = @_;
@@ -49,7 +62,8 @@ elsif ($dis == 1) {
 return wantarray ? @rv : $rv[0];
 }
 
-# find_value(name, &conf)
+# find_value(name, &conf, [disabled])
+# Finds the value or values of a directive
 sub find_value
 {
 local ($name, $conf, $dis) = @_;
@@ -57,50 +71,61 @@ local @rv = map { $_->{'value'} } &find($name, $conf, $dis);
 return wantarray ? @rv : $rv[0];
 }
 
+# find_svalue(name, &conf, [disabled])
+# Like find_value, but only returns a single value
 sub find_svalue
 {
 local $rv = &find_value(@_);
 return $rv;
 }
 
-# save_directive(&conf, name, [value])
+# save_directive(&conf, name, [value|&values])
+# Update one or more directives with some name
 sub save_directive
 {
-local ($conf, $name, $value) = @_;
-local $old = &find($name, $conf);
-local $oldcmt = &find($name, $conf, 1);
-local $lref = &read_file_lines($old ? $old->{'file'} :
-			       $oldcmt ? $oldcmt->{'file'} :
-				         $config{'auth_ldap'});
-if (defined($value) && $old) {
-	# Just update value
-	$old->{'value'} = $value;
-	$lref->[$old->{'line'}] = "$name $value";
-	}
-elsif (defined($value) && $oldcmt) {
-	# Add value after commented version
-	splice(@$lref, $oldcmt->{'line'}+1, 0, "$name $value");
-	&renumber($conf, $oldcmt->{'line'}+1, $oldcmt->{'file'}, 1);
-	push(@$conf, { 'name' => $name,
-		       'value' => $value,
-		       'enabled' => 1,
-		       'line' => $oldcmt->{'line'}+1,
-		       'file' => $oldcmt->{'file'} });
-	}
-elsif (!defined($value) && $old) {
-	# Delete current value
-	splice(@$lref, $old->{'line'}, 1);
-	&renumber($conf, $old->{'line'}, $old->{'file'}, -1);
-	@$conf = grep { $_ ne $old } @$conf;
-	}
-elsif ($value) {
-	# Add value at end of file
-	push(@$conf, { 'name' => $name,
-		       'value' => $value,
-		       'enabled' => 1,
-		       'line' => scalar(@$lref),
-		       'file' => $config{'auth_ldap'} });
-	push(@$lref, "$name $value");
+local ($conf, $name, $valuez) = @_;
+local @values = ref($valuez) ? @$valuez : ( $valuez );
+local @old = &find($name, $conf);
+local @oldcmt = &find($name, $conf, 1);
+local $deffile = &get_ldap_config_file();
+
+for(my $i=0; $i<@old || $i<@values; $i++) {
+	local $old = $old[$i];
+	local $oldcmt = $oldcmt[$i];
+	local $value = $values[$i];
+	local $lref = &read_file_lines($old ? $old->{'file'} :
+				       $oldcmt ? $oldcmt->{'file'} :
+						 $deffile);
+	if (defined($value) && $old) {
+		# Just update value
+		$old->{'value'} = $value;
+		$lref->[$old->{'line'}] = "$name $value";
+		}
+	elsif (defined($value) && $oldcmt) {
+		# Add value after commented version
+		splice(@$lref, $oldcmt->{'line'}+1, 0, "$name $value");
+		&renumber($conf, $oldcmt->{'line'}+1, $oldcmt->{'file'}, 1);
+		push(@$conf, { 'name' => $name,
+			       'value' => $value,
+			       'enabled' => 1,
+			       'line' => $oldcmt->{'line'}+1,
+			       'file' => $oldcmt->{'file'} });
+		}
+	elsif (!defined($value) && $old) {
+		# Delete current value
+		splice(@$lref, $old->{'line'}, 1);
+		&renumber($conf, $old->{'line'}, $old->{'file'}, -1);
+		@$conf = grep { $_ ne $old } @$conf;
+		}
+	elsif ($value) {
+		# Add value at end of file
+		push(@$conf, { 'name' => $name,
+			       'value' => $value,
+			       'enabled' => 1,
+			       'line' => scalar(@$lref),
+			       'file' => $deffile });
+		push(@$lref, "$name $value");
+		}
 	}
 }
 
@@ -167,7 +192,7 @@ elsif ($_[0]) { return $err; }		# Caller asked for error return
 else { &error($err); }			# Caller asked for error() call
 }
 
-# generic_ldap_connect([host], [port], [login], [password])
+# generic_ldap_connect([host], [port], [ssl], [login], [password])
 # A generic function for connecting to an LDAP server. Uses the system's
 # LDAP client config file if any parameters are missing. Returns the LDAP
 # handle on success or an error message on failure.
@@ -180,9 +205,10 @@ eval "use Net::LDAP";
 if ($@) {
 	return &text('ldap_emodule2', "<tt>Net::LDAP</tt>");
 	}
-if (!-r $config{'auth_ldap'}) {
+my $deffile = &get_ldap_config_file();
+if (!-r $deffile) {
 	$ldap_hosts && $ldap_user ||
-		return &text('ldap_econf', "<tt>$config{'auth_ldap'}</tt>");
+		return &text('ldap_econf', "<tt>$deffile</tt>");
 	}
 
 # Get the host and port
@@ -194,6 +220,7 @@ local $cafile = &find_svalue("tls_cacertfile", $conf);
 local $certfile = &find_svalue("tls_cert", $conf);
 local $keyfile = &find_svalue("tls_key", $conf);
 local $ciphers = &find_svalue("tls_ciphers", $conf);
+local $host;
 if ($ldap_hosts) {
 	# Using hosts from parameter
 	local @hosts = split(/[ \t,]+/, $ldap_hosts);
@@ -207,11 +234,11 @@ if ($ldap_hosts) {
 	local $port = $ldap_port ||
 		      &find_svalue("port", $conf) ||
 		      ($use_ssl == 1 ? 636 : 389);
-	foreach my $host (@hosts) {
+	foreach my $h (@hosts) {
 		eval {
-			$ldap = Net::LDAP->new($host, port => $port,
+			$ldap = Net::LDAP->new($h, port => $port,
 				scheme => $use_ssl == 1 ? 'ldaps' : 'ldap',
-				inet6 => &should_use_inet6($host));
+				inet6 => &should_use_inet6($h));
 			};
 		if ($@) {
 			$err = &text('ldap_econn2',
@@ -223,6 +250,7 @@ if ($ldap_hosts) {
 				     "<tt>$host</tt>", "<tt>$port</tt>");
 			}
 		else {
+			$host = $h;
 			$err = undef;
 			last;
 			}
@@ -267,15 +295,16 @@ else {
 		      ($use_ssl == 1 ? 636 : 389);
 	@hosts = ( "localhost" ) if (!@hosts);
 
-	foreach $host (@hosts) {
-		$ldap = Net::LDAP->new($host, port => $port,
+	foreach my $h (@hosts) {
+		$ldap = Net::LDAP->new($h, port => $port,
 			       scheme => $use_ssl == 1 ? 'ldaps' : 'ldap',
-			       inet6 => &should_use_inet6($host));
+			       inet6 => &should_use_inet6($h));
 		if (!$ldap) {
 			$err = &text('ldap_econn',
 				     "<tt>$host</tt>", "<tt>$port</tt>");
 			}
 		else {
+			$host = $h;
 			$err = undef;
 			last;
 			}
@@ -309,7 +338,8 @@ if ($err) {
 	}
 
 local ($dn, $password);
-local $rootbinddn = &find_svalue("rootbinddn", $conf);
+local $rootbinddn = &find_svalue("rootpwmoddn", $conf) ||
+		    &find_svalue("rootbinddn", $conf);
 if ($ldap_user) {
 	# Use login from config
 	$dn = $ldap_user;
@@ -318,7 +348,8 @@ if ($ldap_user) {
 elsif ($rootbinddn) {
 	# Use the root login if we have one
 	$dn = $rootbinddn;
-	$password = &get_rootbinddn_secret();
+	$password = &find_svalue("rootpwmodpw", $conf) ||
+		    &get_rootbinddn_secret();
 	}
 else {
 	# Use the normal login
@@ -372,7 +403,7 @@ local @hosts;
 if ($config{'ldap_hosts'}) {
 	@hosts = split(/\s+/, $config{'ldap_hosts'});
 	}
-elsif (!-r $config{'auth_ldap'}) {
+elsif (!-r &get_ldap_config_file()) {
 	@hosts = ( );
 	}
 else {
@@ -393,6 +424,36 @@ else {
 		}
 	}
 return wantarray ? @hosts : $hosts[0];
+}
+
+# fix_ldap_authconfig()
+# If the systme has a /etc/sysconfig/authconfig file, enable LDAP in it.
+sub fix_ldap_authconfig
+{
+my $afile = "/etc/sysconfig/authconfig";
+return 0 if (!-r $afile);
+&lock_file($afile);
+my %auth;
+&read_env_file($afile, \%auth);
+if ($auth{'USELDAP'} =~ /no/i) {
+	$auth{'USELDAP'} = 'yes';
+	$changed++;
+	}
+if ($auth{'USELDAPAUTH'} =~ /no/i) {
+	$auth{'USELDAPAUTH'} = 'yes';
+	$changed++;
+	}
+if ($changed) {
+	&write_env_file($afile, \%auth);
+	}
+&unlock_file($afile);
+}
+
+# get_ldap_client()
+# Returns either "nss" or "nslcd" depending on the LDAP client being used
+sub get_ldap_client
+{
+return $config{'auth_ldap'} =~ /nslcd/ ? 'nslcd' : 'nss';
 }
 
 1;

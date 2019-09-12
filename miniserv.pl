@@ -11,6 +11,10 @@ eval "use Time::HiRes;";
 @itoa64 = split(//, "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz");
 
 # Find and read config file
+if ($ARGV[0] eq "--nofork") {
+	$nofork_argv = 1;
+	shift(@ARGV);
+	}
 if (@ARGV != 1) {
 	die "Usage: miniserv.pl <config file>";
 	}
@@ -36,12 +40,10 @@ if ($config{'ssl'}) {
 		# These functions only exist for SSLeay 1.0
 		eval "Net::SSLeay::SSLeay_add_ssl_algorithms()";
 		eval "Net::SSLeay::load_error_strings()";
-		if ($config{'no_ssl2'}) {
-			eval "Net::SSLeay::CTX_set_options($ctx,&Net::SSLeay::OP_NO_SSLv2)";
-			}
 		if (defined(&Net::SSLeay::X509_STORE_CTX_get_current_cert) &&
 		    defined(&Net::SSLeay::CTX_load_verify_locations) &&
-		    defined(&Net::SSLeay::CTX_set_verify)) {
+		    (defined(&Net::SSLeay::CTX_set_verify) ||
+		     defined(&Net::SSLeay::set_verify))) {
 			$client_certs = 1;
 			}
 		}
@@ -77,15 +79,25 @@ if ($config{'libwrap'}) {
 	}
 
 # Check if the MD5 perl module is available
-eval "use MD5";
+eval "use MD5; \$dummy = new MD5; \$dummy->add('foo');";
 if (!$@) {
 	$use_md5 = "MD5";
 	}
 else {
-	eval "use Digest::MD5";
+	eval "use Digest::MD5; \$dummy = new Digest::MD5; \$dummy->add('foo');";
 	if (!$@) {
 		$use_md5 = "Digest::MD5";
 		}
+	}
+if ($use_md5) {
+	push(@startup_msg, "Using MD5 module $use_md5");
+	}
+
+# Check if the SHA512 perl module is available
+eval "use Crypt::SHA";
+$use_sha512 = $@ ? "Crypt::SHA" : undef;
+if ($use_sha512) {
+	push(@startup_msg, "Using SHA512 module $use_sha512");
 	}
 
 # Get miniserv's perl path and location
@@ -154,8 +166,11 @@ elsif (!$config{'no_pam'}) {
 		}
 	}
 if ($config{'pam_only'} && !$use_pam) {
-	print STDERR $startup_msg[0],"\n";
+	foreach $msg (@startup_msg) {
+	     print STDERR $msg,"\n";
+	}
 	print STDERR "PAM use is mandatory, but could not be enabled!\n";
+	print STDERR "no_pam and pam_only both are set!\n" if ($config{no_pam});
 	exit(1);
 	}
 elsif ($pam_msg && !$use_pam) {
@@ -267,6 +282,21 @@ if ($use_ssl) {
 			$ssl_contexts{$ip} = $ctx;
 			}
 		}
+
+	# Setup per-hostname SSL contexts on the main IP
+	if (defined(&Net::SSLeay::CTX_set_tlsext_servername_callback)) {
+		Net::SSLeay::CTX_set_tlsext_servername_callback(
+		    $ssl_contexts{"*"},
+		    sub {
+			my $ssl = shift;
+			my $h = Net::SSLeay::get_servername($ssl);
+			my $c = $ssl_contexts{$h} ||
+				$h =~ /^[^\.]+\.(.*)$/ && $ssl_contexts{"*.$1"};
+			if ($c) {
+				Net::SSLeay::set_SSL_CTX($ssl, $c);
+				}
+			});
+		}
 	}
 
 # Load gzip library if enabled
@@ -364,9 +394,6 @@ if (!$config{'inetd'}) {
 		if ($@) {
 			print STDERR "Failed to pre-load $mod : $@\n";
 			}
-		else {
-			print STDERR "Pre-loaded $mod\n";
-			}
 		}
 	}
 
@@ -461,9 +488,9 @@ if ($config{'bind'}) {
 	if (&check_ip6address($config{'bind'})) {
 		# IP is v6
 		$use_ipv6 || die "Cannot bind to $config{'bind'} without IPv6";
-		push(@sockets, [ inet_pton(Socket6::AF_INET6(),$config{'bind'}),
+		push(@sockets, [ inet_pton(AF_INET6(),$config{'bind'}),
 				 $config{'port'},
-				 Socket6::PF_INET6() ]);
+				 PF_INET6() ]);
 		}
 	else {
 		# IP is v4
@@ -478,7 +505,7 @@ else {
 	if ($use_ipv6) {
 		# Also IPv6
 		push(@sockets, [ in6addr_any(), $config{'port'},
-				 Socket6::PF_INET6() ]);
+				 PF_INET6() ]);
 		}
 	}
 foreach $s (split(/\s+/, $config{'sockets'})) {
@@ -497,7 +524,7 @@ foreach $s (split(/\s+/, $config{'sockets'})) {
 				 PF_INET() ]);
 		if ($use_ipv6) {
 			push(@sockets, [ in6addr_any(), $1,
-					 Socket6::PF_INET6() ]);
+					 PF_INET6() ]);
 			}
 		}
 	elsif ($s =~ /^(\S+):(\d+)$/) {
@@ -505,9 +532,9 @@ foreach $s (split(/\s+/, $config{'sockets'})) {
 		my ($ip, $port) = ($1, $2);
 		if (&check_ip6address($ip)) {
 			$use_ipv6 || die "Cannot bind to $ip without IPv6";
-			push(@sockets, [ inet_pton(Socket6::AF_INET6(),
+			push(@sockets, [ inet_pton(AF_INET6(),
 						   $ip),
-					 $port, Socket6::PF_INET6() ]);
+					 $port, PF_INET6() ]);
 			}
 		else {
 			push(@sockets, [ inet_aton($ip), $port,
@@ -522,9 +549,9 @@ foreach $s (split(/\s+/, $config{'sockets'})) {
 	elsif (($s =~ /^([0-9a-f\:]+):\*$/ || $s =~ /^([0-9a-f\:]+)$/) &&
 	       $use_ipv6) {
 		# Listen on the main port on another IPv6 address
-		push(@sockets, [ inet_pton(Socket6::AF_INET6(), $1),
+		push(@sockets, [ inet_pton(AF_INET6(), $1),
 				 $sockets[0]->[1],
-				 Socket6::PF_INET6() ]);
+				 PF_INET6() ]);
 		}
 	}
 
@@ -534,8 +561,11 @@ $proto = getprotobyname('tcp');
 $tried_inaddr_any = 0;
 for($i=0; $i<@sockets; $i++) {
 	$fh = "MAIN$i";
-	socket($fh, $sockets[$i]->[2], SOCK_STREAM, $proto) ||
-		die "Failed to open socket family $sockets[$i]->[2] : $!";
+	if (!socket($fh, $sockets[$i]->[2], SOCK_STREAM, $proto)) {
+		# Protocol not supported
+		push(@sockerrs, "Failed to open socket family $sockets[$i]->[2] : $!");
+		next;
+		}
 	setsockopt($fh, SOL_SOCKET, SO_REUSEADDR, pack("l", 1));
 	if ($sockets[$i]->[2] eq PF_INET()) {
 		$pack = pack_sockaddr_in($sockets[$i]->[1], $sockets[$i]->[0]);
@@ -564,7 +594,7 @@ for($i=0; $i<@sockets; $i++) {
 			}
 		}
 	else {
-		listen($fh, SOMAXCONN);
+		listen($fh, &get_somaxconn());
 		push(@socketfhs, $fh);
 		$ipv6fhs{$fh} = $sockets[$i]->[2] eq PF_INET() ? 0 : 1;
 		}
@@ -584,7 +614,7 @@ if (!@socketfhs && !$tried_inaddr_any) {
 		print STDERR "Failed to bind to port $sockets[0]->[1] : $!\n";
 		exit(1);
 		}
-	listen($fh, SOMAXCONN);
+	listen($fh, &get_somaxconn());
 	push(@socketfhs, $fh);
 	}
 elsif (!@socketfhs && $tried_inaddr_any) {
@@ -598,7 +628,7 @@ if ($config{'listen'}) {
 	if (socket(LISTEN, PF_INET(), SOCK_DGRAM, $proto)) {
 		setsockopt(LISTEN, SOL_SOCKET, SO_REUSEADDR, pack("l", 1));
 		bind(LISTEN, pack_sockaddr_in($config{'listen'}, INADDR_ANY));
-		listen(LISTEN, SOMAXCONN);
+		listen(LISTEN, &get_somaxconn());
 		}
 	else {
 		$config{'listen'} = 0;
@@ -606,7 +636,7 @@ if ($config{'listen'}) {
 	}
 
 # Split from the controlling terminal, unless configured not to
-if (!$config{'nofork'}) {
+if (!$config{'nofork'} && !$nofork_argv) {
 	if (fork()) { exit; }
 	}
 eval { setsid(); };	# may not work on Windows
@@ -622,6 +652,7 @@ foreach $msg (@startup_msg) {
 
 # write out the PID file
 &write_pid_file();
+$miniserv_main_pid = $$;
 
 # Start the log-clearing process, if needed. This checks every minute
 # to see if the log has passed its reset time, and if so clears it
@@ -674,7 +705,11 @@ $SIG{'USR1'} = 'miniserv::trigger_reload';
 $SIG{'PIPE'} = 'IGNORE';
 local $remove_session_count = 0;
 $need_pipes = $config{'passdelay'} || $config{'session'};
+$cron_runs = 0;
 while(1) {
+	# Check if any webmin cron jobs are ready to run
+	&execute_ready_webmin_crons($cron_runs++);
+
 	# wait for a new connection, or a message from a child process
 	local ($i, $rmask);
 	if (@childpids <= $config{'maxconns'}) {
@@ -765,23 +800,29 @@ while(1) {
 		&write_blocked_file();
 		}
 
-	# Check if any webmin cron jobs are ready to run
-	&execute_ready_webmin_crons();
-
 	if ($config{'session'} && (++$remove_session_count%50) == 0) {
 		# Remove sessions with more than 7 days of inactivity,
 		local $s;
 		foreach $s (keys %sessiondb) {
 			local ($user, $ltime, $lip) =
 				split(/\s+/, $sessiondb{$s});
-			if ($time_now - $ltime > 7*24*60*60) {
-				&run_logout_script($s, $user);
+			if ($ltime && $time_now - $ltime > 7*24*60*60) {
+				&run_logout_script($s, $user, undef, undef);
 				&write_logout_utmp($user, $lip);
-				delete($sessiondb{$s});
-				if ($use_syslog) {
+				if ($user =~ /^\!/ || $sessiondb{$s} eq '') {
+					# Don't log anything for logged out
+					# sessions or those with no data
+					}
+				elsif ($use_syslog && $user) {
 					syslog("info", "%s",
 					      "Timeout of session for $user");
 					}
+				elsif ($use_syslog) {
+					syslog("info", "%s",
+					      "Timeout of unknown session $s ".
+					      "with value $sessiondb{$s}");
+					}
+				delete($sessiondb{$s});
 				}
 			}
 		}
@@ -947,7 +988,6 @@ while(1) {
 			# this sub-process is asking about a password
 			local $infd = $passin[$i];
 			local $outfd = $passout[$i];
-			#local $inline = <$infd>;
 			local $inline = &sysread_line($infd);
 			if ($inline) {
 				print DEBUG "main: inline $inline";
@@ -1035,10 +1075,11 @@ while(1) {
 					}
 				$userlast{$1} = $time_now;
 				}
-			elsif ($inline =~ /^verify\s+(\S+)\s+(\S+)/) {
+			elsif ($inline =~ /^verify\s+(\S+)\s+(\S+)\s+(\S+)/) {
 				# Verifying a session ID
 				local $session_id = $1;
 				local $notimeout = $2;
+				local $vip = $3;
 				local $skey = $sessiondb{$session_id} ?
 						$session_id : 
 						&hash_session_id($session_id);
@@ -1047,7 +1088,7 @@ while(1) {
 					print $outfd "0 0\n";
 					}
 				else {
-					local ($user, $ltime) =
+					local ($user, $ltime, $ip) =
 					  split(/\s+/, $sessiondb{$skey});
 					local $lot = &get_logout_time($user, $session_id);
 					if ($lot &&
@@ -1057,14 +1098,20 @@ while(1) {
 						print $outfd "1 ",$time_now - $ltime,"\n";
 						#delete($sessiondb{$skey});
 						}
+					elsif ($ip && $vip && $ip ne $vip &&
+					       $config{'session_ip'}) {
+						# Session was OK, but from the
+						# wrong IP address
+						print $outfd "3 $ip\n";
+						}
+					elsif ($user =~ /^\!/) {
+						# Logged out session
+						print $outfd "0 0\n";
+						}
 					else {
 						# Session is OK
 						print $outfd "2 $user\n";
-						if ($lot &&
-						    $time_now - $ltime >
-						    ($lot*60)/2) {
-							$sessiondb{$skey} = "$user $time_now";
-							}
+						$sessiondb{$skey} = "$user $time_now $ip";
 						}
 					}
 				}
@@ -1082,9 +1129,11 @@ while(1) {
 				local $skey = $sessiondb{$session_id} ?
 						$session_id : 
 						&hash_session_id($session_id);
-				local @sdb = split(/\s+/, $sessiondb{$skey});
-				print $outfd $sdb[0],"\n";
-				delete($sessiondb{$skey});
+				local ($user, $ltime, $ip) =
+					split(/\s+/, $sessiondb{$skey});
+				$user =~ s/^\!//;
+				print $outfd $user,"\n";
+				$sessiondb{$skey} = "!$user $ltime $ip";
 				}
 			elsif ($inline =~ /^pamstart\s+(\S+)\s+(\S+)\s+(.*)/) {
 				# Starting a new PAM conversation
@@ -1217,6 +1266,7 @@ if ($config{'loghost'}) {
 else {
 	$acpthost = $acptip;
 	}
+$loghost = $acpthost;
 $datestr = &http_date(time());
 $ok_code = 200;
 $ok_message = "Document follows";
@@ -1228,7 +1278,7 @@ $validated = undef;
 # check address against access list
 if (@deny && &ip_match($acptip, $localip, @deny) ||
     @allow && !&ip_match($acptip, $localip, @allow)) {
-	&http_error(403, "Access denied for $acptip");
+	&http_error(403, "Access denied for ".&html_strip($acptip));
 	return 0;
 	}
 
@@ -1236,7 +1286,8 @@ if ($use_libwrap) {
 	# Check address with TCP-wrappers
 	if (!hosts_ctl($config{'pam'}, STRING_UNKNOWN,
 		       $acptip, STRING_UNKNOWN)) {
-		&http_error(403, "Access denied for $acptip by TCP wrappers");
+		&http_error(403, "Access denied for ".&html_strip($acptip).
+				 " by TCP wrappers");
 		return 0;
 		}
 	}
@@ -1260,7 +1311,7 @@ if (!$sel) {
 		}
 	else {
 		&http_error(400, "Timeout",
-			    "Waited for that $to seconds for start of headers");
+			    "Waited for $to seconds for start of headers");
 		}
 	}
 $checked_timeout++;
@@ -1281,9 +1332,9 @@ elsif ($reqline !~ /^(\S+)\s+(.*)\s+HTTP\/1\..$/) {
 	if ($use_ssl) {
 		# This could be an http request when it should be https
 		$use_ssl = 0;
-		local $url = $config{'musthost'} ?
-				"https://$config{'musthost'}:$port/" :
-				"https://$host:$port/";
+		local $urlhost = $config{'musthost'} || $host;
+		$urlhost = "[".$urlhost."]" if (&check_ip6address($urlhost));
+		local $url = "https://$urlhost:$port/";
 		if ($config{'ssl_redirect'}) {
 			# Just re-direct to the correct URL
 			sleep(1);	# Give browser a change to finish
@@ -1295,13 +1346,19 @@ elsif ($reqline !~ /^(\S+)\s+(.*)\s+HTTP\/1\..$/) {
 			&write_keep_alive(0);
 			&write_data("\r\n");
 			return 0;
-			}
-		else {
+		} elsif ($config{'hide_admin_url'} != 1) {
 			# Tell user the correct URL
-			&http_error(200, "Bad Request", "This web server is running in SSL mode. Try the URL <a href='$url'>$url</a> instead.<br>");
-			}
+			&http_error(200, "Document follows",
+				"This web server is running in SSL mode. ".
+				"Try the URL <a href='$url'>$url</a> ".
+				"instead.<br>");
+		} else {
+			# Throw an error
+			&http_error(404, "Page not found",
+				"The requested URL was not found on this server ".
+				"try <a href='/'>visiting the home page</a> of this site to see what you can find <br>");
 		}
-	elsif (ord(substr($reqline, 0, 1)) == 128 && !$use_ssl) {
+	} elsif (ord(substr($reqline, 0, 1)) == 128 && !$use_ssl) {
 		# This could be an https request when it should be http ..
 		# need to fake a HTTP response
 		eval <<'EOF';
@@ -1348,11 +1405,15 @@ elsif ($reqline !~ /^(\S+)\s+(.*)\s+HTTP\/1\..$/) {
 				&write_keep_alive(0);
 				&write_data("\r\n");
 				return 0;
-				}
-			else {
+			} elsif ($config{'hide_admin_url'} != 1) {
 				# Tell user the correct URL
 				&http_error(200, "Bad Request", "This web server is not running in SSL mode. Try the URL <a href='$url'>$url</a> instead.<br>");
-				}
+			} else {
+				&http_error(404, "Page not found",
+					"The requested URL was not found on this server ".
+					"try <a href='/'>visiting the home page</a> of this site to see what you can find <br>"
+					);
+			}
 EOF
 		if ($@) {
 			&http_error(400, "Bad Request");
@@ -1377,11 +1438,60 @@ while(1) {
 		$header{$lastheader} .= $headline;
 		}
 	else {
-		&http_error(400, "Bad Header $headline");
+		&http_error(400, "Bad Header ".&html_strip($headline));
+		}
+	if (&is_bad_header($header{$lastheader}, $lastheader)) {
+		delete($header{$lastheader});
+		&http_error(400, "Bad Header Contents ".
+				 &html_strip($lastheader));
 		}
 	}
+
+# If a remote IP is given in a header (such as via a proxy), only use it
+# for logging unless trust_real_ip is set
+local $headerhost = $header{'x-forwarded-for'} ||
+		    $header{'x-real-ip'};
+if ($headerhost) {
+	# Only real IPs are allowed
+	$headerhost = undef if (!&check_ipaddress($headerhost) &&
+				!&check_ip6address($headerhost));
+	}
+if ($config{'trust_real_ip'}) {
+	$acpthost = $headerhost || $acpthost;
+	if (&check_ipaddress($headerhost) || &check_ip6address($headerhost)) {
+		# If a remote IP was given, use it for all access control checks
+		# from now on.
+		$acptip = $headerhost;
+		
+		# re-check remote address against access list
+		if (@deny && &ip_match($acptip, $localip, @deny) ||
+		    @allow && !&ip_match($acptip, $localip, @allow)) {
+			&http_error(403, "Access denied for ".&html_strip($acptip));
+			return 0;
+			}
+		
+		if ($use_libwrap) {
+			# Check address with TCP-wrappers
+			if (!hosts_ctl($config{'pam'}, STRING_UNKNOWN,
+				       $acptip, STRING_UNKNOWN)) {
+				&http_error(403, "Access denied for ".&html_strip($acptip).
+						 " by TCP wrappers");
+				return 0;
+				}
+			}
+		print DEBUG "handle_request: passed Remote IP checks\n";
+		}
+	$loghost = $acpthost;
+	}
+else {
+	$loghost = $headerhost || $loghost;
+	}
+
 if (defined($header{'host'})) {
-	if ($header{'host'} =~ /^([^:]+):([0-9]+)$/) {
+	if ($header{'host'} =~ /^\[(.+)\]:([0-9]+)$/) {
+		($host, $port) = ($1, $2);
+		}
+	elsif ($header{'host'} =~ /^([^:]+):([0-9]+)$/) {
 		($host, $port) = ($1, $2);
 		}
 	else {
@@ -1392,6 +1502,10 @@ if (defined($header{'host'})) {
 		&http_error(400, "Invalid HTTP hostname");
 		}
 	}
+$portstr = $port == 80 && !$ssl ? "" :
+	   $port == 443 && $ssl ? "" : ":$port";
+$hostport = &check_ip6address($host) ? "[".$host."]".$portstr
+				     : $host.$portstr;
 undef(%in);
 if ($page =~ /^([^\?]+)\?(.*)$/) {
 	# There is some query string information
@@ -1458,8 +1572,8 @@ if ($method eq 'POST' &&
 	}
 
 # Reject CONNECT request, which isn't supported
-if ($method eq "CONNECT") {
-	&http_error(405, "Method $method is not supported");
+if ($method eq "CONNECT" || $method eq "TRACE") {
+	&http_error(405, "Method ".&html_strip($method)." is not supported");
 	}
 
 # work out accepted encodings
@@ -1478,7 +1592,7 @@ foreach my $m (@mobile_prefixes) {
 		}
 	}
 
-# check for the logout flag file, and if existant deny authentication
+# check for the logout flag file, and if existent deny authentication
 if ($config{'logout'} && -r $config{'logout'}.$in{'miniserv_logout_id'}) {
 	print DEBUG "handle_request: logout flag set\n";
 	$deny_authentication++;
@@ -1515,10 +1629,8 @@ if (defined($redir)) {
 	&write_data("Date: $datestr\r\n");
 	&write_data("Server: $config{'server'}\r\n");
 	local $ssl = $use_ssl || $config{'inetd_ssl'};
-	$portstr = $port == 80 && !$ssl ? "" :
-		   $port == 443 && $ssl ? "" : ":$port";
 	$prot = $ssl ? "https" : "http";
-	&write_data("Location: $prot://$host$portstr$redir\r\n");
+	&write_data("Location: $prot://$hostport$redir\r\n");
 	&write_keep_alive(0);
 	&write_data("\r\n");
 	return 0;
@@ -1533,7 +1645,7 @@ foreach my $d (@davpaths) {
 		}
 	}
 if (!$davpath && ($method eq "SEARCH" || $method eq "PUT")) {
-	&http_error(400, "Bad Request method $method");
+	&http_error(400, "Bad Request method ".&html_strip($method));
 	}
 
 # Check for password if needed
@@ -1591,7 +1703,7 @@ if ($config{'userfile'}) {
 		# authorization given..
 		($authuser, $authpass) = split(/:/, &b64decode($1), 2);
 		print DEBUG "handle_request: doing basic auth check authuser=$authuser authpass=$authpass\n";
-		local ($vu, $expired, $nonexist) =
+		local ($vu, $expired, $nonexist, $wvu) =
 			&validate_user($authuser, $authpass, $host,
 				       $acptip, $port);
 		print DEBUG "handle_request: vu=$vu expired=$expired nonexist=$nonexist\n";
@@ -1631,7 +1743,7 @@ if ($config{'userfile'}) {
 	# Check for a visit to the special session login page
 	if ($config{'session'} && !$deny_authentication &&
 	    $page eq $config{'session_login'}) {
-		if ($in{'logout'} && $header{'cookie'} =~ /(^|\s)$sidname=([a-f0-9]+)/) {
+		if ($in{'logout'} && $header{'cookie'} =~ /(^|\s|;)$sidname=([a-f0-9]+)/) {
 			# Logout clicked .. remove the session
 			local $sid = $2;
 			print $PASSINw "delete $sid\n";
@@ -1645,24 +1757,43 @@ if ($config{'userfile'}) {
 					syslog("info", "%s", "Logout by $louser from $acpthost");
 					}
 				&run_logout_script($louser, $sid,
-						   $acptip, $localip);
+						   $loghost, $localip);
 				&write_logout_utmp($louser, $actphost);
 				}
 			}
 		else {
 			# Validate the user
 			if ($in{'user'} =~ /\r|\n|\s/) {
+				&run_failed_script($in{'user'}, 'baduser',
+						   $loghost, $localip);
 				&http_error(500, "Invalid username",
 				    "Username contains invalid characters");
 				}
 			if ($in{'pass'} =~ /\r|\n/) {
+				&run_failed_script($in{'user'}, 'badpass',
+						   $loghost, $localip);
 				&http_error(500, "Invalid password",
 				    "Password contains invalid characters");
 				}
 
-			local ($vu, $expired, $nonexist) =
+			local ($vu, $expired, $nonexist, $wvu) =
 				&validate_user($in{'user'}, $in{'pass'}, $host,
 					       $acptip, $port);
+			if ($vu && $wvu) {
+				my $uinfo = &get_user_details($wvu);
+				if ($uinfo && $uinfo->{'twofactor_provider'}) {
+					# Check two-factor token ID
+					$err = &validate_twofactor(
+						$wvu, $in{'twofactor'});
+					if ($err) {
+						&run_failed_script(
+							$vu, 'twofactor',
+							$loghost, $localip);
+						$twofactor_msg = $err;
+						$vu = undef;
+						}
+					}
+				}
 			local $hrv = &handle_login(
 					$vu || $in{'user'}, $vu ? 1 : 0,
 				      	$expired, $nonexist, $in{'pass'},
@@ -1756,14 +1887,14 @@ if ($config{'userfile'}) {
 			$validated = 1;
 			}
 		elsif (!$deny_authentication &&
-		       $header{'cookie'} =~ /(^|\s)$sidname=([a-f0-9]+)/) {
+		       $header{'cookie'} =~ /(^|\s|;)$sidname=([a-f0-9]+)/) {
 			# Try all session cookies
 			local $cookie = $header{'cookie'};
-			while($cookie =~ s/(^|\s)$sidname=([a-f0-9]+)//) {
+			while($cookie =~ s/(^|\s|;)$sidname=([a-f0-9]+)//) {
 				$session_id = $2;
 				local $notimeout =
 					$in{'webmin_notimeout'} ? 1 : 0;
-				print $PASSINw "verify $session_id $notimeout\n";
+				print $PASSINw "verify $session_id $notimeout $acptip\n";
 				<$PASSOUTr> =~ /(\d+)\s+(\S+)/;
 				if ($1 == 2) {
 					# Valid session continuation
@@ -1776,6 +1907,12 @@ if ($config{'userfile'}) {
 				elsif ($1 == 1) {
 					# Session timed out
 					$timed_out = $2;
+					}
+				elsif ($1 == 3) {
+					# Session is OK, but from the wrong IP
+					print STDERR "Session $session_id was ",
+					  "used from $acptip instead of ",
+					  "original IP $2\n";
 					}
 				else {
 					# Invalid session ID .. don't set
@@ -1870,8 +2007,12 @@ if ($config{'userfile'}) {
 					$querystring = "page=".&urlize($rpage);
 					}
 				$method = "GET";
-				$querystring .= "&failed=$failed_user" if ($failed_user);
-				$querystring .= "&timed_out=$timed_out" if ($timed_out);
+				$querystring .= "&failed=$failed_user"
+					if ($failed_user);
+				$querystring .= "&twofactor_msg=".&urlize($twofactor_msg)
+					if ($twofactor_msg);
+				$querystring .= "&timed_out=$timed_out"
+					if ($timed_out);
 				$queryargs = "";
 				$page = $config{'session_login'};
 				$miniserv_internal = 1;
@@ -1894,7 +2035,7 @@ if ($config{'userfile'}) {
 				&write_data("A password is required to access this\n");
 				&write_data("web server. Please try again. <p>\n");
 				&write_data("</body></html>\n");
-				&log_request($acpthost, undef, $reqline, 401, &byte_count());
+				&log_request($loghost, undef, $reqline, 401, &byte_count());
 				return 0;
 				}
 			}
@@ -1924,7 +2065,8 @@ if ($config{'userfile'}) {
 				($>, $<) = ($u[2], $u[2]);
 				}
 			else {
-				&http_error(500, "Unix user $authuser does not exist");
+				&http_error(500, "Unix user ".
+				  &html_strip($authuser)." does not exist");
 				return 0;
 				}
 			}
@@ -1932,7 +2074,8 @@ if ($config{'userfile'}) {
 
 	# Check per-user IP access control
 	if (!&check_user_ip($baseauthuser)) {
-		&http_error(403, "Access denied for $acptip for $baseauthuser");
+		&http_error(403, "Access denied for $acptip for ".
+				 &html_strip($baseauthuser));
 		return 0;
 		}
 
@@ -2097,7 +2240,7 @@ print DEBUG "handle_request: full=$full\n";
 # check filename against denyfile regexp
 local $denyfile = $config{'denyfile'};
 if ($denyfile && $full =~ /$denyfile/) {
-	&http_error(403, "Access denied to $page");
+	&http_error(403, "Access denied to ".&html_strip($page));
 	return 0;
 	}
 
@@ -2114,10 +2257,10 @@ if (-d _) {
 		&write_data("Date: $datestr\r\n");
 		&write_data("Server: $config{server}\r\n");
 		$prot = $ssl ? "https" : "http";
-		&write_data("Location: $prot://$host$portstr$page/\r\n");
+		&write_data("Location: $prot://$hostport$page/\r\n");
 		&write_keep_alive(0);
 		&write_data("\r\n");
-		&log_request($acpthost, $authuser, $reqline, 302, 0);
+		&log_request($loghost, $authuser, $reqline, 302, 0);
 		return 0;
 		}
 	# A directory.. check for index files
@@ -2137,7 +2280,10 @@ if (-d _) {
 	@stfull = stat($full) if (!$foundidx);
 	}
 if (-d _) {
-	# This is definately a directory.. list it
+	# This is definitely a directory.. list it
+	if ($config{'nolistdir'}) {
+		&http_error(500, "Directory is missing an index file");
+		}
 	print DEBUG "handle_request: listing directory\n";
 	local $resp = "HTTP/1.0 $ok_code $ok_message\r\n".
 		      "Date: $datestr\r\n".
@@ -2165,10 +2311,10 @@ if (-d _) {
 		$len = length($df); $rest = " "x(35-$len);
 		&write_data(sprintf 
 		 "<a href=\"%s\">%-${len}.${len}s</a>$rest %-20.20s %-10.10s\n",
-		 $df, $df, $fdate, $stbuf[7]);
+		 &urlize($df), &html_strip($df), $fdate, $stbuf[7]);
 		}
 	closedir(DIR);
-	&log_request($acpthost, $authuser, $reqline, $ok_code, &byte_count());
+	&log_request($loghost, $authuser, $reqline, $ok_code, &byte_count());
 	return 0;
 	}
 
@@ -2265,7 +2411,8 @@ if (&get_type($full) eq "internal/cgi" && $validated != 4) {
 	$nph_script = ($full =~ /\/nph-([^\/]+)$/);
 	seek(STDERR, 0, 2);
 	if (!$config{'forkcgis'} &&
-	    ($first eq $perl_path || $first eq $linked_perl_path) &&
+	    ($first eq $perl_path || $first eq $linked_perl_path ||
+	     $first =~ /\/perl$/ || $first =~ /^\/\S+\/env\s+perl$/) &&
 	      $] >= 5.004 ||
             $config{'internalcgis'}) {
 		# setup environment for eval
@@ -2482,13 +2629,14 @@ else {
 	binmode(FILE);
 
 	# Build common headers
+	local $etime = &get_expires_time($simple);
 	local $resp = "HTTP/1.0 $ok_code $ok_message\r\n".
 		      "Date: $datestr\r\n".
 		      "Server: $config{server}\r\n".
 		      "Content-type: ".&get_type($full)."\r\n".
 		      "Last-Modified: ".&http_date($stopen[9])."\r\n".
-		      "Expires: ".
-			&http_date(time()+&get_expires_time($simple))."\r\n";
+		      "Expires: ".&http_date(time()+$etime)."\r\n".
+		      "Cache-Control: public; max-age=".$etime."\r\n";
 
 	if (!$gzipped && $use_gzip && $acceptenc{'gzip'} &&
 	    &should_gzip_file($full)) {
@@ -2518,7 +2666,7 @@ else {
 		$rv = &write_keep_alive();
 		&write_data("\r\n");
 		&reset_byte_count();
-		my $bufsize = $config{'bufsize'} || 1024;
+		my $bufsize = $config{'bufsize'} || 32768;
 		while(read(FILE, $buf, $bufsize) > 0) {
 			&write_data($buf);
 			}
@@ -2527,7 +2675,7 @@ else {
 	}
 
 # log the request
-&log_request($acpthost, $authuser, $reqline,
+&log_request($loghost, $authuser, $reqline,
 	     $logged_code ? $logged_code :
 	     $cgiheader{"location"} ? "302" : $ok_code, &byte_count());
 return $rv;
@@ -2561,10 +2709,10 @@ else {
 	&reset_byte_count();
 	&write_data("<h1>Error - $_[1]</h1>\n");
 	if ($_[2]) {
-		&write_data("<pre>$_[2]</pre>\n");
+		&write_data("<p>$_[2]</p>\n");
 		}
 	}
-&log_request($acpthost, $authuser, $reqline, $_[0], &byte_count())
+&log_request($loghost, $authuser, $reqline, $_[0], &byte_count())
 	if ($reqline);
 &log_error($_[1], $_[2] ? " : $_[2]" : "");
 shutdown(SOCK, 1);
@@ -2655,23 +2803,25 @@ if ($needhn && !defined($hn = $ip_match_cache{$_[0]})) {
 	}
 for($i=2; $i<@_; $i++) {
 	local $mismatch = 0;
-	if ($_[$i] =~ /^(\S+)\/(\d+)$/) {
+	if ($_[$i] =~ /^([0-9\.]+)\/(\d+)$/) {
 		# Convert CIDR to netmask format
 		$_[$i] = $1."/".&prefix_to_mask($2);
 		}
-	if ($_[$i] =~ /^(\S+)\/(\S+)$/) {
+	if ($_[$i] =~ /^([0-9\.]+)\/([0-9\.]+)$/) {
 		# Compare with IPv4 network/mask
-		@mo = split(/\./, $1); @ms = split(/\./, $2);
+		@mo = split(/\./, $1);
+		@ms = split(/\./, $2);
 		for($j=0; $j<4; $j++) {
-			if ((int($io[$j]) & int($ms[$j])) != int($mo[$j])) {
+			if ((int($io[$j]) & int($ms[$j])) != (int($mo[$j]) & int($ms[$j]))) {
 				$mismatch = 1;
 				}
 			}
 		}
-	elsif ($_[$i] =~ /^(\S+)-(\S+)$/) {
+	elsif ($_[$i] =~ /^([0-9\.]+)-([0-9\.]+)$/) {
 		# Compare with an IPv4 range (separated by a hyphen -)
 		local ($remote, $min, $max);
-		@low = split(/\./, $1); @high = split(/\./, $2);
+		local @low = split(/\./, $1);
+		local @high = split(/\./, $2);
 		for($j=0; $j<4; $j++) {
 			$remote += $io[$j] << ((3-$j)*8);
 			$min += $low[$j] << ((3-$j)*8);
@@ -2683,7 +2833,7 @@ for($i=2; $i<@_; $i++) {
 		}
 	elsif ($_[$i] =~ /^\*(\S+)$/) {
 		# Compare with hostname regexp
-		$mismatch = 1 if ($hn !~ /$1$/);
+		$mismatch = 1 if ($hn !~ /^.*\Q$1\E$/i);
 		}
 	elsif ($_[$i] eq 'LOCAL' && &check_ipaddress($_[1])) {
 		# Compare with local IPv4 network
@@ -2709,7 +2859,7 @@ for($i=2; $i<@_; $i++) {
 			}
 		}
 	elsif ($_[$i] =~ /^[0-9\.]+$/) {
-		# Compare with IPv4 address or network
+		# Compare with a full or partial IPv4 address
 		@mo = split(/\./, $_[$i]);
 		while(@mo && !$mo[$#mo]) { pop(@mo); }
 		for($j=0; $j<@mo; $j++) {
@@ -2719,11 +2869,20 @@ for($i=2; $i<@_; $i++) {
 			}
 		}
 	elsif ($_[$i] =~ /^[a-f0-9:]+$/) {
-		# Compare with IPv6 address or network
-		@mo = split(/:/, $_[$i]);
-		while(@mo && !$mo[$#mo]) { pop(@mo); }
-		for($j=0; $j<@mo; $j++) {
-			if ($mo[$j] ne $io[$j]) {
+		# Compare with a full IPv6 address
+		if (&canonicalize_ip6($_[$i]) ne canonicalize_ip6($_[0])) {
+			$mismatch = 1;
+			}
+		}
+	elsif ($_[$i] =~ /^([a-f0-9:]+)\/(\d+)$/) {
+		# Compare with an IPv6 network
+		local $v6size = $2;
+		local $v6addr = &canonicalize_ip6($1);
+		local $bytes = $v6size / 8;
+		@mo = &expand_ipv6_bytes($v6addr);
+		local @io6 = &expand_ipv6_bytes(&canonicalize_ip6($_[0]));
+		for($j=0; $j<$bytes; $j++) {
+			if ($mo[$j] ne $io6[$j]) {
 				$mismatch = 1;
 				}
 			}
@@ -2786,6 +2945,24 @@ sub trigger_reload
 $need_reload = 1;
 }
 
+# to_ip46address(address, ...)
+# Convert hostnames to v4 and v6 addresses, if possible
+sub to_ip46address
+{
+local @rv;
+foreach my $i (@_) {
+	if (&check_ipaddress($i) || &check_ip6address($i)) {
+		push(@rv, $i);
+		}
+	else {
+		my $addr = &to_ipaddress($i);
+		$addr ||= &to_ip6address($i);
+		push(@rv, $addr) if ($addr);
+		}
+	}
+return @rv;
+}
+
 # to_ipaddress(address, ...)
 sub to_ipaddress
 {
@@ -2814,17 +2991,19 @@ foreach $i (@_) {
 		# A pattern, not a hostname, so don't change
 		push(@rv, $i);
 		}
-	else {
+	elsif ($config{'ipv6'}) {
 		# Lookup IPv6 address
 		local ($inaddr, $addr);
-		(undef, undef, undef, $inaddr) =
-		    getaddrinfo($i, undef, Socket6::AF_INET6(), SOCK_STREAM);
+		eval {
+			(undef, undef, undef, $inaddr) =
+			    getaddrinfo($i, undef, AF_INET6(), SOCK_STREAM);
+			};
 		if ($inaddr) {
 			push(@rv, undef);
 			}
 		else {
 			(undef, $addr) = unpack_sockaddr_in6($inaddr);
-			push(@rv, inet_ntop(Socket6::AF_INET6(), $addr));
+			push(@rv, inet_ntop(AF_INET6(), $addr));
 			}
 		}
 	}
@@ -2837,8 +3016,8 @@ sub to_hostname
 {
 local ($addr) = @_;
 if (&check_ip6address($_[0])) {
-	return gethostbyaddr(inet_pton(Socket6::AF_INET6(), $addr),
-			     Socket6::AF_INET6());
+	return gethostbyaddr(inet_pton(AF_INET6(), $addr),
+			     AF_INET6());
 	}
 else {
 	return gethostbyaddr(inet_aton($addr), AF_INET);
@@ -2852,9 +3031,9 @@ sub read_line
 local ($nowait, $nolimit) = @_;
 local($idx, $more, $rv);
 while(($idx = index($main::read_buffer, "\n")) < 0) {
-	if (length($main::read_buffer) > 10000 && !$nolimit) {
+	if (length($main::read_buffer) > 100000 && !$nolimit) {
 		&http_error(414, "Request too long",
-		    "Received excessive line <pre>$main::read_buffer</pre>");
+		    "Received excessive line <pre>".&html_strip($main::read_buffer)."</pre>");
 		}
 
 	# need to read more..
@@ -2863,7 +3042,7 @@ while(($idx = index($main::read_buffer, "\n")) < 0) {
 		$more = Net::SSLeay::read($ssl_con);
 		}
 	else {
-		my $bufsize = $config{'bufsize'} || 1024;
+		my $bufsize = $config{'bufsize'} || 32768;
                 local $ok = sysread(SOCK, $more, $bufsize);
 		$more = undef if ($ok <= 0);
 		}
@@ -2909,22 +3088,6 @@ else {
 	sysread(SOCK, $buf, $_[0]) || return undef;
 	return $buf;
 	}
-}
-
-# sysread_line(fh)
-# Read a line from a file handle, using sysread to get a byte at a time
-sub sysread_line
-{
-local ($fh) = @_;
-local $line;
-while(1) {
-	local ($buf, $got);
-	$got = sysread($fh, $buf, 1);
-	last if ($got <= 0);
-	$line .= $buf;
-	last if ($buf eq "\n");
-	}
-return $line;
 }
 
 # wait_for_data(secs)
@@ -2973,15 +3136,19 @@ sub reset_byte_count { $write_data_count = 0; }
 sub byte_count { return $write_data_count; }
 
 # log_request(hostname, user, request, code, bytes)
+# Write an HTTP request to the log file
 sub log_request
 {
-if ($config{'log'}) {
-	local ($user, $ident, $headers);
-	if ($config{'logident'}) {
-		# add support for rfc1413 identity checking here
+local ($host, $user, $request, $code, $bytes) = @_;
+local $headers;
+if ($config{'nolog'}) {
+	foreach my $nolog (split(/\s+/, $config{'nolog'})) {
+		return if ($request =~ /^$nolog$/);
 		}
-	else { $ident = "-"; }
-	$user = $_[1] ? $_[1] : "-";
+	}
+if ($config{'log'}) {
+	local $ident = "-";
+	$user ||= "-";
 	local $dstr = &make_datestr();
 	if (fileno(MINISERVLOG)) {
 		seek(MINISERVLOG, 0, 2);
@@ -3001,8 +3168,8 @@ if ($config{'log'}) {
 	else {
 		$headers = "";
 		}
-	print MINISERVLOG "$_[0] $ident $user [$dstr] \"$_[2]\" ",
-			  "$_[3] $_[4]$headers\n";
+	print MINISERVLOG "$host $ident $user [$dstr] \"$request\" ",
+			  "$code $bytes$headers\n";
 	close(MINISERVLOG);
 	}
 }
@@ -3131,7 +3298,6 @@ else {
 	local $data = &read_data($len);
 	if ($data eq '' && $len) {
 		# End of socket
-		print STDERR "finished reading - shutting down socket\n";
 		shutdown(SOCK, 0);
 		}
 	substr($$bufref, $offset, length($data)) = $data;
@@ -3166,7 +3332,6 @@ else {
 	my $nl = &read_line(0, 1);
 	if ($nl eq '') {
 		# End of socket
-		print STDERR "finished reading - shutting down socket\n";
 		shutdown(SOCK, 0);
 		}
 	$line .= $nl if (defined($nl));
@@ -3260,7 +3425,7 @@ if ($doing_cgi_eval && $$ == $main_process_id) {
 	shutdown(SOCK, 1);
 	close(SOCK);
 	close($PASSINw); close($PASSOUTw);
-	&log_request($acpthost, $authuser, $reqline,
+	&log_request($loghost, $authuser, $reqline,
 		     $cgiheader{"location"} ? "302" : $ok_code, &byte_count());
 	}
 }
@@ -3282,7 +3447,8 @@ sub urlize {
 
 # validate_user(username, password, host, remote-ip, webmin-port)
 # Checks if some username and password are valid. Returns the modified username,
-# the expired / temp pass flag, and the non-existence flag
+# the expired / temp pass flag, the non-existence flag, and the underlying
+# Webmin username.
 sub validate_user
 {
 local ($user, $pass, $host, $actpip, $port) = @_;
@@ -3293,11 +3459,11 @@ local ($canuser, $canmode, $notexist, $webminuser, $sudo) =
 print DEBUG "validate_user: canuser=$canuser canmode=$canmode notexist=$notexist webminuser=$webminuser sudo=$sudo\n";
 if ($notexist) {
 	# User doesn't even exist, so go no further
-	return ( undef, 0, 1 );
+	return ( undef, 0, 1, $webminuser );
 	}
 elsif ($canmode == 0) {
 	# User does exist but cannot login
-	return ( $canuser, 0, 0 );
+	return ( $canuser, 0, 0, $webminuser );
 	}
 elsif ($canmode == 1) {
 	# Attempt Webmin authentication
@@ -3313,26 +3479,26 @@ elsif ($canmode == 1) {
 			if ($config{'pass_lockdays'} &&
 			    $daysold > $config{'pass_lockdays'}) {
 				# So old that the account is locked
-				return ( undef, 0, 0 );
+				return ( undef, 0, 0, $webminuser );
 				}
 			elsif ($daysold > $config{'pass_maxdays'}) {
 				# Password has expired
-				return ( $user, 1, 0 );
+				return ( $user, 1, 0, $webminuser );
 				}
 			}
 		if ($uinfo->{'temppass'}) {
 			# Temporary password - force change now
-			return ( $user, 2, 0 );
+			return ( $user, 2, 0, $webminuser );
 			}
-		return ( $user, 0, 0 );
+		return ( $user, 0, 0, $webminuser );
 		}
 	elsif (!$uinfo) {
 		print DEBUG "validate_user: User $webminuser not found\n";
-		return ( undef, 0, 0 );
+		return ( undef, 0, 0, $webminuser );
 		}
 	else {
 		print DEBUG "validate_user: User $webminuser password mismatch $pass != $uinfo->{'pass'}\n";
-		return ( undef, 0, 0 );
+		return ( undef, 0, 0, $webminuser );
 		}
 	}
 elsif ($canmode == 2 || $canmode == 3) {
@@ -3349,13 +3515,15 @@ elsif ($canmode == 2 || $canmode == 3) {
 			print DEBUG "validate_user: sudo passed\n";
 			}
 		}
-	return $val == 2 ? ( $canuser, 1, 0 ) :
-	       $val == 1 ? ( $canuser, 0, 0 ) : ( undef, 0, 0 );
+	return $val == 2 ? ( $canuser, 1, 0, $webminuser ) :
+	       $val == 1 ? ( $canuser, 0, 0, $webminuser ) :
+			   ( undef, 0, 0, $webminuser );
 	}
 elsif ($canmode == 4) {
 	# Attempt external authentication
 	return &validate_external_user($canuser, $pass) ?
-		( $canuser, 0, 0 ) : ( undef, 0, 0 );
+		( $canuser, 0, 0, $webminuser ) :
+		( undef, 0, 0, $webminuser );
 	}
 else {
 	# Can't happen!
@@ -3378,26 +3546,31 @@ if ($use_pam) {
 	local $pamh = new Authen::PAM($config{'pam'}, $pam_username,
 				      \&pam_conv_func);
 	if (ref($pamh)) {
-		$pamh->pam_set_item("PAM_RHOST", $_[2]) if ($_[2]);
-		$pamh->pam_set_item("PAM_TTY", $_[3]) if ($_[3]);
+		$pamh->pam_set_item(PAM_RHOST(), $_[2]) if ($_[2]);
+		$pamh->pam_set_item(PAM_TTY(), $_[3]) if ($_[3]);
+		local $rcode = 0;
 		local $pam_ret = $pamh->pam_authenticate();
 		if ($pam_ret == PAM_SUCCESS()) {
 			# Logged in OK .. make sure password hasn't expired
 			local $acct_ret = $pamh->pam_acct_mgmt();
+			$pam_ret = $acct_ret;
 			if ($acct_ret == PAM_SUCCESS()) {
 				$pamh->pam_open_session();
-				return 1;
+				$rcode = 1;
 				}
 			elsif ($acct_ret == PAM_NEW_AUTHTOK_REQD() ||
 			       $acct_ret == PAM_ACCT_EXPIRED()) {
-				return 2;
+				$rcode = 2;
 				}
 			else {
 				print STDERR "Unknown pam_acct_mgmt return value : $acct_ret\n";
-				return 0;
+				$rcode = 0;
 				}
 			}
-		return 0;
+		if ($config{'pam_end'}) {
+			$pamh->pam_end($pam_ret);
+			}
+		return $rcode;
 		}
 	}
 elsif ($config{'pam_only'}) {
@@ -3698,7 +3871,7 @@ sub get_address_ip
 local ($sn, $ipv6) = @_;
 if ($ipv6) {
 	local ($p, $b) = unpack_sockaddr_in6($sn);
-	return ($b, inet_ntop(Socket6::AF_INET6(), $b), $p);
+	return ($b, inet_ntop(AF_INET6(), $b), $p);
 	}
 else {
 	local ($p, $b) = unpack_sockaddr_in($sn);
@@ -3717,7 +3890,7 @@ if (!$get_socket_name_cache{$myaddr}) {
 	local $myname;
 	if (!$config{'no_resolv_myname'}) {
 		$myname = gethostbyaddr($mybin,
-					$ipv6 ? Socket6::AF_INET6() : AF_INET);
+					$ipv6 ? AF_INET6() : AF_INET);
 		}
 	$myname ||= $myaddr;
 	$get_socket_name_cache{$myaddr} = $myname;
@@ -3748,6 +3921,22 @@ if ($config{'logout_script'}) {
 	$SIG{'ALRM'} = sub { die "timeout" };
 	eval {
 		system($config{'logout_script'}.
+		       " ".join(" ", map { quotemeta($_) || '""' } @_).
+		       " >/dev/null 2>&1 </dev/null");
+		};
+	alarm(0);
+	}
+}
+
+# run_failed_script(username, reason-code, remoteip, localip)
+sub run_failed_script
+{
+if ($config{'failed_script'}) {
+	$_[0] =~ s/\r|\n/ /g;
+	alarm(5);
+	$SIG{'ALRM'} = sub { die "timeout" };
+	eval {
+		system($config{'failed_script'}.
 		       " ".join(" ", map { quotemeta($_) || '""' } @_).
 		       " >/dev/null 2>&1 </dev/null");
 		};
@@ -3883,7 +4072,7 @@ if ($ok && (!$expired ||
 
 	# Run the post-login script, if any
 	&run_login_script($authuser, $sid,
-			  $acptip, $localip);
+			  $loghost, $localip);
 
 	# Check for a redirect URL for the user
 	local $rurl = &login_redirect($authuser, $pass, $host);
@@ -3896,7 +4085,7 @@ if ($ok && (!$expired ||
 		&write_data("Location: $rurl\r\n");
 		&write_keep_alive(0);
 		&write_data("\r\n");
-		&log_request($acpthost, $authuser, $reqline, 302, 0);
+		&log_request($loghost, $authuser, $reqline, 302, 0);
 		}
 	else {
 		# Set cookie and redirect to originally requested page
@@ -3908,22 +4097,27 @@ if ($ok && (!$expired ||
 			   $port == 443 && $ssl ? "" : ":$port";
 		$prot = $ssl ? "https" : "http";
 		local $sec = $ssl ? "; secure" : "";
-		#$sec .= "; httpOnly";
-		if ($in{'page'} !~ /^\/[A-Za-z0-9\/\.\-\_]+$/) {
+		if (!$config{'no_httponly'}) {
+			$sec .= "; httpOnly";
+			}
+		if ($in{'page'} !~ /^\/[A-Za-z0-9\/\.\-\_:]+$/) {
 			# Make redirect URL safe
 			$in{'page'} = "/";
 			}
+		local $cpath = $config{'cookiepath'};
 		if ($in{'save'}) {
-			&write_data("Set-Cookie: $sidname=$sid; path=/; expires=\"Thu, 31-Dec-2037 00:00:00\"$sec\r\n");
+			&write_data("Set-Cookie: $sidname=$sid; path=$cpath; ".
+			    "expires=\"Thu, 31-Dec-2037 00:00:00\"$sec\r\n");
 			}
 		else {
-			&write_data("Set-Cookie: $sidname=$sid; path=/$sec\r\n");
+			&write_data("Set-Cookie: $sidname=$sid; path=$cpath".
+				    "$sec\r\n");
 			}
-		&write_data("Location: $prot://$host$portstr$in{'page'}\r\n");
+		&write_data("Location: $prot://$hostport$in{'page'}\r\n");
 		&write_keep_alive(0);
 		&write_data("\r\n");
-		&log_request($acpthost, $authuser, $reqline, 302, 0);
-		syslog("info", "%s", "Successful login as $authuser from $acpthost") if ($use_syslog);
+		&log_request($loghost, $authuser, $reqline, 302, 0);
+		syslog("info", "%s", "Successful login as $authuser from $loghost") if ($use_syslog);
 		&write_login_utmp($authuser, $acpthost);
 		}
 	return 0;
@@ -3932,6 +4126,8 @@ elsif ($ok && $expired &&
        ($config{'passwd_mode'} == 2 || $expired == 2)) {
 	# Login was ok, but password has expired or was temporary. Need
 	# to force display of password change form.
+	&run_failed_script($authuser, 'expiredpass',
+			   $loghost, $localip);
 	$validated = 1;
 	$authuser = undef;
 	$querystring = "&user=".&urlize($vu).
@@ -3944,11 +4140,14 @@ elsif ($ok && $expired &&
 	$miniserv_internal = 2;
 	syslog("crit", "%s",
 		"Expired login as $vu ".
-		"from $acpthost") if ($use_syslog);
+		"from $loghost") if ($use_syslog);
 	}
 else {
 	# Login failed, or password has expired. The login form will be
 	# displayed again by later code
+	&run_failed_script($vu, $handle_login ? 'wronguser' :
+				$expired ? 'expiredpass' : 'wrongpass',
+			   $loghost, $localip);
 	$failed_user = $vu;
 	$request_uri = $in{'page'};
 	$already_session_id = undef;
@@ -3957,7 +4156,7 @@ else {
 	syslog("crit", "%s",
 		($nonexist ? "Non-existent" :
 		 $expired ? "Expired" : "Invalid").
-		" login as $vu from $acpthost")
+		" login as $vu from $loghost")
 		if ($use_syslog);
 	}
 return undef;
@@ -3973,7 +4172,7 @@ if ($write_utmp) {
 		  'ut_time' => time(),
 		  'ut_user' => $_[0],
 		  'ut_type' => 7,	# user process
-		  'ut_pid' => $main_process_id,
+		  'ut_pid' => $miniserv_main_pid,
 		  'ut_line' => $config{'pam'},
 		  'ut_id' => '' );
 	if (defined(&User::Utmp::putut)) {
@@ -3995,7 +4194,7 @@ if ($write_utmp) {
 		  'ut_time' => time(),
 		  'ut_user' => $_[0],
 		  'ut_type' => 8,	# dead process
-		  'ut_pid' => $main_process_id,
+		  'ut_pid' => $miniserv_main_pid,
 		  'ut_line' => $config{'pam'},
 		  'ut_id' => '' );
 	if (defined(&User::Utmp::putut)) {
@@ -4182,11 +4381,35 @@ local $ssl_ctx;
 eval { $ssl_ctx = Net::SSLeay::new_x_ctx() };
 $ssl_ctx ||= Net::SSLeay::CTX_new();
 $ssl_ctx || die "Failed to create SSL context : $!";
+
+# Setup PFS, if ciphers are in use
+if (-r $config{'dhparams_file'}) {
+	eval {
+		my $bio = Net::SSLeay::BIO_new_file(
+				$config{'dhparams_file'}, 'r');
+		my $DHP = Net::SSLeay::PEM_read_bio_DHparams($bio);
+		Net::SSLeay::CTX_set_tmp_dh($ssl_ctx, $DHP);
+		my $nid = Net::SSLeay::OBJ_sn2nid("secp384r1");
+		my $curve = Net::SSLeay::EC_KEY_new_by_curve_name($nid);
+		Net::SSLeay::CTX_set_tmp_ecdh($ssl_ctx, $curve);
+		Net::SSLeay::BIO_free($bio);
+		};
+	}
+if ($@) {
+	print STDERR "Failed to load $config{'dhparams_file'} : $@\n";
+	}
+
 if ($client_certs) {
 	Net::SSLeay::CTX_load_verify_locations(
 		$ssl_ctx, $config{'ca'}, "");
-	Net::SSLeay::CTX_set_verify(
-		$ssl_ctx, &Net::SSLeay::VERIFY_PEER, \&verify_client);
+	eval {
+		Net::SSLeay::set_verify(
+			$ssl_ctx, &Net::SSLeay::VERIFY_PEER, \&verify_client);
+		};
+	if ($@) {
+		Net::SSLeay::CTX_set_verify(
+			$ssl_ctx, &Net::SSLeay::VERIFY_PEER, \&verify_client);
+		}
 	}
 if ($extracas && $extracas ne "none") {
 	foreach my $p (split(/\s+/, $extracas)) {
@@ -4195,12 +4418,41 @@ if ($extracas && $extracas ne "none") {
 		}
 	}
 
-Net::SSLeay::CTX_use_RSAPrivateKey_file(
+Net::SSLeay::CTX_use_PrivateKey_file(
 	$ssl_ctx, $keyfile,
 	&Net::SSLeay::FILETYPE_PEM) || die "Failed to open SSL key $keyfile";
 Net::SSLeay::CTX_use_certificate_file(
 	$ssl_ctx, $certfile || $keyfile,
 	&Net::SSLeay::FILETYPE_PEM) || die "Failed to open SSL cert $certfile";
+
+if ($config{'no_ssl2'}) {
+	eval 'Net::SSLeay::CTX_set_options($ssl_ctx,
+		&Net::SSLeay::OP_NO_SSLv2)';
+	}
+if ($config{'no_ssl3'}) {
+	eval 'Net::SSLeay::CTX_set_options($ssl_ctx,
+		&Net::SSLeay::OP_NO_SSLv3)';
+	}
+if ($config{'no_tls1'}) {
+	eval 'Net::SSLeay::CTX_set_options($ssl_ctx,
+		&Net::SSLeay::OP_NO_TLSv1)';
+	}
+if ($config{'no_tls1_1'}) {
+	eval 'Net::SSLeay::CTX_set_options($ssl_ctx,
+		&Net::SSLeay::OP_NO_TLSv1_1)';
+	}
+if ($config{'no_tls1_2'}) {
+	eval 'Net::SSLeay::CTX_set_options($ssl_ctx,
+		&Net::SSLeay::OP_NO_TLSv1_2)';
+	}
+if ($config{'no_sslcompression'}) {
+	eval 'Net::SSLeay::CTX_set_options($ssl_ctx,
+		&Net::SSLeay::OP_NO_COMPRESSION)';
+	}
+if ($config{'ssl_honorcipherorder'}) {
+	eval 'Net::SSLeay::CTX_set_options($ssl_ctx,
+		&Net::SSLeay::OP_CIPHER_SERVER_PREFERENCE)';
+	}
 
 return $ssl_ctx;
 }
@@ -4225,8 +4477,6 @@ if ($config{'ssl_cipher_list'}) {
 	if ($@) {
 		print STDERR "SSL cipher $config{'ssl_cipher_list'} failed : ",
 			     "$@\n";
-		}
-	else {
 		}
 	}
 Net::SSLeay::set_fd($ssl_con, fileno($sock));
@@ -4314,6 +4564,7 @@ my %vital = ("port", 80,
 	  "expires", 7*24*60*60,
 	  "pam_test_user", "root",
 	  "precache", "lang/en */lang/en",
+	  "cookiepath", "/",
 	 );
 foreach my $v (keys %vital) {
 	if (!$config{$v}) {
@@ -4351,6 +4602,9 @@ if (!$config{'webmincron_wrapper'}) {
 	$config{'webmincron_wrapper'} = $config{'root'}.
 					"/webmincron/webmincron.pl";
 	}
+if (!$config{'twofactor_wrapper'}) {
+	$config{'twofactor_wrapper'} = $config{'root'}."/acl/twofactor.pl";
+	}
 }
 
 # read_users_file()
@@ -4366,6 +4620,7 @@ undef(%allowhours);
 undef(%lastchanges);
 undef(%nochange);
 undef(%temppass);
+undef(%twofactor);
 if ($config{'userfile'}) {
 	open(USERS, $config{'userfile'});
 	while(<USERS>) {
@@ -4374,14 +4629,18 @@ if ($config{'userfile'}) {
 		$users{$user[0]} = $user[1];
 		$certs{$user[0]} = $user[3] if ($user[3]);
 		if ($user[4] =~ /^allow\s+(.*)/) {
+			my $allow = $1;
+			$allow =~ s/;/:/g;
 			$allow{$user[0]} = $config{'alwaysresolve'} ?
-				[ split(/\s+/, $1) ] :
-				[ &to_ipaddress(split(/\s+/, $1)) ];
+				[ split(/\s+/, $allow) ] :
+				[ &to_ip46address(split(/\s+/, $allow)) ];
 			}
 		elsif ($user[4] =~ /^deny\s+(.*)/) {
+			my $deny = $1;
+			$deny =~ s/;/:/g;
 			$deny{$user[0]} = $config{'alwaysresolve'} ?
-				[ split(/\s+/, $1) ] :
-				[ &to_ipaddress(split(/\s+/, $1)) ];
+				[ split(/\s+/, $deny) ] :
+				[ &to_ip46address(split(/\s+/, $deny)) ];
 			}
 		if ($user[5] =~ /days\s+(\S+)/) {
 			$allowdays{$user[0]} = [ split(/,/, $1) ];
@@ -4392,6 +4651,11 @@ if ($config{'userfile'}) {
 		$lastchanges{$user[0]} = $user[6];
 		$nochange{$user[0]} = $user[9];
 		$temppass{$user[0]} = $user[10];
+		if ($user[11] && $user[12]) {
+			$twofactor{$user[0]} = { 'provider' => $user[11],
+						 'id' => $user[12],
+						 'apikey' => $user[13] };
+			}
 		}
 	close(USERS);
 	}
@@ -4426,6 +4690,9 @@ if (exists($users{$username})) {
 		 'nochange' => $nochange{$username},
 		 'temppass' => $temppass{$username},
 		 'preroot' => $config{'preroot_'.$username},
+		 'twofactor_provider' => $twofactor{$username}->{'provider'},
+		 'twofactor_id' => $twofactor{$username}->{'id'},
+		 'twofactor_apikey' => $twofactor{$username}->{'apikey'},
 	       };
 	}
 if ($config{'userdb'}) {
@@ -4494,7 +4761,7 @@ if ($config{'userdb'}) {
 			return undef;
 			}
 		my ($u) = $rv->all_entries();
-		if (!$u) {
+		if (!$u || $u->get_value('cn') ne $username) {
 			&disconnect_userdb($config{'userdb'}, $dbh);
                         $get_user_details_cache{$username} = undef;
 			print DEBUG "get_user_details: User not found\n";
@@ -4540,6 +4807,9 @@ if ($config{'userdb'}) {
 		$user->{'nochange'} = $attrs{'nochange'};
 		$user->{'temppass'} = $attrs{'temppass'};
 		$user->{'preroot'} = $attrs{'theme'};
+		$user->{'twofactor_provider'} = $attrs{'twofactor_provider'};
+		$user->{'twofactor_id'} = $attrs{'twofactor_id'};
+		$user->{'twofactor_apikey'} = $attrs{'twofactor_apikey'};
 		}
 	&disconnect_userdb($config{'userdb'}, $dbh);
 	$get_user_details_cache{$user->{'name'}} = $user;
@@ -4626,7 +4896,7 @@ if ($proto eq "mysql") {
 	$cstr .= ";port=$port" if ($port);
 	print DEBUG "connect_userdb: Connecting to MySQL $cstr as $user\n";
 	my $dbh = $drh->connect($cstr, $user, $pass, { });
-	$dbh || return &text('sql_emysqlconnect', $drh->errstr);
+	$dbh || return "Failed to connect to MySQL : ".$drh->errstr;
 	print DEBUG "connect_userdb: Connected OK\n";
 	return wantarray ? ($dbh, $proto, $prefix, $args) : $dbh;
 	}
@@ -4639,7 +4909,7 @@ elsif ($proto eq "postgresql") {
 	$cstr .= ";port=$port" if ($port);
 	print DEBUG "connect_userdb: Connecting to PostgreSQL $cstr as $user\n";
 	my $dbh = $drh->connect($cstr, $user, $pass);
-	$dbh || return &text('sql_epostgresqlconnect', $drh->errstr);
+	$dbh || return "Failed to connect to PostgreSQL : ".$drh->errstr;
 	print DEBUG "connect_userdb: Connected OK\n";
 	return wantarray ? ($dbh, $proto, $prefix, $args) : $dbh;
 	}
@@ -4655,14 +4925,14 @@ elsif ($proto eq "ldap") {
 	my $ldap = Net::LDAP->new($host,
 				  port => $port,
 				  'scheme' => $scheme);
-	$ldap || return &text('sql_eldapconnect', $host);
+	$ldap || return "Failed to connect to LDAP : ".$host;
 	my $mesg;
 	if ($args->{'tls'}) {
 		# Switch to TLS mode
 		eval { $mesg = $ldap->start_tls(); };
 		if ($@ || !$mesg || $mesg->code) {
-			return &text('sql_eldaptls',
-			    $@ ? $@ : $mesg ? $mesg->error : "Unknown error");
+			return "Failed to switch to LDAP TLS mode : ".
+			    ($@ ? $@ : $mesg ? $mesg->error : "Unknown error");
 			}
 		}
 	# Login to the server
@@ -4673,8 +4943,8 @@ elsif ($proto eq "ldap") {
 		$mesg = $ldap->bind(dn => $user, anonymous => 1);
 		}
 	if (!$mesg || $mesg->code) {
-		return &text('sql_eldaplogin', $user,
-			     $mesg ? $mesg->error : "Unknown error");
+		return "Failed to login to LDAP as ".$user." : ".
+		       ($mesg ? $mesg->error : "Unknown error");
 		}
 	return wantarray ? ($ldap, $proto, $prefix, $args) : $ldap;
 	}
@@ -4923,12 +5193,17 @@ return $logout_time_cache{$user,$sid};
 sub password_crypt
 {
 local ($pass, $salt) = @_;
+local $rval;
 if ($salt =~ /^\$1\$/ && $use_md5) {
-	return &encrypt_md5($pass, $salt);
+	$rval = &encrypt_md5($pass, $salt);
 	}
-else {
-	return &unix_crypt($pass, $salt);
+elsif ($salt =~ /^\$6\$/ && $use_sha512) {
+	$rval = &encrypt_sha512($pass, $salt);
 	}
+if (!defined($rval) || $salt ne $rval) {
+	$rval = &unix_crypt($pass, $salt);
+	}
+return $rval;
 }
 
 # unix_crypt(password, salt)
@@ -4988,7 +5263,8 @@ if ($config{'dav_remoteuser'} && !$< && $validated) {
 			}
 		}
 	else {
-		&http_error(500, "Unix user $authuser does not exist");
+		&http_error(500, "Unix user ".&html_strip($authuser).
+				 " does not exist");
 		return 0;
 		}
 	}
@@ -5057,7 +5333,7 @@ if ($config{'dav_debug'}) {
 	}
 
 # Log it
-&log_request($acpthost, $authuser, $reqline, $response->code(), 
+&log_request($loghost, $authuser, $reqline, $response->code(), 
 	     length($response->content()));
 }
 
@@ -5194,15 +5470,17 @@ if ($pid < 0) {
 	}
 if (!$pid) {
 	setsid();
-	$ptyfh->make_slave_controlling_terminal();
-	close(STDIN); close(STDOUT); close(STDERR);
-	untie(*STDIN); untie(*STDOUT); untie(*STDERR);
-	close($PASSINw); close($PASSOUTr);
 	($(, $)) = ( $uinfo[3],
                      "$uinfo[3] ".join(" ", $uinfo[3],
                                             &other_groups($uinfo[0])) );
 	($>, $<) = ($uinfo[2], $uinfo[2]);
+	$ENV{'USER'} = $ENV{'LOGNAME'} = $user;
+	$ENV{'HOME'} = $uinfo[7];
 
+	$ptyfh->make_slave_controlling_terminal();
+	close(STDIN); close(STDOUT); close(STDERR);
+	untie(*STDIN); untie(*STDOUT); untie(*STDERR);
+	close($PASSINw); close($PASSOUTr);
 	close(SUDOw);
 	close(SOCK);
 	close(MAIN);
@@ -5235,7 +5513,7 @@ while(<$ptyfh>) {
 close($ptyfh);
 kill('KILL', $pid);
 waitpid($pid, 0);
-local ($ok) = ($out =~ /\(ALL\)\s+ALL|\(ALL\)\s+NOPASSWD:\s+ALL|\(ALL\s*:\s*ALL\)\s+ALL/ ? 1 : 0);
+local ($ok) = ($out =~ /\(ALL\)\s+ALL|\(ALL\)\s+NOPASSWD:\s+ALL|\(ALL\s*:\s*ALL\)\s+ALL|\(ALL\s*:\s*ALL\)\s+NOPASSWD:\s+ALL/ ? 1 : 0);
 
 # Update cache
 if ($PASSINw) {
@@ -5282,6 +5560,7 @@ local @prefixes = (
     "DoCoMo",     # DoCoMo phones
     "Lynx",	  # Lynx text-mode linux browser
     "Links",	  # Another text-mode linux browser
+    "Dalvik",	  # Android browser
     );
 local @substrings = (
     "UP.Browser",         # Openwave
@@ -5298,6 +5577,7 @@ local @substrings = (
     "iPhone",		  # Apple iPhone KHTML browser
     "iPod",		  # iPod touch browser
     "MobileSafari",	  # HTTP client in iPhone
+    "Mobile Safari",	  # Samsung Galaxy S6 browser
     "Opera Mini",	  # Opera Mini
     "HTC_P3700",	  # HTC mobile device
     "Pre/",		  # Palm Pre
@@ -5512,6 +5792,19 @@ else {
 	}
 }
 
+# encrypt_sha512(password, [salt])
+# Hashes a password, possibly with the given salt, with SHA512
+sub encrypt_sha512
+{
+my ($passwd, $salt) = @_;
+if ($salt =~ /^\$6\$([^\$]+)/) {
+	# Extract actual salt from already encrypted password
+	$salt = $1;
+	}
+$salt ||= '$6$'.substr(time(), -8).'$';
+return crypt($passwd, $salt);
+}
+
 sub to64
 {
 local ($v, $n) = @_;
@@ -5555,16 +5848,25 @@ foreach $k (keys %{$_[1]}) {
 close(ARFILE);
 }
 
-# execute_ready_webmin_crons()
+# execute_ready_webmin_crons(run-count)
 # Find and run any cron jobs that are due, based on their last run time and
 # execution interval
 sub execute_ready_webmin_crons
 {
+my ($runs) = @_;
 my $now = time();
 my $changed = 0;
 foreach my $cron (@webmincrons) {
 	my $run = 0;
-	if (!$webmincron_last{$cron->{'id'}}) {
+	if ($runs == 0 && $cron->{'boot'}) {
+		# If cron job wants to be run at startup, run it now
+		$run = 1;
+		}
+	elsif ($cron->{'disabled'}) {
+		# Explicitly disabled
+		$run = 0;
+		}
+	elsif (!$webmincron_last{$cron->{'id'}}) {
 		# If not ever run before, don't run right away
 		$webmincron_last{$cron->{'id'}} = $now;
 		$changed = 1;
@@ -5574,15 +5876,15 @@ foreach my $cron (@webmincrons) {
 		# Older than interval .. time to run
 		$run = 1;
 		}
-	elsif ($cron->{'mins'}) {
+	elsif ($cron->{'mins'} ne '') {
 		# Check if current time matches spec, and we haven't run in the
 		# last minute
 		my @tm = localtime($now);
-		if (&matches_cron($cron->{'mins'}, $tm[1]) &&
-		    &matches_cron($cron->{'hours'}, $tm[2]) &&
-		    &matches_cron($cron->{'days'}, $tm[3]) &&
-		    &matches_cron($cron->{'months'}, $tm[4]+1) &&
-		    &matches_cron($cron->{'weekdays'}, $tm[6]) &&
+		if (&matches_cron($cron->{'mins'}, $tm[1], 0) &&
+		    &matches_cron($cron->{'hours'}, $tm[2], 0) &&
+		    &matches_cron($cron->{'days'}, $tm[3], 1) &&
+		    &matches_cron($cron->{'months'}, $tm[4]+1, 1) &&
+		    &matches_cron($cron->{'weekdays'}, $tm[6], 0) &&
 		    $now - $webmincron_last{$cron->{'id'}} > 60) {
 			$run = 1;
 			}
@@ -5590,79 +5892,12 @@ foreach my $cron (@webmincrons) {
 
 	if ($run) {
 		print DEBUG "Running cron id=$cron->{'id'} ".
-			    "module=$cron->{'module'} func=$cron->{'func'}\n";
+			    "module=$cron->{'module'} func=$cron->{'func'} ".
+			    "arg0=$cron->{'arg0'}\n";
 		$webmincron_last{$cron->{'id'}} = $now;
 		$changed = 1;
-		my $pid = fork();
-		if (!$pid) {
-			# Run via a wrapper command, which we run like a CGI
-			dbmclose(%sessiondb);
-
-			# Setup CGI-like environment
-			$envtz = $ENV{"TZ"};
-			$envuser = $ENV{"USER"};
-			$envpath = $ENV{"PATH"};
-			$envlang = $ENV{"LANG"};
-			$envroot = $ENV{"SystemRoot"};
-			$envperllib = $ENV{'PERLLIB'};
-			foreach my $k (keys %ENV) {
-				delete($ENV{$k});
-				}
-			$ENV{"PATH"} = $envpath if ($envpath);
-			$ENV{"TZ"} = $envtz if ($envtz);
-			$ENV{"USER"} = $envuser if ($envuser);
-			$ENV{"OLD_LANG"} = $envlang if ($envlang);
-			$ENV{"SystemRoot"} = $envroot if ($envroot);
-			$ENV{'PERLLIB'} = $envperllib if ($envperllib);
-			$ENV{"HOME"} = $user_homedir;
-			$ENV{"SERVER_SOFTWARE"} = $config{"server"};
-			$ENV{"SERVER_ADMIN"} = $config{"email"};
-			$root0 = $roots[0];
-			$ENV{"SERVER_ROOT"} = $root0;
-			$ENV{"SERVER_REALROOT"} = $root0;
-			$ENV{"SERVER_PORT"} = $config{'port'};
-			$ENV{"WEBMIN_CRON"} = 1;
-			$ENV{"DOCUMENT_ROOT"} = $root0;
-			$ENV{"DOCUMENT_REALROOT"} = $root0;
-			$ENV{"MINISERV_CONFIG"} = $config_file;
-			$ENV{"HTTPS"} = "ON" if ($use_ssl);
-			$ENV{"MINISERV_PID"} = $miniserv_main_pid;
-			$ENV{"SCRIPT_FILENAME"} = $config{'webmincron_wrapper'};
-			if ($ENV{"SCRIPT_FILENAME"} =~ /^\Q$root0\E(\/.*)$/) {
-				$ENV{"SCRIPT_NAME"} = $1;
-				}
-			$config{'webmincron_wrapper'} =~ /^(.*)\//;
-			$ENV{"PWD"} = $1;
-			foreach $k (keys %config) {
-				if ($k =~ /^env_(\S+)$/) {
-					$ENV{$1} = $config{$k};
-					}
-				}
-			chdir($ENV{"PWD"});
-			$SIG{'CHLD'} = 'DEFAULT';
-			eval {
-				# Have SOCK closed if the perl exec's something
-				use Fcntl;
-				fcntl(SOCK, F_SETFD, FD_CLOEXEC);
-				};
-
-			# Run the wrapper script by evaling it
-			$pkg = "webmincron";
-			$0 = $config{'webmincron_wrapper'};
-			@ARGV = ( $cron );
-			$main_process_id = $$;
-			eval "
-				\%pkg::ENV = \%ENV;
-				package $pkg;
-				do \$miniserv::config{'webmincron_wrapper'};
-				die \$@ if (\$@);
-				";
-			if ($@) {
-				print STDERR "Perl cron failure : $@\n";
-				}
-
-			exit(0);
-			}
+		my $pid = &execute_webmin_command($config{'webmincron_wrapper'},
+						  [ $cron ]);
 		push(@childpids, $pid);
 		}
 	}
@@ -5672,19 +5907,24 @@ if ($changed) {
 	}
 }
 
-# matches_cron(cron-spec, time)
+# matches_cron(cron-spec, time, first-value)
 # Checks if some minute or hour matches some cron spec, which can be * or a list
 # of numbers.
 sub matches_cron
 {
-my ($spec, $tm) = @_;
+my ($spec, $tm, $first) = @_;
 if ($spec eq '*') {
 	return 1;
 	}
 else {
 	foreach my $s (split(/,/, $spec)) {
 		if ($s == $tm ||
-		    $s =~ /^(\d+)\-(\d+)$/ && $tm >= $1 && $tm <= $2) {
+		    $s =~ /^(\d+)\-(\d+)$/ &&
+		      $tm >= $1 && $tm <= $2 ||
+		    $s =~ /^\*\/(\d+)$/ &&
+		      $tm % $1 == $first ||
+		    $s =~ /^(\d+)\-(\d+)\/(\d+)$/ &&
+		      $tm >= $1 && $tm <= $2 && $tm % $3 == $first) {
 			return 1;
 			}
 		}
@@ -5712,7 +5952,8 @@ foreach my $f (readdir(CRONS)) {
 				$broken = 1;
 				}
 			}
-		if (!$cron{'interval'} && !$cron{'mins'} && !$cron{'special'}) {
+		if (!$cron{'interval'} && $cron{'mins'} eq '' &&
+		    $cron{'special'} eq '' && !$cron{'boot'}) {
 			print STDERR "Cron $1 missing any time spec\n";
 			$broken = 1;
 			}
@@ -5765,11 +6006,12 @@ foreach my $f (readdir(CRONS)) {
 			delete($cron{'special'});
 			}
 		if (!$broken) {
-			print DEBUG "adding cron id=$cron{'id'} module=$cron{'module'} func=$cron{'func'}\n";
+			print DEBUG "Adding cron id=$cron{'id'} module=$cron{'module'} func=$cron{'func'} arg0=$cron{'arg0'}\n";
 			push(@webmincrons, \%cron);
 			}
 		}
 	}
+closedir(CRONS);
 }
 
 # precache_files()
@@ -5832,7 +6074,7 @@ if (length($addr) == 4 || !$use_ipv6) {
 	return inet_ntoa($addr);
 	}
 else {
-	return Socket6::inet_ntop(Socket6::AF_INET6(), $addr);
+	return inet_ntop(AF_INET6(), $addr);
 	}
 }
 
@@ -5871,3 +6113,204 @@ foreach my $pe (@expires_paths) {
 return $config{'expires'};
 }
 
+sub html_escape
+{
+my ($tmp) = @_;
+$tmp =~ s/&/&amp;/g;
+$tmp =~ s/</&lt;/g;
+$tmp =~ s/>/&gt;/g;
+$tmp =~ s/\"/&quot;/g;
+$tmp =~ s/\'/&#39;/g;
+$tmp =~ s/=/&#61;/g;
+return $tmp;
+}
+
+sub html_strip
+{
+my ($tmp) = @_;
+$tmp =~ s/<[^>]*>//g;
+return $tmp;
+}
+
+# validate_twofactor(username, token)
+# Checks if a user's two-factor token is valid or not. Returns undef on success
+# or the error message on failure.
+sub validate_twofactor
+{
+my ($user, $token) = @_;
+local $uinfo = &get_user_details($user);
+$token =~ s/^\s+//;
+$token =~ s/\s+$//;
+$token || return "No two-factor token entered";
+$uinfo->{'twofactor_provider'} || return undef;
+pipe(TOKENr, TOKENw);
+my $pid = &execute_webmin_command($config{'twofactor_wrapper'},
+	[ $user, $uinfo->{'twofactor_provider'}, $uinfo->{'twofactor_id'},
+	  $token, $uinfo->{'twofactor_apikey'} ],
+	TOKENw);
+close(TOKENw);
+waitpid($pid, 0);
+my $ex = $?;
+my $out = <TOKENr>;
+close(TOKENr);
+if ($ex) {
+	return $out || "Unknown two-factor authentication failure";
+	}
+return undef;
+}
+
+# execute_webmin_command(command, &argv, [stdout-fd])
+# Run some Webmin script in a sub-process, like webmincron.pl
+# Returns the PID of the new process.
+sub execute_webmin_command
+{
+my ($cmd, $argv, $fd) = @_;
+my $pid = fork();
+if (!$pid) {
+	# Run via a wrapper command, which we run like a CGI
+	dbmclose(%sessiondb);
+	if ($fd) {
+		open(STDOUT, ">&$fd");
+		}
+	else {
+		open(STDOUT, ">&STDERR");
+		}
+	&close_all_sockets();
+	&close_all_pipes();
+	close(LISTEN);
+
+	# Setup CGI-like environment
+	$envtz = $ENV{"TZ"};
+	$envuser = $ENV{"USER"};
+	$envpath = $ENV{"PATH"};
+	$envlang = $ENV{"LANG"};
+	$envroot = $ENV{"SystemRoot"};
+	$envperllib = $ENV{'PERLLIB'};
+	foreach my $k (keys %ENV) {
+		delete($ENV{$k});
+		}
+	$ENV{"PATH"} = $envpath if ($envpath);
+	$ENV{"TZ"} = $envtz if ($envtz);
+	$ENV{"USER"} = $envuser if ($envuser);
+	$ENV{"OLD_LANG"} = $envlang if ($envlang);
+	$ENV{"SystemRoot"} = $envroot if ($envroot);
+	$ENV{'PERLLIB'} = $envperllib if ($envperllib);
+	$ENV{"HOME"} = $user_homedir;
+	$ENV{"SERVER_SOFTWARE"} = $config{"server"};
+	$ENV{"SERVER_ADMIN"} = $config{"email"};
+	$root0 = $roots[0];
+	$ENV{"SERVER_ROOT"} = $root0;
+	$ENV{"SERVER_REALROOT"} = $root0;
+	$ENV{"SERVER_PORT"} = $config{'port'};
+	$ENV{"WEBMIN_CRON"} = 1;
+	$ENV{"DOCUMENT_ROOT"} = $root0;
+	$ENV{"DOCUMENT_REALROOT"} = $root0;
+	$ENV{"MINISERV_CONFIG"} = $config_file;
+	$ENV{"HTTPS"} = "ON" if ($use_ssl);
+	$ENV{"MINISERV_PID"} = $miniserv_main_pid;
+	$ENV{"SCRIPT_FILENAME"} = $cmd;
+	if ($ENV{"SCRIPT_FILENAME"} =~ /^\Q$root0\E(\/.*)$/) {
+		$ENV{"SCRIPT_NAME"} = $1;
+		}
+	$cmd =~ /^(.*)\//;
+	$ENV{"PWD"} = $1;
+	foreach $k (keys %config) {
+		if ($k =~ /^env_(\S+)$/) {
+			$ENV{$1} = $config{$k};
+			}
+		}
+	chdir($ENV{"PWD"});
+	$SIG{'CHLD'} = 'DEFAULT';
+	eval {
+		# Have SOCK closed if the perl exec's something
+		use Fcntl;
+		fcntl(SOCK, F_SETFD, FD_CLOEXEC);
+		};
+
+	# Run the wrapper script by evaling it
+	if ($cmd =~ /\/([^\/]+)\/([^\/]+)$/) {
+		$pkg = $1;
+		}
+	$0 = $cmd;
+	@ARGV = @$argv;
+	$main_process_id = $$;
+	eval "
+		\%pkg::ENV = \%ENV;
+		package $pkg;
+		do \"$cmd\";
+		die \$@ if (\$@);
+		";
+	if ($@) {
+		print STDERR "Perl failure : $@\n";
+		}
+	exit(0);
+	}
+return $pid;
+}
+
+# canonicalize_ip6(address)
+# Converts an address to its full long form. Ie. 2001:db8:0:f101::20 to
+# 2001:0db8:0000:f101:0000:0000:0000:0020
+sub canonicalize_ip6
+{
+my ($addr) = @_;
+return $addr if (!&check_ip6address($addr));
+my @w = split(/:/, $addr);
+my $idx = &indexof("", @w);
+if ($idx >= 0) {
+	# Expand ::
+	my $mis = 8 - scalar(@w);
+	my @nw = @w[0..$idx];
+	for(my $i=0; $i<$mis; $i++) {
+		push(@nw, 0);
+		}
+	push(@nw, @w[$idx+1 .. $#w]);
+	@w = @nw;
+	}
+foreach my $w (@w) {
+	while(length($w) < 4) {
+		$w = "0".$w;
+		}
+	}
+return lc(join(":", @w));
+}
+
+# expand_ipv6_bytes(address)
+# Given a canonical IPv6 address, split it into an array of bytes
+sub expand_ipv6_bytes
+{
+my ($addr) = @_;
+my @rv;
+foreach my $w (split(/:/, $addr)) {
+	$w =~ /^(..)(..)$/ || return ( );
+	push(@rv, hex($1), hex($2));
+	}
+return @rv;
+}
+
+sub get_somaxconn
+{
+return defined(&SOMAXCONN) ? SOMAXCONN : 128;
+}
+
+sub is_bad_header
+{
+my ($value, $name) = @_;
+return $value =~ /^\s*\(\s*\)\s*\{/ ? 1 : 0;
+}
+
+# sysread_line(fh)
+# Read a line from a file handle, using sysread to get a byte at a time
+sub sysread_line
+{
+local ($fh) = @_;
+local $line;
+while(1) {
+	local ($buf, $got);
+	$got = sysread($fh, $buf, 1);
+	last if ($got <= 0);
+	$line .= $buf;
+	last if ($buf eq "\n");
+	}
+return $line;
+}

@@ -33,6 +33,11 @@ else {
 		&set_config_file($access{'file'});
 		}
 	else {
+		if (!-r $config{'local_cf'} && -r $config{'alt_local_cf'}) {
+			# Copy in default config file
+			&copy_source_dest($config{'alt_local_cf'},
+					  $config{'local_cf'});
+			}
 		&set_config_file($config{'local_cf'});
 		}
 	if ($access{'nocheck'}) {
@@ -966,6 +971,8 @@ return $uinfo;
 sub get_auto_whitelist_file
 {
 local ($user) = @_;
+local @uinfo = $module_info{'usermin'} ? @remote_user_info :
+	       $user ? getpwnam($user) : ( );
 local $conf = &get_config();
 local $awp = &find("auto_whitelist_path", $conf);
 if (!$awp) {
@@ -974,8 +981,6 @@ if (!$awp) {
 $awp ||= "~/.spamassassin/auto-whitelist";
 if ($awp !~ /^\//) {
 	# Make absolute
-	local @uinfo = $module_info{'usermin'} ? @remote_user_info :
-		       $user ? getpwnam($user) : ( );
 	return undef if (scalar(@uinfo) == 0);
 	$awp =~ s/^(\~|\$HOME)\//$uinfo[7]\//;
 	if ($awp !~ /^\//) {
@@ -986,6 +991,10 @@ if ($awp !~ /^\//) {
 if (!-r $awp) {
 	local @real = glob("$awp.*");
 	$awp = undef if (!@real);
+	}
+# Is it under the user's home?
+if (!&is_under_directory($uinfo[7], $awp)) {
+	$awp = undef;
 	}
 return $awp;
 }

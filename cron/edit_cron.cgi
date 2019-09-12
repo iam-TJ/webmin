@@ -38,6 +38,7 @@ else {
 print &ui_form_start("save_cron.cgi");
 print &ui_hidden("new", $in{'new'});
 print &ui_hidden("idx", $in{'idx'});
+print &ui_hidden("search", $in{'search'});
 print &ui_table_start($text{'edit_details'}, "width=100%", 2);
 
 if (&supports_users()) {
@@ -60,13 +61,20 @@ if (&supports_users()) {
 print &ui_table_row($text{'edit_active'},
 	&ui_yesno_radio("active", $job->{'active'} ? 1 : 0));
 
+# Next run time
+if (!$in{'new'} && ($config{'show_next'} || $userconfig{'show_next'})) {
+	$n = &next_run($job);
+	print &ui_table_row($text{'edit_next'},
+		$n ? &make_date($n) : "<i>$text{'index_nunknown'}</i>");
+	}
+
 &convert_comment($job);
 $rpd = &is_run_parts($job->{'command'});
 if ($rpd) {
 	# run-parts command.. just show scripts that will be run
 	print &ui_table_row($text{'edit_commands'},
-		"<tt>".join("<br>",&expand_run_parts($rpd))."</tt>");
-	print &ui_hidden("cmd", $job->{'command'});
+		"<tt>".join("<br>",&expand_run_parts($rpd))."</tt>".
+		&ui_hidden("cmd", $job->{'command'}));
 	}
 elsif (!$access{'command'}) {
 	# Just show command, which cannot be edited
@@ -78,6 +86,8 @@ else {
 	&convert_range($job);
 	$rangeable = 1;
 	($command, $input) = &extract_input($job->{'command'});
+	$command =~ s/\\%/%/g;
+	$input =~ s/\\%/%/g;
 	@lines = split(/%/, $input);
 	print &ui_table_row($text{'edit_command'},
 		&ui_textbox("cmd", $command, 60));
@@ -96,9 +106,7 @@ print &ui_table_end();
 
 # Show times and days to run
 print &ui_table_start($text{'edit_when'}, "width=100%", 2);
-print &ui_table_row(undef, "<table border width=100%>".
-			   &capture_function_output(\&show_times_input, $job).
-			   "</table>", 2);
+print &get_times_input($job);
 print &ui_table_end();
 
 if ($rangeable) {
@@ -110,34 +118,39 @@ if ($rangeable) {
 	}
 
 if (!$in{'new'}) {
-	print "<table><tr>\n";
-
 	# Save button
-	print "<td>",&ui_submit($text{'save'}),"</td>\n";
-	print "<td>",&ui_submit($text{'edit_saverun'}, 'saverun'),"</td>\n";
+	print &ui_submit($text{'save'});
+	print &ui_submit($text{'edit_saverun'}, 'saverun');
 	print &ui_form_end();
 
 	# Run button
+	print "<table class='ui_table_end_submit_right'><tr>\n";
 	if (!$rpd) {
+		print "<td>";
 		print &ui_form_start("exec_cron.cgi");
 		print &ui_hidden("idx", $in{'idx'});
-		print "<td>",&ui_submit($text{'edit_run'}),"</td>\n";
+		print &ui_submit($text{'edit_run'});
 		print &ui_form_end();
+		print "</td>\n";
 		}
 
 	# Clone button
+	print "<td>";
 	print &ui_form_start("edit_cron.cgi");
 	print &ui_hidden("clone", $in{'idx'});
 	print &ui_hidden("new", 1);
-	print "<td>",&ui_submit($text{'edit_clone'}),"</td>\n";
+	print &ui_submit($text{'edit_clone'});
 	print &ui_form_end();
+	print "</td>";
 
 	# Delete button
 	if ($access{'delete'}) {
+		print "<td>";
 		print &ui_form_start("delete_cron.cgi");
 		print &ui_hidden("idx", $in{'idx'});
-		print "<td>",&ui_submit($text{'delete'}),"</td>\n";
+		print &ui_submit($text{'delete'});
 		print &ui_form_end();
+		print "</td>\n";
 		}
 	print "</tr></table>\n";
 	}
@@ -145,5 +158,6 @@ else {
 	print &ui_form_end([ [ undef, $text{'create'} ] ]);
 	}
 
-&ui_print_footer("", $text{'index_return'});
+&ui_print_footer("index.cgi?search=".&urlize($in{'search'}),
+		 $text{'index_return'});
 

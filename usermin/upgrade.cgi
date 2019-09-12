@@ -5,7 +5,12 @@
 require './usermin-lib.pl';
 $access{'upgrade'} || &error($text{'acl_ecannot'});
 &foreign_require("proc", "proc-lib.pl");
-&ReadParseMime();
+if ($ENV{'CONTENT_TYPE'} =~ /boundary=/) {
+	&ReadParseMime();
+	}
+else {
+	&ReadParse();
+	}
 &get_usermin_miniserv_config(\%miniserv);
 
 &ui_print_unbuffered_header(undef, $in{'install'} ? $text{'upgrade_title2'} : $text{'upgrade_title'}, "");
@@ -142,7 +147,7 @@ if ($in{'mode'} eq 'rpm') {
 
 	# Install the RPM
 	if ($in{'force'}) {
-		$cmd = "rpm -U --force $qfile";
+		$cmd = "rpm -U --force --nodeps $qfile";
 		}
 	else {
 		$cmd = "rpm -U --ignoreos --ignorearch --nodeps $qfile";
@@ -316,8 +321,7 @@ else {
 sub inst_error
 {
 unlink($file) if ($need_unlink);
-print "<br><b>$whatfailed : $_[0]</b> <p>\n";
-&ui_print_footer("", $text{'index_return'});
+&error($_[0]);
 exit;
 }
 

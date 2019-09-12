@@ -1,25 +1,31 @@
 #!/usr/local/bin/perl
 # edit_forward.cgi
 # Display options for an existing forward zone
+use strict;
+use warnings;
+our (%access, %in, %text);
 
 require './bind8-lib.pl';
 &ReadParse();
-$bconf = $conf = &get_config();
-if ($in{'view'} ne '') {
-	$view = $conf->[$in{'view'}];
-	$conf = $view->{'members'};
-	}
-$zconf = $conf->[$in{'index'}]->{'members'};
-$dom = $conf->[$in{'index'}]->{'value'};
-&can_edit_zone($conf->[$in{'index'}], $view) ||
+
+$in{'view'} = 'any' if ($in{'view'} eq '');
+my $zone = &get_zone_name_or_error($in{'zone'}, $in{'view'});
+my $z = &zone_to_config($zone);
+my $zconf = $z->{'members'};
+my $dom = $zone->{'name'};
+&can_edit_zone($zone) ||
+	&error($text{'master_ecannot'});
+
+$dom = $zone->{'name'};
+&can_edit_zone($zone) ||
 	&error($text{'fwd_ecannot'});
-$desc = &ip6int_to_net(&arpa_to_ip($dom));
+my $desc = &ip6int_to_net(&arpa_to_ip($dom));
 &ui_print_header($desc, $text{'fwd_title'}, "",
 		 undef, undef, undef, undef, &restart_links());
 
 # Start of the form
 print &ui_form_start("save_forward.cgi");
-print &ui_hidden("index", $in{'index'});
+print &ui_hidden("zone", $in{'zone'});
 print &ui_hidden("view", $in{'view'});
 print &ui_table_start($text{'fwd_opts'}, "width=100%", 4);
 
@@ -45,13 +51,14 @@ else {
 	print &ui_buttons_start();
 
 	# Move to another view
-	print &move_zone_button($bconf, $in{'view'}, $in{'index'});
+	my $bconf = &get_config();
+	print &move_zone_button($bconf, $zone->{'viewindex'}, $in{'zone'});
 
 	# Delete zone
 	if ($access{'delete'}) {
 		print &ui_buttons_row("delete_zone.cgi",
 			$text{'master_del'}, $text{'fwd_delmsg'},
-			&ui_hidden("index", $in{'index'}).
+			&ui_hidden("zone", $in{'zone'}).
 			&ui_hidden("view", $in{'view'}));
 		}
 

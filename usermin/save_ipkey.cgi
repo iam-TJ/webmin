@@ -21,8 +21,9 @@ else {
 	&error_setup($text{'ipkey_err'});
 	@ips = split(/\s+/, $in{'ips'});
 	foreach $i (@ips) {
-		&check_ipaddress($i) ||
-			&error(&text('ipkey_eip', $i));
+		&check_ipaddress($i) || &check_ip6address($i) ||
+			$i =~ /^(\*\.)?[a-z0-9\.\_\-]+$/i ||
+			&error(&text('ipkey_eip2', $i));
 		}
 	@ips || &error(&text('ipkey_eips'));
 	$ipkey->{'ips'} = \@ips;

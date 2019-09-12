@@ -15,7 +15,7 @@ if (@htaccess_files) {
 	$i = 0;
 	foreach $f (@htaccess_files) {
 		print &ui_columns_row([
-			"<a href=\"htaccess_index.cgi?file=".&urlize($htaccess_files[$i])."\">".$htaccess_files[$i]."</a>"
+			&ui_link("htaccess_index.cgi?file=".&urlize($htaccess_files[$i]), $htaccess_files[$i])
 			]);
 		$i++;
 		}
@@ -44,5 +44,4 @@ print &ui_textbox("dir", $access{'dir'}, 30)." ".
 	&file_chooser_button("dir", 1, 1);
 print &ui_form_end();
 
-&ui_print_footer("", $text{'index_return'});
-
+&ui_print_footer("index.cgi?mode=global", $text{'index_return2'});

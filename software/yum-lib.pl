@@ -1,14 +1,25 @@
 # yum-lib.pl
 # Functions for installing packages with yum
 
-$yum_config = $config{'yum_config'} || "/etc/yum.conf";
+if ($config{'yum_config'}) {
+	$yum_config = $config{'yum_config'};
+	}
+elsif (&has_command("yum")) {
+	$yum_config = "/etc/yum.conf";
+	}
+elsif (&has_command("dnf")) {
+	$yum_config = "/etc/dnf/dnf.conf";
+	}
+
+$yum_command = &has_command("dnf") || &has_command("yum") || "yum";
+$yum_repos_dir = "/etc/yum.repos.d";
 
 sub list_update_system_commands
 {
-return ("yum");
+return ($yum_command);
 }
 
-# update_system_install([package], [&in])
+# update_system_install([packages], [&in])
 # Install some package with yum
 sub update_system_install
 {
@@ -19,27 +30,58 @@ if ($in->{'enablerepo'}) {
 	$enable = "enablerepo=".quotemeta($in->{'enablerepo'});
 	}
 local (@rv, @newpacks);
-print "<b>",&text('yum_install', "<tt>yum $enable -y install $update</tt>"),"</b><p>\n";
+
+# If there are multiple architectures to update for a package, split them out
+local @updates = split(/\s+/, $update);
+local @names = map { &append_architectures($_) } split(/\s+/, $update);
+if (@names == 1) {
+	@names = ( $update );
+	}
+$update = join(" ", @names);
+
+# Work out command to use - for DNF, upgrades need to use the update command
+local $cmd;
+if ($yum_command =~ /dnf$/) {
+	local @pinfo = &package_info($updates[0]);
+	if ($pinfo[0]) {
+		$cmd = "update";
+		}
+	else {
+		$cmd = "install";
+		}
+	}
+else {
+	$cmd = "install";
+	}
+
+print "<b>",&text('yum_install', "<tt>$yum_command $enable -y $cmd $update</tt>"),"</b><p>\n";
 print "<pre>";
-&additional_log('exec', undef, "yum $enable -y install $update");
-local $qm = join(" ", map { quotemeta($_) } split(/\s+/, $update));
-&open_execute_command(CMD, "yum $enable -y install $qm </dev/null", 2);
+&additional_log('exec', undef, "$yum_command $enable -y install $update");
+$SIG{'TERM'} = 'ignore';	# Installing webmin itself may kill this script
+local $qm = join(" ", map { quotemeta($_) } @names);
+&open_execute_command(CMD, "$yum_command $enable -y $cmd $qm </dev/null", 2);
 while(<CMD>) {
 	s/\r|\n//g;
 	if (/^\[(update|install|deps):\s+(\S+)\s+/) {
 		push(@rv, $2);
 		}
-	elsif (/^(Installed|Dependency Installed|Updated|Dependency Updated):\s*(.*)/) {
+	elsif (/^(Installed|Dependency Installed|Updated|Dependency Updated|Upgraded):\s*(.*)/) {
 		# Line like :
 		# Updated:
 		#   wbt-virtual-server-theme.x86
 		local @pkgs = split(/\s+/, $2);
 		if (!@pkgs) {
-			# Wrapped to next line
-			local $pkgs = <CMD>;
-			$pkgs =~ s/^\s+//;
-			$pkgs =~ s/\s+$//;
-			@pkgs = split(/\s+/, $_);
+			# Wrapped to next line(s)
+			while(1) {
+				local $pkgs = <CMD>;
+				last if (!$pkgs);
+				print &html_escape($pkgs);
+				$pkgs =~ s/^\s+//;
+				$pkgs =~ s/\s+$//;
+				my @linepkgs = split(/\s+/, $_);
+				last if (!@linepkgs);
+				push(@pkgs, @linepkgs);
+				}
 			}
 		foreach my $p (@pkgs) {
 			if ($p !~ /:/ && $p =~ /^(\S+)\.(\S+)$/) {
@@ -50,18 +92,26 @@ while(<CMD>) {
 				}
 			}
 		}
-	elsif (/^\s+Updating\s+:\s+(\S+)/) {
+	elsif (/^\s+(Updating|Installing|Upgrading)\s+:\s+(\S+)/) {
 		# Line like :
 		#   Updating       : wbt-virtual-server-theme       1/2 
-		push(@rv, $1);
+		# or
+		#   Installing : 2:nmap-5.51-2.el6.i686             1/1
+		local $pkg = $2;
+		$pkg =~ s/^\d://;	# Strip epoch from front
+		$pkg =~ s/\-\d.*$//;	# Strip version number from end
+		push(@rv, $pkg);
 		}
 	if (!/ETA/ && !/\%\s+done\s+\d+\/\d+\s*$/) {
 		print &html_escape($_."\n");
 		}
+	if ($update =~ /perl\(/ && /No\s+package\s+.*available/i) {
+		$nopackage = 1;
+		}
 	}
 close(CMD);
 print "</pre>\n";
-if ($?) {
+if ($? || $nopackage) {
 	print "<b>$text{'yum_failed'}</b><p>\n";
 	return ( );
 	}
@@ -69,6 +119,28 @@ else {
 	print "<b>$text{'yum_ok'}</b><p>\n";
 	return &unique(@rv);
 	}
+}
+
+# append_architectures(package)
+# Given a package name, if it has multiple architectures return the name with
+# each appended
+sub append_architectures
+{
+my ($name) = @_;
+local %packages;
+my $n = &list_packages($name);
+return ( $name ) if (!$n);
+my @rv;
+for(my $i=0; $i<$n; $i++) {
+	if ($packages{$i,'arch'}) {
+		push(@rv, $packages{$i,'name'}.".".$packages{$i,'arch'});
+		}
+	else {
+		push(@rv, $packages{$i,'name'});
+		}
+	}
+@rv = &unique(@rv);
+return @rv;
 }
 
 # update_system_operations(packages)
@@ -83,9 +155,9 @@ my $temp = &transname();
 &print_tempfile(SHELL, "transaction solve\n");
 &close_tempfile(SHELL);
 my @rv;
-open(SHELL, "yum shell $temp |");
+open(SHELL, "$yum_command shell $temp |");
 while(<SHELL>) {
-	if (/Package\s+(\S+)\s+(\S+)\s+set/i) {
+	if (/Package\s+(\S+)\s+(\S+)\s+(set|will\s+be\s+an\s+update)/i) {
 		my $pkg = { 'name' => $1,
 			    'version' => $2 };
 		if ($pkg->{'name'} =~ s/\.([^\.]+)$//) {
@@ -125,27 +197,23 @@ if (&compare_versions($pinfo[4], "2.1.10") > 0) {
 return undef;
 }
 
-# update_system_form()
-# Shows a form for updating all packages on the system
-sub update_system_form
-{
-print &ui_subheading($text{'yum_form'});
-print &ui_form_start("yum_upgrade.cgi");
-print &ui_form_end([ [ undef, $text{'yum_apply'} ] ]);
-}
-
 # update_system_resolve(name)
 # Converts a standard package name like apache, sendmail or squid into
 # the name used by YUM.
 sub update_system_resolve
 {
 local ($name) = @_;
-return $name eq "apache" ? "httpd" :
+local $maria = $gconfig{'real_os_type'} =~ /CentOS|Redhat|Scientific/ &&
+	       $gconfig{'real_os_version'} >= 7;
+return $name eq "apache" ? "httpd mod_.*" :
        $name eq "dhcpd" ? "dhcp" :
-       $name eq "mysql" ? "mysql mysql-server mysql-devel" :
+       $name eq "mysql" && $maria ? "mariadb mariadb-server mariadb-devel" :
+       $name eq "mysql" && !$maria ? "mysql mysql-server mysql-devel" :
        $name eq "openssh" ? "openssh openssh-server" :
        $name eq "postgresql" ? "postgresql postgresql-libs postgresql-server" :
        $name eq "openldap" ? "openldap-servers openldap-clients" :
+       $name eq "ldap" ? "nss-pam-ldapd pam_ldap nss_ldap" :
+       $name eq "virtualmin-modules" ? "wbm-.*" :
        			  $name;
 }
 
@@ -155,7 +223,7 @@ sub update_system_available
 {
 local @rv;
 local %done;
-&open_execute_command(PKG, "yum info", 1, 1);
+&open_execute_command(PKG, "$yum_command info", 1, 1);
 while(<PKG>) {
 	s/\r|\n//g;
 	if (/^Name\s*:\s*(\S+)/) {
@@ -205,13 +273,26 @@ return @rv;
 sub set_yum_security_field
 {
 local ($done) = @_;
-&open_execute_command(PKG, "yum list-sec 2>/dev/null", 1, 1);
+&open_execute_command(PKG, "$yum_command updateinfo list sec 2>/dev/null", 1, 1);
 while(<PKG>) {
 	s/\r|\n//g;
-	if (/^\S+\s+security\s+(\S+?)\-([0-9]\S+)\.([^\.]+)$/) {
+	if (/^\S+\s+\S+\s+(\S+?)\-([0-9]\S+)\.([^\.]+)$/) {
 		local ($name, $ver) = ($1, $2);
 		if ($done->{$name}) {
-			$done->{$name}->{'source'} = 'security';
+			$done->{$name}->{'source'} ||= 'security';
+			$done->{$name}->{'security'} = 1;
+			}
+		}
+	}
+close(PKG);
+&open_execute_command(PKG, "$yum_command list-sec 2>/dev/null", 1, 1);
+while(<PKG>) {
+	s/\r|\n//g;
+	next if (/^(Loaded|updateinfo)/);
+	if (/^\S+\s+\S+\s+(\S+?)\-([0-9]\S+)\.([^\.]+)$/) {
+		local ($name, $ver) = ($1, $2);
+		if ($done->{$name}) {
+			$done->{$name}->{'source'} ||= 'security';
 			$done->{$name}->{'security'} = 1;
 			}
 		}
@@ -225,7 +306,7 @@ sub update_system_updates
 {
 local @rv;
 local %done;
-&open_execute_command(PKG, "yum check-update 2>/dev/null", 1, 1);
+&open_execute_command(PKG, "$yum_command check-update 2>/dev/null", 1, 1);
 while(<PKG>) {
         s/\r|\n//g;
 	if (/^(\S+)\.([^\.]+)\s+(\S+)\s+(\S+)/) {
@@ -268,6 +349,158 @@ while(<CONF>) {
 	}
 close(CONF);
 return \@rv;
+}
+
+# list_package_repos()
+# Returns a list of configured repositories
+sub list_package_repos
+{
+my @rv;
+
+# Parse the raw repo files
+my $repo;
+foreach my $f (glob("$yum_repos_dir/*.repo")) {
+	my $lref = &read_file_lines($f, 1);
+	my $lnum = 0;
+	foreach my $l (@$lref) {
+		$l =~ s/#.*$//;
+		if ($l =~ /^\[(\S+)\]/) {
+			# Start of a new repo
+			$repo = { 'file' => $f,
+				  'line' => $lnum,
+				  'eline' => $lnum,
+				  'id' => $1,
+				};
+			push(@rv, $repo);
+			}
+		elsif ($l =~ /^([^= ]+)=(.*)$/ && $repo) {
+			# Line in a repo
+			$repo->{'raw'}->{$1} = $2;
+			$repo->{'eline'} = $lnum;
+			}
+		$lnum++;
+		}
+	}
+
+# Extract common information
+foreach my $repo (@rv) {
+	my $name = $repo->{'raw'}->{'name'};
+	$name =~ s/\s*-.*//;
+	$name =~ s/\s*\$[a-z0-9]+//gi;
+	$repo->{'name'} = $repo->{'id'}." (".$name.")";
+	$repo->{'url'} = $repo->{'raw'}->{'baseurl'} ||
+			 $repo->{'raw'}->{'mirrorlist'};
+	$repo->{'enabled'} = defined($repo->{'raw'}->{'enabled'}) ?
+				$repo->{'raw'}->{'enabled'} : 1;
+	}
+
+return @rv;
+}
+
+# create_repo_form()
+# Returns HTML for a package repository creation form
+sub create_repo_form
+{
+my $rv;
+$rv .= &ui_table_row($text{'yum_repo_id'},
+		     &ui_textbox("id", undef, 20));
+$rv .= &ui_table_row($text{'yum_repo_name'},
+		     &ui_textbox("name", undef, 60));
+$rv .= &ui_table_row($text{'yum_repo_url'},
+		     &ui_textbox("url", undef, 60));
+$rv .= &ui_table_row($text{'yum_repo_gpg'},
+		     &ui_opt_textbox("gpg", undef, 60, $text{'yum_repo_none'}));
+return $rv;
+}
+
+# create_repo_parse(&in)
+# Parses input from create_repo_form, and returns either a new repo object or
+# an error string
+sub create_repo_parse
+{
+my ($in) = @_;
+my $repo = { 'raw' => { 'enabled' => 1 } };
+
+# ID must be valid and unique
+$in->{'id'} =~ /^[a-z0-9\-\_]+$/i || return $text{'yum_repo_eid'};
+my ($clash) = grep { $_->{'id'} eq $in->{'id'} } &list_package_repos();
+$clash && return $text{'yum_repo_eidclash'};
+$repo->{'id'} = $in->{'id'};
+
+# Human-readable repo name
+$in->{'name'} =~ /\S/ || return $text{'yum_repo_ename'};
+$repo->{'raw'}->{'name'} = $in->{'name'};
+
+# Base URL
+$in->{'url'} =~ /^(http|https):/ || return $text{'yum_repo_eurl'};
+$repo->{'raw'}->{'baseurl'} = $in->{'url'};
+
+# GPG key file
+if (!$in->{'gpg_def'}) {
+	-r $in->{'gpg'} || return $text{'yum_repo_egpg'};
+	$repo->{'raw'}->{'gpgcheck'} = 1;
+	$repo->{'raw'}->{'gpgkey'} = 'file://'.$in->{'gpg'};
+	}
+
+return $repo;
+}
+
+# create_package_repo(&repo)
+# Creates a new repository from the given hash (returned by create_repo_parse)
+sub create_package_repo
+{
+my ($repo) = @_;
+my $file = "$yum_repos_dir/$repo->{'id'}.repo";
+-r $file && return $text{'yum_repo_efile'};
+
+&lock_file($file);
+my $lref = &read_file_lines($file);
+push(@$lref, "[$repo->{'id'}]");
+foreach my $r (keys %{$repo->{'raw'}}) {
+	push(@$lref, $r."=".$repo->{'raw'}->{$r});
+	}
+&flush_file_lines($file);
+&unlock_file($file);
+
+return undef;
+}
+
+# delete_package_repo(&repo)
+# Delete a repository from it's config file. Does not delete the file even if
+# empty, to prevent it from being re-created if it came from an RPM package.
+sub delete_package_repo
+{
+my ($repo) = @_;
+&lock_file($repo->{'file'});
+my $lref = &read_file_lines($repo->{'file'});
+splice(@$lref, $repo->{'line'}, $repo->{'eline'}-$repo->{'line'}+1);
+&flush_file_lines($repo->{'file'});
+&unlock_file($repo->{'file'});
+}
+
+# enable_package_repo(&repo, enable?)
+# Enable or disable a repository
+sub enable_package_repo
+{
+my ($repo, $enable) = @_;
+&lock_file($repo->{'file'});
+my $lref = &read_file_lines($repo->{'file'});
+my $e = "enabled=".($enable ? 1 : 0);
+if (defined($repo->{'raw'}->{'enabled'})) {
+	# There's a line to update already
+	for(my $i=$repo->{'line'}; $i<=$repo->{'eline'}; $i++) {
+		if ($lref->[$i] =~ /^enabled=/) {
+			$lref->[$i] = $e;
+			last;
+			}
+		}
+	}
+else {
+	# Need to add a line
+	splice(@$lref, $repo->{'eline'}, 0, $e);
+	}
+&flush_file_lines($repo->{'file'});
+&unlock_file($repo->{'file'});
 }
 
 1;

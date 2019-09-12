@@ -45,7 +45,7 @@ else {
 		&can_create_iface() || &error($text{'ifcs_ecannot'});
 		&can_iface($a) || &error($text{'ifcs_ecannot'});
 		}
-	elsif ($in{'name'} =~ /^([a-z]+\d*(\.\d+)?):(\d+)$/) {
+	elsif ($in{'name'} =~ /^([a-z]+\d*(s\d*)?(\.\d+)?):(\d+)$/) {
 		# also creating a virtual interface
 		foreach $ea (@acts) {
 			if ($ea->{'name'} eq $1 &&
@@ -61,7 +61,7 @@ else {
 		&can_create_iface() || &error($text{'ifcs_ecannot'});
 		&can_iface($a) || &error($text{'ifcs_ecannot'});
 		}
-	elsif ($in{'name'} =~ /^[a-z]+\d*(\.\d+)?$/) {
+	elsif ($in{'name'} =~ /^[a-z]+\d*(s\d+)?(\.\d+)?$/) {
 		# creating a real interface
 		foreach $ea (@acts) {
 			if ($ea->{'name'} eq $in{'name'}) {
@@ -109,7 +109,7 @@ else {
 
 	if (!$access{'broadcast'}) {
 		# Compute broadcast
-		$a->{'netmask'} = $in{'new'} ?
+		$a->{'broadcast'} = $in{'new'} ?
 			&compute_broadcast($a->{'address'}, $a->{'netmask'}) :
 			$olda->{'broadcast'};
 		}

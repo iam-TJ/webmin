@@ -13,11 +13,12 @@ index_rpm=Instal·la el paquet RPM d'Usermin
 index_tgz=Instal·la el paquet tar.gz d'Usermin
 index_deb=Instal·la el paquet Debian d'Usermin
 index_esame=El directori $1 de configuració d'Usermin establert a la pàgina de <a href='$2'>configuració del mòdul</a> és el mateix que el directori de Webmin, cosa que no és correcta.
+index_eroot=El directori de configuració $1 d'Usermin existeix, però el directori arrel de programes $2 al qual fa referència, no! Has de descarregar i reinstal·lar Usermin manualment.
 index_restart=Reinicia Usermin
 index_restartmsg=Fes clic sobre aquest botó per reiniciar el procés servidor d'Usermin. Això pot ser necessari si has actualitzat Perl fa poc. 
 
 access_title=Control d'Accés IP
-access_desc=Amb aquest formulari, el servidor Usermin pot configurar-se per a permetre o denegar l'accés només des de certes adreces IP. Es poden introduir també noms de host (com ara foo.bar.com) i xarxes IP (com 10.254.3.0 o 10.254.1.0/255.255.255.128). Hauries de limitar l'accés al servidor a les adreces fiables, sobretot si és accessible des d'Internet. Altrament, algú que endevini la teva contrasenya tindrà el control complet del sistema.
+access_desc=Amb aquest formulari, el servidor Usermin pot configurar-se per a permetre o denegar l'accés només des de certes adreces IP. Es poden introduir també noms de host (com ara foo.bar.com) i xarxes IP (com 10.254.3.0 o 10.254.1.0/255.255.255.128 o 10.254.1.0/25 o 10.254.1.5-10.254.97.127). Hauries de limitar l'accés al servidor a les adreces fiables, sobretot si és accessible des d'Internet. Altrament, algú que endevini la teva contrasenya tindrà el control complet del sistema.
 
 bind_title=Ports i Adreces
 bind_desc2=Aquest formulari es pot utilitzar per canviar el número de port que Usermin escolta, o fer que escolti només una sola adreça IP del sistema. També el podeu configurar per acceptar connexions a múltiples ports, o escoltar diferents adreces IP. Nota - pot ser que el navegador et demani d'identificar-te cada vegada que canviïs el port o l'adreça.
@@ -48,7 +49,7 @@ os_title=Sistema Operatiu i Entorn
 os_desc3=Aquesta pàgina mostra el sistema operatiu detectat per Usermin a l'hora d'instal·lar-lo, i el sistema detectat actualment. Si són diferents, pots triar d'actualitzar la informació del SO d'Usermin, cosa que pot ser necessària si has fet una actualització recentment.
 os_desc2=També pots canviar el camí de recerca que utilitza Webmin quan executa programes, i la llibreria compartida que es passa a tots els programes.
 os_usermin=Sistema operatiu d'acord amb Usermin
-os_iusermin=Codi intern d'OS utilitzat per Usermin
+os_iusermin=Codi intern de SO utilitzat per Usermin
 os_update=Actualitza l'Usermin per utilitzar el SO detectat
 
 lang_title=Idioma
@@ -61,6 +62,7 @@ session_desc2=Quan l'autenticació de sessió està activada, la sessió de cada usu
 session_remember=Ofereix-te a recordar la contrasenya de forma permanent
 session_hostname=Mostra el nom de host a la pantalla de connexió
 session_realname=Mostra el nom de host real en lloc del nom de l'URL
+session_authmode=Mètode d'autenticació
 session_authmode0=Utilitza PAM per a l'autenticació si està disponible
 session_authmode1=Autenticació utilitzant el fitxer de contrasenyes $1 columnes $2 i $3
 session_authmode2=Utilitza un programa extern d'autenticació estil squid
@@ -128,9 +130,12 @@ acl_desc=Utilitza aquesta pàgina per seleccionar quins mòduls instal·lats d'User
 
 ssl_title=Xifratge SSL
 ssl_desc1=No sembla que el host on s'està executant Usermin tingui instal·lat el mòdul perl SSLeay. Amb això, Usermin suporta comunicació xifrada SSL entre el navegador i el servidor. Si els usuaris accedeixen al servidor Usermin a través d'Internet, llavors has de considerar seriosament utilitzar SSL per evitar que un atacant els prengui les contrasenyes.
-ssl_desc2=Atenció - activa el suport SSL només si tens un navegador que suporti SSL (com ara Netscape o IE), i no hi ha cap tallafocs bloquejant les peticions https entre el navegador i el host Usermin.
+ssl_desc2=Atenció - activa el suport SSL només si tens un navegador que suporti SSL, i no hi ha cap tallafoc bloquejant les peticions <tt>https</tt> entre el navegador i el host Usermin.
 ssl_newkey=Aquest formulari es pot utilitzar per crear una nova clau SSL per al servidor Usermin.
 ssl_hole=Com que actualment estàs utilitzant la clau SSL per defecte d'Usermin a la qual tothom té accés, hauries de generar immediatament una clau nova. Altrament, la teva connexió SSL no serà segura!
+ssl_savekey=Aquest formulari permet carregar un certificat i una clau privada SSL existents en format PEM per a ús del servidor Usermin.
+ssl_copycert=Copia el Certificat de Webmin
+ssl_copycertdesc=Copia el Certificat SSL, clau privada, certificat CA i altres paràmetres que estigui utilitzant Webmin.
 
 ca_email=Adreça de correu
 ca_ou=Departament
@@ -153,20 +158,18 @@ users_desc=Amb aquest formulari es pot configurar Usermin per limitar quins usua
 users_desc2=Per fer coincidir un rang d'UIDs, introdueix <tt>start-end</tt>, <tt>start-</tt> o <tt>-end</tt> dins de la llista.
 users_header=Control d'accés Usermin
 users_all=Permet tots els usuaris
-users_allow=Permet només els usuaris llistats
-users_deny=Denega els usuaris llistats
+users_allow=Permet només els usuaris llistats...
+users_deny=Denega els usuaris llistats...
 users_err=No s'ha pogut actualitzar la llista d'usuaris
 users_none=No has introduït cap usuari
 users_euser='$1' no és un nom d'usuari vàlid
 users_egroup='$1' no és un nom de grup vàlid
-users_eversion=El control d'accés d'usuaris i grups només està suportat per les versions 0.76 d'Usermin i superiors.
 users_shells=Denega els usuaris la shell dels quals no sigui al fitxer
 users_eshells=Hi falta el fitxer de shells o bé no existeix
 
 defacl_title=Opcions de Control d'Accés
 defacl_desc=Aquesta pàgina permet configurar diverses opcions de control d'accés que s'apliquen als mòduls i usuaris d'Usermin. Aquestes opcions són semblants a les d'ACLs globals per a cada usuari del mòdul d'usuaris de Webmin.
 defacl_header=Opcions de control d'accés del usuaris Usermin
-defacl_eversion=L'edició d'opcions de control d'accés només està suportada per les version 0.76 d'Usermin i superiors.
 defacl_err=No s'han pogut desar les opcions de control d'accés
  
 install_err1=No s'ha pogut instal·lar el mòdul de $1
@@ -243,7 +246,7 @@ ui_feedbackhost=Nom de host a l'adreça From: d'opinions
 ui_feedbackthis=Nom de host del sistema
 ui_hostnamemode=Nom de host a mostrar a Usermin
 ui_hnm0=Nom de host real
-ui_hnm1=Nom de host apartir de l'URL
+ui_hnm1=Nom de host a partir de l'URL
 ui_hnm2=Nom de domini a partir de l'URL
 ui_hnm3=Un altre nom...
 ui_tabs=Categoritza els mòduls
@@ -306,7 +309,7 @@ assignment_desc=Aquest formulari permet configurar sota quina categoria es mostr
  
 categories_title=Edició de Categories
 categories_header=ID de Categoria i descripcions
-categories_desc=Aquest formulari permet renomenar les categories Usermin existents i crear-ne de noves per assignar-hi mòduls. La part de dalt de la taula és per canviar les descripcions de les categories integrades, mentre que la de baix és per afegir nous IDs i descripcions de categoria.
+categories_desc=Aquest formulari permet reanomenar les categories Usermin existents i crear-ne de noves per assignar-hi mòduls. La part de dalt de la taula és per canviar les descripcions de les categories integrades, mentre que la de baix és per afegir nous IDs i descripcions de categoria.
 categories_ok=Desa les Categories
 categories_err=No s'han pogut desar les categories
 categories_edesc=Hi falta la descripció de $1
@@ -330,6 +333,7 @@ log_upgrade=S'ha actualitzat Usermin a la versió $1
 log_uinstall=S'ha instal·lat la versió $1 d'Usermin
 log_session=S'han canviat les opcions d'autenticació
 log_ssl=S'ha canviat el mode de xifratge SSL
+log_copycert=S'han copiat els paràmetres SSL de Webmin
 log_newkey=S'ha creat la nova clau SSL
 log_setupca=S'ha establert l'autoritat certificadora
 log_changeca=S'ha canviat l'autoritat certificadora
@@ -376,7 +380,7 @@ update_subject=Informe d'actualització de mòduls Usermin
 update_version=Hi ha una nova versió d'Usermin (versió $1) disponible per a descarregar. Les pròximes actualitzacions només estaran disponibles per a la darrera versió.
 
 restrict_title=Restriccions dels Mòduls
-restrict_desc=Aquesta pàgina permet controlar quins mòduls d'Usermin estan disponibles per a diferents usuaris i grups. S'apliquen totes les addicions i substraccions de la llista, no només la primera que coincideixi amb cada usuari.<br>Els mòduls que no estiguin seleccionats a la pàgina de <a href='$1'>mòduls disponibles</a> no estaran mai disponibles pels usuaris, encara que aquí estiguin seleccionats.
+restrict_desc=Aquesta pàgina permet controlar quins mòduls d'Usermin estan disponibles per a diferents usuaris i grups. S'apliquen totes les addicions i subtraccions de la llista, no només la primera que coincideixi amb cada usuari.<br>Els mòduls que no estiguin seleccionats a la pàgina de <a href='$1'>mòduls disponibles</a> no estaran mai disponibles pels usuaris, encara que aquí estiguin seleccionats.
 restrict_who=Usuari Usermin
 restrict_what=Mòduls disponibles
 restrict_all=Tots els usuaris
@@ -396,11 +400,11 @@ restrict_umode1=Als membres del grup
 restrict_umode2=A tots els usuaris
 restrict_umode3=Usuaris i grups del fitxer
 restrict_mods=Mòduls
-restrict_modsdesc=(els que estan en vermell han<br>estat desactivats a<br> la pàgina <a href='$1'>Mòduls Disponibles</a>)
+restrict_modsdesc=(els que estan en vermell han estat desactivats a la pàgina de <a href='$1'>Mòduls Disponibles</a>)
 restrict_mmode0=Només els seleccionats...
 restrict_mmode1=Afegeix els seleccionats...
 restrict_mmode2=Treu els seleccionats...
-restrict_return=a la llistia de restriccions
+restrict_return=a la llista de restriccions
 restrict_err=No s'han pogut desar les restriccions
 restrict_euser=Hi falta el nom de l¡usuari o bé és invàlid
 restrict_egroup=Hi falta el nom del grup o bé és invàlid
@@ -490,5 +494,9 @@ blocked_user=Usuari Usermin
 blocked_cleardesc=Fes clic sobre aquest botó per esborrar tot els bloqueigs actuals de hosts i usuaris reiniciant el procés servidor d'Usermin.
 
 mobile_title=Opcions del Dispositiu Mòbil
+
+copycert_err=No s'han pogut copiar els paràmetres SSL de Webmin
+copycert_essl=SSL no està activat
+copycert_ekeyfile=No ha cap fitxer de clau privada configurat a Webmin
 
 __norefs=1

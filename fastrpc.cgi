@@ -4,7 +4,7 @@
 # client. From then on, direct TCP connections can be made to this port
 # to send requests and get replies.
 
-BEGIN { push(@INC, ".."); };
+BEGIN { push(@INC, "."); };
 use WebminCore;
 use POSIX;
 use Socket;
@@ -53,8 +53,16 @@ untie(*STDIN);
 untie(*STDOUT);
 
 # Accept the TCP connection
+local $rmask;
+vec($rmask, fileno(MAIN), 1) = 1;
+$sel = select($rmask, undef, undef, 60);
+if ($sel <= 0) {
+	print STDERR "fastrpc: accept timed out\n"
+		if ($gconfig{'rpcdebug'});
+	exit;
+	}
 $acptaddr = accept(SOCK, MAIN);
-die "accept failed!" if (!$acptaddr);
+die "accept failed : $!" if (!$acptaddr);
 $oldsel = select(SOCK);
 $| = 1;
 select($oldsel);
@@ -182,7 +190,11 @@ while(1) {
 	elsif ($arg->{'action'} eq 'tcpread') {
 		# Transfer data from a file over TCP connection
 		print STDERR "fastrpc: tcpread $arg->{'file'}\n" if ($gconfig{'rpcdebug'});
-		if (!open(FILE, $arg->{'file'})) {
+		if (-d $arg->{'file'}) {
+			$rawrv = &serialise_variable(
+				{ 'status' => 1, 'rv' => [ undef, "$arg->{'file'} is a directory" ] } );
+			}
+		elsif (!open(FILE, $arg->{'file'})) {
 			$rawrv = &serialise_variable(
 				{ 'status' => 1, 'rv' => [ undef, "Failed to open $arg->{'file'} : $!" ] } );
 			}
@@ -307,7 +319,7 @@ while(1) {
 	$$port++;
 	last if (bind($fh, sockaddr_in($$port, INADDR_ANY)));
 	}
-listen($fh, SOMAXCONN);
+listen($fh, SOMAXCONN) || return "listed failed : $!";
 return undef;
 }
 

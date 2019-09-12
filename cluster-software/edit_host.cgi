@@ -20,7 +20,7 @@ print "<tr $cb> <td><table width=100%>\n";
 print "<tr> <td><b>$text{'host_name'}</b></td>\n";
 if ($server->{'id'}) {
 	$h = $server->{'realhost'} || $server->{'host'};
-	printf "<td><a href='/servers/link.cgi/%s/'>%s</a></td>\n",
+	printf &ui_link("/servers/link.cgi/%s/","%s")."</td>\n",
 		$server->{'id'}, $server->{'desc'} ? "$server->{'desc'} ($h:$server->{'port'})" : "$h:$server->{'port'}";
 	}
 else {
@@ -52,15 +52,17 @@ print "</table></td></tr></table>\n";
 
 # Show delete and refresh buttons
 print "<table width=100%><tr>\n";
-print "<form action=delete_host.cgi>\n";
-print "<input type=hidden name=id value=$in{'id'}>\n";
-print "<td><input type=submit value='$text{'host_delete'}'></td>\n";
-print "</form>\n";
 
-print "<form action=refresh.cgi>\n";
+print "<td><form action=delete_host.cgi>\n";
 print "<input type=hidden name=id value=$in{'id'}>\n";
-print "<td align=right><input type=submit value='$text{'host_refresh'}'></td>\n";
-print "</form>\n";
+print "<input type=submit value='$text{'host_delete'}'>\n";
+print "</form></td>\n";
+
+print "<td align=right><form action=refresh.cgi>\n";
+print "<input type=hidden name=id value=$in{'id'}>\n";
+print "<input type=submit value='$text{'host_refresh'}'>\n";
+print "</form></td>\n";
+
 print "</tr></table>\n";
 
 # Show tree of packages
@@ -81,7 +83,7 @@ foreach $c (sort { $a cmp $b } &unique(map { $_->{'class'} } @packages)) {
 %heiropen = map { $_, 1 } &get_heiropen($in{'id'});
 $heiropen{""}++;
 
-# traverse the heirarchy
+# traverse the hierarchy
 $spacer = "&nbsp;"x3;
 print &ui_hr();
 print &ui_subheading($text{'host_installed'});
@@ -89,8 +91,8 @@ print "<table width=100%>\n";
 &traverse("", 0);
 print "</table>\n";
 if ($hasclasses) {
-	print "<a href='closeall.cgi?id=$in{'id'}'>$text{'host_close'}</a>\n";
-	print "<a href='openall.cgi?id=$in{'id'}'>$text{'host_open'}</a><p>\n";
+	print &ui_link("closeall.cgi?id=$in{'id'}",$text{'host_close'}),"\n";
+	print &ui_link("openall.cgi?id=$in{'id'}",$text{'host_open'}),"<p>\n";
 	}
 
 &ui_print_footer("", $text{'index_return'});

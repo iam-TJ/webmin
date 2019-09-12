@@ -50,9 +50,11 @@ Each is an array ref whose values are :
 
 =item options - Mount options, like rw,usrquota,grpquota
 
-=item quotacan - Can this filesystem type support quotas?
+=item quotacan - Can this filesystem support quotas?
 
 =item quotanow - Are quotas enabled right now?
+
+=item quotapossible - Can quotas potentially be enabled?
 
 The values of quotacan and quotanow are :
 
@@ -74,7 +76,10 @@ foreach $f (&mount::list_mounts()) {
 	}
 map { $_->[4] = &quota_can($_, $fmap{$_->[0],$_->[1]}) } @mtab;
 map { $_->[5] = &quota_now($_, $fmap{$_->[0],$_->[1]}) } @mtab;
-return grep { $_->[4] } @mtab;
+if (defined(&quota_possible)) {
+	map { $_->[6] = &quota_possible($fmap{$_->[0],$_->[1]}) } @mtab;
+	}
+return grep { $_->[4] || $_->[6] } @mtab;
 }
 
 =head2 parse_options(type, options)
@@ -115,10 +120,11 @@ elements are :
 =cut
 sub user_quota
 {
-local (%user, $n, $i);
-$n = &filesystem_users($_[1]);
-for($i=0; $i<$n; $i++) {
-	if ($user{$i,'user'} eq $_[0]) {
+my ($user, $fs) = @_;
+local %user;
+my $n = &filesystem_users($fs);
+for(my $i=0; $i<$n; $i++) {
+	if ($user{$i,'user'} eq $user) {
 		return ( $user{$i,'ublocks'}, $user{$i,'sblocks'},
 			 $user{$i,'hblocks'}, $user{$i,'ufiles'},
 			 $user{$i,'sfiles'},  $user{$i,'hfiles'} );
@@ -136,10 +142,11 @@ assigned.
 =cut
 sub group_quota
 {
-local (%group, $n, $i);
-$n = &filesystem_groups($_[1]);
-for($i=0; $i<$n; $i++) {
-	if ($group{$i,'group'} eq $_[0]) {
+my ($group, $fs) = @_;
+local %group;
+my $n = &filesystem_groups($fs);
+for(my $i=0; $i<$n; $i++) {
+	if ($group{$i,'group'} eq $group) {
 		return ( $group{$i,'ublocks'}, $group{$i,'sblocks'},
 			 $group{$i,'hblocks'}, $group{$i,'ufiles'},
 			 $group{$i,'sfiles'},  $group{$i,'hfiles'} );
@@ -167,10 +174,15 @@ Sets the disk quota for some user. The parameters are :
 =cut
 sub edit_user_quota
 {
-if ($config{'user_setquota_command'} &&
-    &has_command((split(/\s+/, $config{'user_setquota_command'}))[0])) {
+my ($user, $fs, $sblocks, $hblocks, $sfiles, $hfiles) = @_;
+if (defined(&set_user_quota) && defined(&can_set_user_quota) &&
+    &can_set_user_quota($fs)) {
+	# OS lib file defines a function to set quotas
+	return &set_user_quota(@_);
+	}
+elsif ($config{'user_setquota_command'} &&
+       &has_command((split(/\s+/, $config{'user_setquota_command'}))[0])) {
 	# Use quota setting command
-	local $user = $_[0];
 	if ($user =~ /^#(\d+)$/) {
 		# Pass numeric UID
 		$user = $1;
@@ -181,21 +193,20 @@ if ($config{'user_setquota_command'} &&
 		$user = $uid if (defined($uid));
 		}
 	local $cmd = $config{'user_setquota_command'}." ".quotemeta($user)." ".
-		     int($_[2])." ".int($_[3])." ".int($_[4])." ".int($_[5]).
-		     " ".quotemeta($_[1]);
+		     int($sblocks)." ".int($hblocks)." ".
+		     int($sfiles)." ".int($hfiles)." ".quotemeta($fs);
 	local $out = &backquote_logged("$cmd 2>&1 </dev/null");
 	&error("<tt>".&html_escape($out)."</tt>") if ($?);
 	}
 else {
 	# Call the quota editor
 	$ENV{'EDITOR'} = $ENV{'VISUAL'} = "$module_root_directory/edquota.pl";
-	$ENV{'QUOTA_USER'} = $_[0];
-	$ENV{'QUOTA_FILESYS'} = $_[1];
-	$ENV{'QUOTA_SBLOCKS'} = $_[2];
-	$ENV{'QUOTA_HBLOCKS'} = $_[3];
-	$ENV{'QUOTA_SFILES'} = $_[4];
-	$ENV{'QUOTA_HFILES'} = $_[5];
-	local $user = $_[0];
+	$ENV{'QUOTA_USER'} = $user;
+	$ENV{'QUOTA_FILESYS'} = $fs;
+	$ENV{'QUOTA_SBLOCKS'} = $sblocks;
+	$ENV{'QUOTA_HBLOCKS'} = $hblocks;
+	$ENV{'QUOTA_SFILES'} = $sfiles;
+	$ENV{'QUOTA_HFILES'} = $hfiles;
 	if ($edquota_use_ids) {
 		# Use UID instead of username
 		if ($user =~ /^#(\d+)$/) {
@@ -230,10 +241,15 @@ Sets the disk quota for some group The parameters are :
 =cut
 sub edit_group_quota
 {
-if ($config{'group_setquota_command'} &&
-    &has_command((split(/\s+/, $config{'group_setquota_command'}))[0])) {
+my ($group, $fs, $sblocks, $hblocks, $sfiles, $hfiles) = @_;
+if (defined(&set_group_quota) && defined(&can_set_group_quota) &&
+    &can_set_group_quota($fs)) {
+	# OS lib file defines a function to set quotas
+	return &set_group_quota(@_);
+	}
+elsif ($config{'group_setquota_command'} &&
+       &has_command((split(/\s+/, $config{'group_setquota_command'}))[0])) {
 	# Use quota setting command
-	local $group = $_[0];
 	if ($group =~ /^#(\d+)$/) {
 		# Pass numeric UID
 		$group = $1;
@@ -244,21 +260,20 @@ if ($config{'group_setquota_command'} &&
 		$group = $gid if (defined($gid));
 		}
 	local $cmd =$config{'group_setquota_command'}." ".quotemeta($group)." ".
-		     int($_[2])." ".int($_[3])." ".int($_[4])." ".int($_[5]).
-		     " ".quotemeta($_[1]);
+		     int($sblocks)." ".int($hblocks)." ".
+		     int($sfiles)." ".int($hfiles)." ".quotemeta($fs);
 	local $out = &backquote_logged("$cmd 2>&1 </dev/null");
 	&error("<tt>".&html_escape($out)."</tt>") if ($?);
 	}
 else {
 	# Call the editor
 	$ENV{'EDITOR'} = $ENV{'VISUAL'} = "$module_root_directory/edquota.pl";
-	$ENV{'QUOTA_USER'} = $_[0];
-	$ENV{'QUOTA_FILESYS'} = $_[1];
-	$ENV{'QUOTA_SBLOCKS'} = $_[2];
-	$ENV{'QUOTA_HBLOCKS'} = $_[3];
-	$ENV{'QUOTA_SFILES'} = $_[4];
-	$ENV{'QUOTA_HFILES'} = $_[5];
-	local $group = $_[0];
+	$ENV{'QUOTA_USER'} = $group;
+	$ENV{'QUOTA_FILESYS'} = $fs;
+	$ENV{'QUOTA_SBLOCKS'} = $sblocks;
+	$ENV{'QUOTA_HBLOCKS'} = $hblocks;
+	$ENV{'QUOTA_SFILES'} = $sfiles;
+	$ENV{'QUOTA_HFILES'} = $hfiles;
 	if ($edquota_use_ids) {
 		# Use GID instead of group name
 		if ($group =~ /^#(\d+)$/) {
@@ -291,13 +306,20 @@ Change the grace times for blocks and files on some filesystem. Parameters are:
 =cut
 sub edit_user_grace
 {
-$ENV{'EDITOR'} = $ENV{'VISUAL'} = "$module_root_directory/edgrace.pl";
-$ENV{'QUOTA_FILESYS'} = $_[0];
-$ENV{'QUOTA_BTIME'} = $_[1];
-$ENV{'QUOTA_BUNITS'} = $_[2];
-$ENV{'QUOTA_FTIME'} = $_[3];
-$ENV{'QUOTA_FUNITS'} = $_[4];
-&system_logged($config{'user_grace_command'});
+my ($fs, $btime, $bunits, $ftime, $funits) = @_;
+if (defined(&set_user_grace) && defined(&can_set_user_grace) &&
+    &can_set_user_grace($fs)) {
+	return &set_user_grace(@_);
+	}
+else {
+	$ENV{'EDITOR'} = $ENV{'VISUAL'} = "$module_root_directory/edgrace.pl";
+	$ENV{'QUOTA_FILESYS'} = $fs;
+	$ENV{'QUOTA_BTIME'} = $btime;
+	$ENV{'QUOTA_BUNITS'} = $bunits;
+	$ENV{'QUOTA_FTIME'} = $ftime;
+	$ENV{'QUOTA_FUNITS'} = $funits;
+	&system_logged($config{'user_grace_command'});
+	}
 }
 
 =head2 edit_group_grace(filesystem, btime, bunits, ftime, funits)
@@ -308,13 +330,20 @@ The parameters are the same as edit_user_grace.
 =cut
 sub edit_group_grace
 {
-$ENV{'EDITOR'} = $ENV{'VISUAL'} = "$module_root_directory/edgrace.pl";
-$ENV{'QUOTA_FILESYS'} = $_[0];
-$ENV{'QUOTA_BTIME'} = $_[1];
-$ENV{'QUOTA_BUNITS'} = $_[2];
-$ENV{'QUOTA_FTIME'} = $_[3];
-$ENV{'QUOTA_FUNITS'} = $_[4];
-&system_logged($config{'group_grace_command'});
+my ($fs, $btime, $bunits, $ftime, $funits) = @_;
+if (defined(&set_group_grace) && defined(&can_set_group_grace) &&
+    &can_set_group_grace($fs)) {
+	return &set_group_grace(@_);
+	}
+else {
+	$ENV{'EDITOR'} = $ENV{'VISUAL'} = "$module_root_directory/edgrace.pl";
+	$ENV{'QUOTA_FILESYS'} = $fs;
+	$ENV{'QUOTA_BTIME'} = $btime;
+	$ENV{'QUOTA_BUNITS'} = $bunits;
+	$ENV{'QUOTA_FTIME'} = $ftime;
+	$ENV{'QUOTA_FUNITS'} = $funits;
+	&system_logged($config{'group_grace_command'});
+	}
 }
 
 =head2 quota_input(name, value, [blocksize])
@@ -489,7 +518,7 @@ else {
 =head2 block_size(dir, [for-filesys])
 
 Returns the size (in bytes) of blocks on some filesystem, if known. All
-quota functions deal with blocks, so they must be multipled by the value
+quota functions deal with blocks, so they must be multiplied by the value
 returned by this function before display to users.
 
 =cut

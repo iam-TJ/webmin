@@ -13,7 +13,7 @@ print &ui_table_start($text{'newdb_header'}, undef, 2);
 print &ui_table_row($text{'newdb_db'},
 	&ui_textbox("db", undef, 20));
 
-if ($mysql_version >= 4.1) {
+if (&compare_version_numbers($mysql_version, "4.1") >= 0) {
 	# Character set option
 	@charsets = &list_character_sets();
 	%csmap = map { $_->[0], $_->[1] } @charsets;
@@ -39,8 +39,7 @@ print &ui_table_row($text{'newdb_table'},
 	&ui_radio("table_def", 1, [ [ 1, $text{'newdb_none'} ],
 				    [ 0, $text{'newdb_tname'} ] ])." ".
 	&ui_textbox("table", undef, 20)." ".$text{'newdb_str'}."...");
-$out = &capture_function_output(\&show_table_form, 4);
-print &ui_table_row(undef, $out, 2);
+print &ui_table_row(undef, &show_table_form(4), 2);
 
 print &ui_table_end();
 print &ui_form_end([ [ undef, $text{'create'} ] ]);

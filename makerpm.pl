@@ -1,8 +1,11 @@
 #!/usr/local/bin/perl
 # Build an RPM package of Webmin
 
-if (-r "/usr/src/OpenLinux") {
-	$base_dir = "/usr/src/OpenLinux";
+if (-d "$ENV{'HOME'}/redhat") {
+	$base_dir = "$ENV{'HOME'}/redhat";
+	}
+elsif (-d "$ENV{'HOME'}/rpmbuild") {
+	$base_dir = "$ENV{'HOME'}/rpmbuild";
 	}
 else {
 	$base_dir = "/usr/src/redhat";
@@ -27,6 +30,9 @@ if (-r "/etc/.issue") {
 	}
 elsif (-r "/etc/issue") {
 	\$etc_issue = `cat /etc/issue`;
+	}
+if (-r "/etc/os-release") {
+	\$os_release = `cat /etc/os-release`;
 	}
 \$uname = `uname -a`;
 EOF
@@ -57,6 +63,8 @@ $maketemp =~ s/\$/\\\$/g;
 system("cp tarballs/webmin-$ver.tar.gz $source_dir");
 open(SPEC, ">$spec_dir/webmin-$ver.spec");
 print SPEC <<EOF;
+%global __perl_provides %{nil}
+
 #%define BuildRoot /tmp/%{name}-%{version}
 %define __spec_install_post %{nil}
 
@@ -64,9 +72,9 @@ Summary: A web-based administration interface for Unix systems.
 Name: webmin
 Version: $ver
 Release: $rel
-Provides: %{name}-%{version}
+Provides: %{name}-%{version} perl(WebminCore)
 PreReq: /bin/sh /usr/bin/perl /bin/rm
-Requires: /bin/sh /usr/bin/perl /bin/rm
+Requires: /bin/sh /usr/bin/perl /bin/rm perl(Net::SSLeay) perl(Time::Local) perl(Encode::Detect) perl(Data::Dumper) openssl unzip
 AutoReq: 0
 License: Freeware
 Group: System/Tools
@@ -91,7 +99,7 @@ rm -f mount/freebsd-mounts*
 rm -f mount/openbsd-mounts*
 rm -f mount/macos-mounts*
 rm -f webmin-gentoo-init
-rm -rf format bsdexports hpuxexports sgiexports zones rbac
+rm -rf format bsdexports hpuxexports sgiexports zones rbac bsdfdisk
 rm -rf acl/Authen-SolarisRBAC-0.1*
 chmod -R og-w .
 
@@ -166,7 +174,8 @@ fi
 # Save /etc/webmin in case the upgrade trashes it
 if [ "\$1" != 1 ]; then
 	rm -rf /etc/.webmin-backup
-	cp -r /etc/webmin /etc/.webmin-backup
+	mkdir /etc/.webmin-backup
+	(cd /etc/webmin && tar --exclude history --exclude bandwidth --exclude usage -c -f - .) | (cd /etc/.webmin-backup && tar -x -f -)
 fi
 # Put back old /etc/webmin saved when an RPM was removed
 if [ "\$1" = 1 -a ! -d /etc/webmin -a -d /etc/webmin.rpmsave ]; then
@@ -222,6 +231,7 @@ export config_dir var_dir perl autoos port login crypt host ssl nochown autothir
 chmod 600 \$tempdir/webmin-setup.out
 rm -f /var/lock/subsys/webmin
 if [ "\$inetd" != "1" -a "\$startafter" = "1" ]; then
+	/etc/init.d/webmin stop >/dev/null 2>&1 </dev/null
 	/etc/init.d/webmin start >/dev/null 2>&1 </dev/null
 fi
 cat >/etc/webmin/uninstall.sh <<EOFF
@@ -249,12 +259,14 @@ musthost=`grep musthost= /etc/webmin/miniserv.conf | sed -e 's/musthost=//'`
 if [ "$musthost" != "" ]; then
 	host=$musthost
 fi
-if [ "\$sslmode" = "1" ]; then
-	echo "Webmin install complete. You can now login to https://\$host:\$port/"
-else
-	echo "Webmin install complete. You can now login to http://\$host:\$port/"
+if [ "\$1" == 1 ]; then
+	if [ "\$sslmode" = "1" ]; then
+		echo "Webmin install complete. You can now login to https://\$host:\$port/"
+	else
+		echo "Webmin install complete. You can now login to http://\$host:\$port/"
+	fi
+	echo "as root with your root password."
 fi
-echo "as root with your root password."
 /bin/true
 
 %preun

@@ -62,12 +62,11 @@ print &ui_table_row($text{'table_type'},
 			[ "heap" ], [ "merge" ], [ "innodb" ], [ "ndbcluster" ]
 		      ]));
 
-$out = &capture_function_output(\&show_table_form, $in{"fields"} || 4);
-print &ui_table_row(undef, $out, 2);
+print &ui_table_row(undef, &show_table_form($in{"fields"} || 4), 2);
 
 print &ui_table_end();
 print &ui_form_end([ [ "create", $text{'create'} ] ]);
 
 &ui_print_footer("edit_dbase.cgi?db=$in{'db'}", $text{'dbase_return'},
-	"", $text{'index_return'});
+		 &get_databases_return_link($in{'db'}), $text{'index_return'});
 

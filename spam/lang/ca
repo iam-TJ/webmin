@@ -2,6 +2,7 @@ index_title=Filtre de Correu SpamAssassin
 index_ecmd=No s'ha trobat al sistema l'ordre $1 de SpamAssassin. Pot ser que no estigui instal·lada, o bé que la <a href='$2'>configuració del mòdul</a> sigui incorrecta.
 index_ecmd2=No s'ha trobat al sistema l'ordre $1 de spamassassin. 
 index_econfig=No s'ha trobat al sistema el directori o fitxer de configuració local $1 de SpamAssassin. Pot ser que SpamAssassin no estigui instal·lat, o bé que la <a href='$2'>configuració del mòdul</a> sigui incorrecta.
+index_unknown=desconegut
 index_edb=No s'ha pogut connectar amb la base de dades de configuracio de SpamAssassin: $1. Comprova la <a href='$2'>configuració del mòdul</a> per assegurar que estàs utilitzant els valors correctes.
 index_version=SpamAssassin versió $1
 index_warn_usermin=No sembla que SpamAssassin estigui configurat al fitxer de configuració $2 de Procmail ni al fitxer global $1, així que cap configuració feta utilitzant aquest mòdul tindrà cap efecte a menys que SpamAssassin s'hagi configurat globalment.
@@ -12,13 +13,13 @@ index_applydesc=Fes clic sobre aquest botó per aplica la configuració actual de 
 index_cpan=Com que SpamAssassin és un mòdul Perl, també el pots instal·lar automàticament utilitzant el mòdul <a href='$2'>Mòduls Perl</a> de Webmin per descarregar $1 de CPAN.
 index_spamassassin=SpamAssassin
 index_ecannot=No tens permís per gestionar el fitxer de configuració $1 de SpamAssassin
-
 white_title=Adreces Permeses i Denegades
 white_desc=Les taules d'aquesta pàgina permeten especificar adreces de correu From: i To: que sempre o mai estan classificades com a spam. Qualsevol altre correu es processarà com a normal per part de les regles de SpamAssassin. Totes les adreces de correu poden contenir escarrassos, com ara *@foo.com o *.foo.com per a coincidir amb dominis sencers.
 white_from=Remitents que no s'han de classificar mai com a spam
 white_gfrom=Remitents que no s'han de classificar mai com a spam a tot el sistema
-white_unfrom=Exceptions dels remitents que no s'han de classificar com a spam
+white_unfrom=Excepcions dels remitents que no s'han de classificar com a spam
 white_addr=Adreça del remitent
+white_addr2=Adreça del destinatari
 white_rcvd2=Remitent que no s'ha de classificar com a spam
 white_rcvdhost=Domini de la capçalera Received
 white_gunfrom=Excepcions de remitents que no s'han de classificar com a spam a tot el sistema
@@ -34,7 +35,7 @@ white_level2=Tot el spam
 white_err=No s'han pogut desar les llistes blanca i negra
 white_efrom='$1' no és una adreça From: vàlida
 white_ercvd='$1' no és un nom de domini vàlid
-white_importdesc=Aquest formulari es pot utilitzar per afegir adreces de correu d'un fitxer (com ara una llibreta d¡adreces exportada des d'Outlook o Eudora) a la llista permesa.
+white_importdesc=Aquest formulari es pot utilitzar per afegir adreces de correu d'un fitxer (com ara una llibreta d'adreces exportada des d'Outlook o Eudora) a la llista permesa.
 white_import=Importa les adreces del fitxer
 white_sort=Ordena les adreces permeses després de la importació
 white_importok=Importa-ho Ara
@@ -45,7 +46,7 @@ white_tabsome=Adreces de destinació
 white_tabimport=Importa adreces
 
 score_title=Classificació de Spam
-score_desc=SpamAssassin assigna una puntuació a cada missatgebasant-se en el seu contingut i les seves capçaleres. Les opcions d'aquesta pàgina determinen la puntuació per sobre de la qual un missatge es considera spam, i alguns dels mètodes mitjançant els quals es calcula aquesta puntuació.
+score_desc=SpamAssassin assigna una puntuació a cada missatge basant-se en el seu contingut i les seves capçaleres. Les opcions d'aquesta pàgina determinen la puntuació per sobre de la qual un missatge es considera spam, i alguns dels mètodes mitjançant els quals es calcula aquesta puntuació.
 score_header=Opcions de classificació de missatges spam
 score_score=Puntuació dels tests de SpamAssassin
 score_name=Nom del test
@@ -63,6 +64,7 @@ score_localessel=Els jocs de caràcters seleccionats...
 score_auto=Factor de puntuació de la llista blanca
 score_timeout=Segons d'espera entre consultes RBL
 score_received=Nombre de capçaleres Received: a comprovar amb RBL
+score_trusted=Xarxes i hosts fiables
 score_describe=Descripció del test per a l'informe
 score_descr=Descripció
 score_err=No s'ha pogut desar la puntuació del missatge
@@ -223,6 +225,7 @@ log_priv=S'han modificat les opcions miscel·lànies privilegiades
 log_setup=S'ha configurat Procmail per a SpamAssassin
 log_procmail=S'ha canviat la configuració de Procmail
 log_import=S'han importat $1 adreces permeses
+log_manual=Fitxer de configuració editat manualment
 
 import_title=Importació d'Adreces
 import_err=No s'han pogut importar les adreces
@@ -267,7 +270,7 @@ search_escore=Hi falta la puntuació de spam o bé és invàlida
 search_results5=$1 missatges de correu amb puntuació de spam igual o superior a $2...
 
 razor_title=Configura el Detector de Spam Razor
-razor_desc=El Razor de Vipul's és un sistema col·laboratiu de detecció i informació de spam que pot millorar la classificació del spam enviat a la teva adreça. No obstant, abans de poder-lo utilitzar t'has de registrar amb un compte de Razor, utilitzant el formulari de sota.
+razor_desc=El Razor de Vipul és un sistema col·laboratiu de detecció i informació de spam que pot millorar la classificació del spam enviat a la teva adreça. No obstant, abans de poder-lo utilitzar t'has de registrar amb un compte de Razor, utilitzant el formulari de sota.
 razor_user=Usuari Razor
 razor_pass=Contrasenya Razor
 razor_auto=Tria-la automàticament
@@ -280,6 +283,44 @@ razor_epass=Hi falta la contrasenya
 razor_doing=S'està intentant registrar i configurar Razor...
 razor_done=...fet.
 razor_failed=...ha fallat! Mira el missatge d'error de sobre per saber-ne el motiu.
+
+amavisd_title=Lliurament de Spam Amavisd
+amavisd_desc=Pots fer servir el formulari per canviar la configuració d'Amavisd que determina què passa quan els missatges es classifiquen com a spam.
+amavis_ok=Canvia el Lliurament d'Amavisd
+amavis_tab_config=Configuració d'Amavisd
+amavis_tab_quarantine=Quarantena de Spam
+amavis_warn=Si utilitzes Amavisd per al filtratge de Spam, s'ignoraran algunes opcions.
+amavis_econfig=No s'ha trobat al sistema el fitxer de configuració d'Amavisd $1. Pot ser que Amavisd no estigui instal·lat, o bé que la <a href='$2'>configuració del mòdul</a> sigui incorrecta.
+amavis_hits=Impactes per damunt dels quals un missatge es considera spam.
+amavis_ehit=Els impactes per damunt dels quals un missatge es considera spam no és un valor!
+amavis_ekill=Els impactes per damunt dels quals un missatge de Spam es posa en Quarantena no és un valor!
+amavis_edsn=Els impactes per damunt dels quals no s'envia notificació al remitent no és un valor!
+amavis_ecut=Els impactes per damunt dels quals se suprimeix un missatge de Spam no és un valor!
+amavis_eheader=El valor de Modificació de la capçalera Assumpte: no és un valor!
+amavis_esize=El valor de la mida per sobre de la qual no es comprova si el missatge és Spam no és un valor!
+amavis_echar=Cal introduir un sol caràcter per a la capçalera X-Spam-Level:
+amavis_esubject=El valor del text prefixat a l capçalera Assumpte: no és un valor!
+amavis_elocal=El valor per desactivar els orígens d'Internet no és un valor!
+amavis_quarantine_level=Impactes per sobre dels quals un missatge de Spam es posa en Quarantena.
+amavis_dsn_level=Impactes per sobre dels quals no s'envia notificació al remitent.
+amavis_delete_level=Impactes per sobre dels quals s'esborra un missatge de Spam.
+amavis_report_header=Insereix la capçalera X-Spam-Header al missatge
+amavis_level_char=Caràcter utilitzat per mostrar el nivell de Spam a la capçalera X-Spam-Level:
+amavis_rewrite=Modifica la capçalera Assumpte: de spam
+amavis_rsubject=Prefixa text a la capçalera Subject: 
+amavis_size_limit=Mida de missatge en bytes per sobre de la qual no es comprova si el missatge és Spam.
+amavis_local_only=Desactiva els orígens d'Internet per a la comprovació de Spam
+amavis_quarantine_desc=Mostra on posa Amavisd el Spam en Quarantena, mostra també les Estadístiques de Spam si està activada la Quarantena local. Si la Quarantena està desactivada o reenviada a una adreça de correu, no es podem mostrar les Estadístiques de Spam.
+amavis_quarantine_off=La Quarantena de Spam està desactivada al sistema. Canvia <tt>spam_Quarantine_to</tt> per <tt>spam-quarantine</tt> al fitxer <tt>$1</tt> per activar la Quarantena.
+amavis_nostat=No és possible mostrar les Estadístiques de Spam.
+amavis_spam_admin=L'adreça de correu des d'on on s'envien les notificacions (administrador de Spam)
+amavis_quarantine_mail=El Spam en Quarantena es reenvia a l'adreça de correu
+amavis_quarantine_bsmtp=El Spam està en Quarantena en format BSMTP al sistema de fitxers local com a
+amavis_quarantine_local=El Spam està en Quarantena en format MBOX al sistema de fitxers local com a
+amavis_quarantine_today=Correus Spam en Quarantena avui (24h)
+amavis_quarantine_week=Correus Spam en Quarantena aquesta setmana (7 dies)
+amavis_quarantine_month=Correus Spam en Quarantena aquest mes (30 dies)
+amavis_quarantine_total=Nombre total de correus Spam en Quarantena
 
 procmail_title=Lliurament de Spam Procmail
 procmail_ok=Canvia el Lliurament Procmail
@@ -302,7 +343,7 @@ after_ecmd=L'ordre de després de desar ha fallat: $1
 connect_emysql=No s'ha pogut carregar el controlador $1 de la base de dades
 connect_elogin=No s'ha pogut entrar a la base de dades $1: $2.
 connect_equery=La base de dades $1 no conté la taula de preferències $2
-connect_eldapmod=El módul Perl $1 necessari per comunicar-se amb LDAP no està instal·lat o no es pot carregar
+connect_eldapmod=El mòdul Perl $1 necessari per comunicar-se amb LDAP no està instal·lat o no es pot carregar
 connect_eldap=No s'ha pogut connectar amb el servidor LDAP $1 al port $2
 connect_eldaplogin=No s'ha pogut entrar al servidor LDAP com a $2: $3
 connect_ebase=El DN base LDAP $1 no és vàlid: $2
@@ -373,11 +414,18 @@ awl_deleteonedesc=Elimina totes les entrades de la llista blanca automàtica de l
 awl_deleteall=Neteja Totes les Llistes Blanques Automàtiques
 awl_deletealldesc=Elimina totes les entrades de totes les llistes blanques automàtiques de tots els usuaris del sistema.
 
-dawl_err=No s'ha pogut suprimir de ls llista blanca automàtica
+dawl_err=No s'ha pogut suprimir de la llista blanca automàtica
 dawl_eopen=No s'ha pogut obrir la llista blanca
 dawl_enone=No has seleccionat cap adreça per suprimir
 dawl_ecannot=No tens permès de gestionar la llista blanca automàtica d'aquest usuari
 dawl_doing=S'estan suprimint les llistes blanques automàtiques de tots els usuaris...
 dawl_done=...s'han suprimit $2 entrades de $1 usuaris.
 dawl_title=Suprimeix Totes les Llistes Blanques Automàtiques
+
+manual_title=Edició de Fitxers de Configuració
+manual_file=Edita el fitxer de configuració:
+manual_ok=Bé
+manual_efile=Fitxer de configuració invàlid!
+manual_err=No s'ha pogut desar el fitxer de configuració
+
 __norefs=1

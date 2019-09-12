@@ -1,6 +1,11 @@
 #!/usr/local/bin/perl
 # Show a form for setting up RNDC
 # XXX should check if already working!
+use strict;
+use warnings;
+# Globals
+our (%access, %text, %config);
+our $module_name;
 
 require './bind8-lib.pl';
 $access{'defaults'} || &error($text{'rndc_ecannot'});
@@ -16,14 +21,17 @@ if (!&has_command($config{'rndcconf_cmd'})) {
 	}
 
 # Check if already working
-&execute_command("$config{'rndc_cmd'} status", undef, \$out);
+my $out;
+&execute_command($config{'rndc_cmd'}.
+		 ($config{'rndc_conf'} ? " -c $config{'rndc_conf'}" : "").
+		 " status", undef, \$out);
 if (!$? && $out !~ /failed/) {
 	print "<b>",$text{'rndc_desc2'},"</b><p>\n";
 	}
 
 # Show form
 print &ui_form_start("save_rndc.cgi", "post");
-$ex = -s $config{'rndc_conf'};
+my $ex = -s $config{'rndc_conf'};
 print &text($ex ? 'rndc_rusure' : 'rndc_rusure2',
 	    "<tt>$config{'rndc_conf'}</tt>"),"<p>\n";
 print &ui_submit($text{'rndc_ok'});

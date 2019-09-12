@@ -43,8 +43,7 @@ if (@links) {
 			local ($type) = grep { $_->[0] eq $s->{'type'} }
 					     @servers::server_types;
 			print &ui_columns_row([
-				"<a href='edit_host.cgi?id=$h->{'id'}'>".
-				($s->{'host'} || &get_system_hostname())."</a>",
+				&ui_link("edit_host.cgi?id=$h->{'id'}",($s->{'host'} || &get_system_hostname())),
 				$s->{'desc'},
 				$h->{'version'},
 				$type->[1],
@@ -65,54 +64,54 @@ else {
 # Build common selectors
 @wgroups = &all_groups(\@hosts);
 $modsel2 = $modsel = "<select name=mod>\n";
-$modsel2 .= "<option value=''>$text{'index_gacl'}\n";
+$modsel2 .= "<option value=''>$text{'index_gacl'}</option>\n";
 foreach $m (&all_modules(\@hosts)) {
-	$modsel .= "<option value=$m->{'dir'}>$m->{'desc'}\n";
-	$modsel2 .= "<option value=$m->{'dir'}>$m->{'desc'}\n";
+	$modsel .= "<option value=$m->{'dir'}>$m->{'desc'}</option>\n";
+	$modsel2 .= "<option value=$m->{'dir'}>$m->{'desc'}</option>\n";
 	}
 $modsel .= "</select>\n";
 $modsel2 .= "</select>\n";
 $themesel = "<select name=theme>\n";
 foreach $t (&all_themes(\@hosts)) {
-	$themesel .= "<option value=$t->{'dir'}>$t->{'desc'}\n";
+	$themesel .= "<option value=$t->{'dir'}>$t->{'desc'}</option>\n";
 	}
 $themesel .= "</select>\n";
 $usersel = "<select name=user>\n";
 foreach $u (&all_users(\@hosts)) {
-	$usersel .= "<option>$u->{'name'}\n";
+	$usersel .= "<option>$u->{'name'}</option>\n";
 	}
 $usersel .= "</select>\n";
 $groupsel = "<select name=group>\n";
 foreach $u (@wgroups) {
-	$groupsel .= "<option>$u->{'name'}\n";
+	$groupsel .= "<option>$u->{'name'}</option>\n";
 	}
 $groupsel .= "</select>\n";
 
 print "<table width=100%><tr>\n";
 @addservers = grep { !$gothost{$_->{'id'}} } @servers;
 if (@addservers) {
-	print "<form action=add.cgi><td>\n";
-	print "<input type=submit name=add value='$text{'index_add'}'>\n";
+	print "<td><form action=add.cgi>\n";
+	print "<br><p></p><input type=submit name=add value='$text{'index_add'}'>\n";
 	print "<select name=server>\n";
-	foreach $s (@addservers) {
-		print "<option value=$s->{'id'}>",&server_name($s),"\n";
+	foreach $s (sort { $a->{'host'} cmp $b->{'host'} } @addservers) {
+		print "<option value=$s->{'id'}>",&server_name($s),"</option>\n";
 		}
 	print "</select>\n";
-	print "</td></form>\n";
+	print "</form></td>\n";
 	$formno++;
 	}
 else { print "<td></td>\n"; }
 
 @groups = &servers::list_all_groups(\@servers);
 if (@groups) {
-	print "<form action=add.cgi><td align=right>\n";
+	print "<td align=right><form action=add.cgi>\n";
 	print "<input type=submit name=gadd value='$text{'index_gadd'}'>\n";
 	print "<select name=group>\n";
 	foreach $g (@groups) {
-		print "<option>$g->{'name'}\n";
+		print "<option>$g->{'name'}</option>\n";
 		}
 	print "</select>\n";
-	print "</td></form>\n";
+	print "</form></td>\n";
 	$formno++;
 	}
 else { print "<td></td>\n"; }
@@ -124,58 +123,58 @@ if (@hosts) {
 	print &ui_subheading($text{'index_users'});
 	print "<table width=100%>\n";
 
-	print "<tr><form action=edit_user.cgi><td>\n";
+	print "<tr><td><form action=edit_user.cgi>\n";
 	print "<input type=submit value='$text{'index_euser'}'>\n";
 	print $usersel;
-	print "</td></form>\n";
+	print "</form></td>\n";
 	$formno++;
 
-	print "<form action=edit_acl.cgi><td>\n";
+	print "<td><form action=edit_acl.cgi>\n";
 	print "<input type=submit value='$text{'index_euseracl'}'>\n";
 	print $usersel;
 	print "$text{'index_inmod'}\n";
 	print $modsel2;
-	print "</td></form>\n";
+	print "</form></td>\n";
 	$formno++;
 
-	print "<form action=user_form.cgi><td align=right>\n";
+	print "<td align=right><form action=user_form.cgi>\n";
 	print "<input type=submit value='$text{'index_cuser'}'>\n";
-	print "</td></form></tr>\n";
+	print "</form></td></tr>\n";
 	$formno++;
 
 	if (@wgroups) {
-		print "<tr><form action=edit_group.cgi><td>\n";
+		print "<tr><td><form action=edit_group.cgi>\n";
 		print "<input type=submit value='$text{'index_egroup'}'>\n";
 		print $groupsel;
-		print "</td></form>\n";
+		print "</form></td>\n";
 		$formno++;
 
-		print "<form action=edit_acl.cgi><td>\n";
+		print "<td><form action=edit_acl.cgi>\n";
 		print "<input type=submit value='$text{'index_egroupacl'}'>\n";
 		print $groupsel;
 		print "$text{'index_inmod'}\n";
 		print $modsel2;
-		print "</td></form>\n";
+		print "</form></td>\n";
 		$formno++;
 		}
 	else {
 		print "<tr> <td colspan=2></td>\n";
 		}
 
-	print "<form action=group_form.cgi><td align=right>\n";
+	print "<td align=right><form action=group_form.cgi>\n";
 	print "<input type=submit value='$text{'index_cgroup'}'>\n";
-	print "</td></form></tr>\n";
+	print "</form></td></tr>\n";
 	$formno++;
 
-	print "<tr> <form action=refresh.cgi><td align=left colspan=2>\n";
+	print "<tr> <td align=left colspan=2><form action=refresh.cgi>\n";
 	print "<input type=submit value='$text{'index_refresh'}'>\n";
 	&create_on_input(undef, 1, 1);
-	print "</td></form>\n";
+	print "</form></td>\n";
 	$formno++;
 
-	print "<form action=sync_form.cgi><td align=right>\n";
+	print "<td align=right><form action=sync_form.cgi>\n";
 	print "<input type=submit value='$text{'index_sync'}'>\n";
-	print "</td></form></tr>\n";
+	print "</form></td></tr>\n";
 	$formno++;
 
 	print "</table>\n";
@@ -184,14 +183,16 @@ if (@hosts) {
 	print &ui_hr();
 	print &ui_subheading($text{'index_modules'});
 	print "<table width=100%><tr>\n";
-	print "<form action=edit_mod.cgi><td>\n";
+	print "<td><form action=edit_mod.cgi>\n";
 	print "<input type=submit value=\"$text{'index_edit'}\">\n";
 	print $modsel;
-	print "</td>\n";
+	print "</form></td>\n";
 
-	print "<td align=right><input type=submit name=tedit value=\"$text{'index_tedit'}\">\n";
+	print "<td align=right><form action=edit_mod.cgi>\n";
+	print "<input type=submit name=tedit value=\"$text{'index_tedit'}\">\n";
 	print $themesel;
-	print "</td></form></tr></table><p>\n";
+	print "</form></td>\n";
+	print "</tr></table><p>\n";
 	$formno++;
 
 	print "<form action=install.cgi method=post ",

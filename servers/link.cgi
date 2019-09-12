@@ -75,7 +75,9 @@ else {
 
 # Connect to the server
 my $con = &make_http_connection($s->{'ip'} || $s->{'host'}, $s->{'port'},
-			        $s->{'ssl'}, $meth, $path);
+			        $s->{'ssl'}, $meth, $path, undef, undef,
+				{ 'host' => $s->{'host'},
+				  'nocheckhost' => !$s->{'checkssl'} });
 &error($con) if (!ref($con));
 
 # Send request headers
@@ -100,15 +102,39 @@ else {
 	$http_host = $ENV{'SERVER_NAME'};
 	$http_port = $ENV{'SERVER_PORT'};
 	}
+my $http_prot = $ENV{'HTTPS'} eq "ON" ? "https" : "http";
 &write_http_connection($con, sprintf(
-			"Webmin-servers: %s://%s:%d/%s\n",
-			$ENV{'HTTPS'} eq "ON" ? "https" : "http",
-			$http_host, $http_port,
+			"Webmin-servers: %s://%s:%d%s/%s\n",
+			$http_prot, $http_host, $http_port,
+			$gconfig{'webprefix'},
 			$tconfig{'inframe'} ? "" : "$module_name/"));
+&write_http_connection($con, sprintf(
+			"Webmin-path: %s://%s:%d%s/%s/link.cgi%s\n",
+			$http_prot, $http_host, $http_port,
+			$gconfig{'webprefix'}, $module_name,
+			$ENV{'PATH_INFO'}));
+if ($ENV{'HTTP_WEBMIN_PATH'}) {
+	&write_http_connection($con, sprintf(
+			"Complete-webmin-path: %s%s\n",
+			$ENV{'HTTP_WEBMIN_PATH'}));
+	}
+else {
+	&write_http_connection($con, sprintf(
+			"Complete-webmin-path: %s://%s:%d%s/%s/link.cgi%s\n",
+			$http_prot, $http_host, $http_port,
+			$gconfig{'webprefix'}, $module_name,
+			$ENV{'PATH_INFO'}));
+	}
 my $cl = $ENV{'CONTENT_LENGTH'};
 &write_http_connection($con, "Content-length: $cl\r\n") if ($cl);
 &write_http_connection($con, "Content-type: $ENV{'CONTENT_TYPE'}\r\n")
 	if ($ENV{'CONTENT_TYPE'});
+my $ref = $ENV{'HTTP_REFERER'};
+if ($ref && $ref =~ /^.*\Q$url\E(.*)/) {
+	my $rurl = ($s->{'ssl'} ? 'https' : 'http').'://'.$s->{'host'}.
+		   ':'.$s->{'port'}.$1;
+	&write_http_connection($con, "Referer: $rurl\r\n");
+	}
 &write_http_connection($con, "\r\n");
 my $post;
 if ($cl) {
@@ -134,6 +160,9 @@ if ($header{'location'} &&
      $header{'location'} =~ /^(http|https):\/\/$s->{'host'}(.*)/ &&
      $s->{'port'} == $defport)) {
 	# fix a redirect
+	local $gconfig{'webprefixnoredir'} = 1;		# We've already added
+							# webprefix, so no need
+							# to add it again
 	&redirect("$url$2");
 	exit;
 	}
@@ -174,6 +203,11 @@ if ($header{'content-type'} =~ /text\/html/ && !$header{'x-no-links'}) {
 		s/param\s+name=config\s+value="(\/[^']*)"/param name=config value="$url$1"/gi;
 		s/param\s+name=config\s+value=(\/[^']*)/param name=config value=$url$1/gi;
 		print;
+		if (/<applet.*archive=file.jar.*>/) {
+			# Remote webmin file manager applet - give it the 
+			# session ID on *this* system
+			print "<param name=session value=\"$main::session_id\">\n";
+			}
 		}
 	}
 elsif ($header{'content-type'} =~ /text\/css/ && !$header{'x-no-links'}) {

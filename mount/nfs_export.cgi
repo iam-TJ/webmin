@@ -2,7 +2,6 @@
 # nfs_export.cgi
 # Display a list of NFS exports on some host for the user to choose from
 
-$trust_unknown_referers = 1;
 require './mount-lib.pl';
 &ReadParse();
 &popup_header(&text('nfs_choose', &html_escape($in{'server'})));
@@ -31,8 +30,8 @@ print "<tr $tb> <td><b>$text{'nfs_dir'}</b></td> ",
       "<td><b>$text{'nfs_clients'}</b></td> </tr>\n";
 for($i=0; $i<@dirs; $i++) {
 	print "<tr $cb>\n";
-	print "<td><a href=\"\" onClick='choose(\"$dirs[$i]\"); return false'>",
-	      "$dirs[$i]</a></td>\n";
+	print "<td>".&ui_link("#", $dirs[$i], undef, "onClick='choose(\"$dirs[$i]\"); return false;'" );
+	print "</td>\n";
 	printf "<td>%s</td>\n",
 		length($clients[$i]) > 45 ?
 			&html_escape(substr($clients[$i], 0, 45))." ..." :

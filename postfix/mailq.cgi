@@ -33,23 +33,16 @@ elsif ($config{'mailq_sort'} == 6) {
 if (@qfiles) {
 	if (@qfiles > $config{'perpage'}) {
 		# Need to show arrows
-		print "<center>\n";
 		$s = int($in{'start'});
 		$e = $in{'start'} + $config{'perpage'} - 1;
 		$e = @qfiles-1 if ($e >= @qfiles);
-		if ($s) {
-			printf "<a href='mailq.cgi?start=%d'>%s</a>\n",
-			    $s - $config{'perpage'},
-			    "<img src=/images/left.gif border=0 align=middle>";
-			}
-		print "<font size=+1>",&text('mail_pos', $s+1, $e+1,
-					     scalar(@qfiles)),"</font>\n";
-		if ($e < @qfiles-1) {
-			printf "<a href='mailq.cgi?start=%d'>%s</a>\n",
-			    $s + $config{'perpage'},
-			    "<img src=/images/right.gif border=0 align=middle>";
-			}
-		print "</center>\n";
+		print &ui_page_flipper(
+			&text('mail_pos', $s+1, $e+1, scalar(@qfiles)),
+			undef,
+			undef,
+			$s ? "mailq.cgi?start=".($s - $config{'perpage'}) : "",
+			$e < @qfiles-1 ? "mailq.cgi?start=".($s + $config{'perpage'}) : "",
+			);
 		}
 	else {
 		# Can show them all
@@ -71,16 +64,23 @@ if (@qfiles) {
 	print &ui_submit($text{'mail_ok'});
 	print &ui_form_end();
 
-	# Show flush button, if the needed command is installed
+	print &ui_hr();
+	print &ui_buttons_start();
+
+	# Show buttons to flush and refresh mail queue
 	if (&has_command($config{'postfix_queue_command'})) {
-		print &ui_hr();
-		print &ui_buttons_start();
 		print &ui_buttons_row("flushq.cgi", $text{'mailq_flush'},
 				      $text{'mailq_flushdesc'});
 		print &ui_buttons_row("mailq.cgi?$in", $text{'mailq_refresh'},
 				      $text{'mailq_refreshdesc'});
-		print &ui_buttons_end();
 		}
+
+	# Show button to clear the mail queue entirely
+	print &ui_buttons_row("delete_queues.cgi", $text{'mailq_deleteall'},
+			      $text{'mailq_deletealldesc'},
+			      [ [ "all", 1 ] ]);
+
+	print &ui_buttons_end();
 	}
 else {
 	print "<b>$text{'mailq_none'}</b> <p>\n";

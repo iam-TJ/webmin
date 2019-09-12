@@ -100,6 +100,7 @@ schema_ecannot=You are not allowed to manage the LDAP schema
 acl_title=LDAP Access Control
 acl_ecannot=You are not allowed to configure LDAP access control
 acl_what=Objects
+acl_order=Order
 acl_who=Access granted
 acl_move=Move
 acl_none=No access control rules have been defined yet. All objects in the LDAP database will be readable by all users.
@@ -160,7 +161,7 @@ sdelete_edn=Object $1 was not found
 sdelete_edel=LDAP delete of $1 failed : $2
 
 rename_err=Failed to rename object
-rename_eget=Could not fine object with DN $1
+rename_eget=Could not find object with DN $1
 rename_enew=New name does not appear to be valid
 rename_erename=LDAP newdn to $2 from $1 failed : $3
 
@@ -261,6 +262,7 @@ gencert_same=Current config files
 gencert_dir=Directory
 gencert_err=Failed to generate certificate
 gencert_edest=Destination directory does not exist
+gencert_epath=Certificate and key files in the LDAP server config must be absolute paths
 
 perms_err=Failed to fix file ownership
 
@@ -322,4 +324,7 @@ eacl_efilter=Missing or invalid filter - should be like <tt>(objectClass=posixAc
 eacl_eattrs=Missing or invalid comma-separated list of attributes
 eacl_ewho=Missing or invalid-looking DN in row $1
 eacl_eaccess=Missing or invalid access level in row $1
+eacl_order=Rule order
+eacl_noorder=None set
+
 __norefs=1

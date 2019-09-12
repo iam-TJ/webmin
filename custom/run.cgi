@@ -34,14 +34,15 @@ else {
 @servers = &list_servers();
 
 # Run and display output
-if ($cmd->{'format'} ne 'redirect') {
+if ($cmd->{'format'} ne 'redirect' && $cmd->{'format'} ne 'form') {
 	if ($cmd->{'format'}) {
 		print "Content-type: ",$cmd->{'format'},"\n";
 		print "\n";
 		}
 	else {
-		&ui_print_unbuffered_header($cmd->{'desc'}, $text{'run_title'},
-					    "", -d "help" ? "run" : undef);
+		&ui_print_unbuffered_header(
+			&html_escape($cmd->{'desc'}), $text{'run_title'},
+			"", -d "help" ? "run" : undef);
 		}
 	}
 
@@ -62,26 +63,36 @@ foreach $h (@hosts) {
 	$remote_custom_error = undef;
 	if ($h == 0) {
 		# Run locally
-		($got, $out, $timeout) = &execute_custom_command(
+		($got, $out, $timeout, $ex) = &execute_custom_command(
 					$cmd, $env, $export, $str,
-					$cmd->{'format'} ne 'redirect');
+					$cmd->{'format'} ne 'redirect' &&
+					$cmd->{'format'} ne 'form');
 		}
 	else {
 		# Remote foreign call
-		&remote_foreign_require($server->{'host'}, "custom",
-					"custom-lib.pl");
-		&remote_foreign_call($server->{'host'}, "custom",
+		eval {
+			$SIG{'ALRM'} = sub { die "timeout" };
+			alarm($cmd->{'timeout'} ? $cmd->{'timeout'} + 5 : 60);
+			&remote_foreign_require($server->{'host'}, "custom",
+						"custom-lib.pl");
+			&remote_foreign_call($server->{'host'}, "custom",
 				     "set_parameter_envs", $cmd, $cmd->{'cmd'},
 				     \@user_info, \%in, 1);
-		($got, $out, $timeout) = &remote_foreign_call(
-			$server->{'host'}, "custom", "execute_custom_command",
-			$cmd, $env, $export, $str);
+			($got, $out, $timeout, $ex) = &remote_foreign_call(
+			   $server->{'host'}, "custom",
+			   "execute_custom_command", $cmd, $env, $export, $str);
+			};
+		if ($@ =~ /timeout/) {
+			$timeout = 1;
+			}
+		alarm(0);
 		}
 	if ($h == 0) {
 		&additional_log('exec', undef, $displaystr);
 		}
 	if (!$remote_custom_error) {
-		print $out if ($h != 0 && $cmd->{'format'} ne 'redirect');
+		print $out if ($h != 0 && $cmd->{'format'} ne 'redirect' &&
+					  $cmd->{'format'} ne 'form');
 		if (!$got && !$cmd->{'format'}) {
 			print "<i>$text{'run_noout'}</i>\n";
 			}
@@ -94,7 +105,10 @@ foreach $h (@hosts) {
 			}
 		elsif ($timeout) {
 			print "<b>",&text('run_timeout',
-					  $cmd->{'timeout'}),"</b><p>\n";
+					  $cmd->{'timeout'} || 60),"</b><p>\n";
+			}
+		elsif ($ex) {
+			print "<b>",&text('run_failed', $ex),"</b><p>\n";
 			}
 		}
 
@@ -114,6 +128,9 @@ if (!$cmd->{'format'}) {
 	}
 elsif ($cmd->{'format'} eq 'redirect') {
 	&redirect("");
+	}
+elsif ($cmd->{'format'} eq 'form') {
+	&redirect("form.cgi?id=".$in{'id'}."&idx=".$in{'idx'});
 	}
 
 sub remote_custom_handler

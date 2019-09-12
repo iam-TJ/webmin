@@ -8,7 +8,9 @@
 require './dhcpd-lib.pl';
 require './params-lib.pl';
 &ReadParse();
-&lock_file($config{'dhcpd_conf'});
+%access = &get_module_acl();
+$access{'zones'} || &error($text{'zone_ecannot'});
+&lock_all_files();
 
 unless ($in{'new'}){  # on change or delete
 	# Read current zone data from config file
@@ -23,7 +25,7 @@ $key=$in{'key'};
 
 
 # Prepare data structure
-local $oldzone=$zone; # backup (neccessary if name changes)
+local $oldzone=$zone; # backup (necessary if name changes)
 local $zone = {
 	'values' => [ $zonename ],
 	'comment' => $in{'desc'},
@@ -54,7 +56,7 @@ if ($in{'delete'}) {
 
 &flush_file_lines();
 
-&unlock_file($config{'dhcpd_conf'});
+&unlock_all_files();
 
 &webmin_log($in{'delete'} ? 'delete' : $in{'new'} ? 'create' : 'modify',
 	    'shared', $zone->{'values'}->[0], \%in);
